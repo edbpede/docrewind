@@ -59,16 +59,16 @@ docrewind/
 ## Phase 1: Foundation & Core Logic (TypeScript)
 
 - **Task 1.1: Project Setup**
-    - [ ] Initialize TypeScript project (`npm init`, `tsc --init`).
-    - [ ] Setup linter (ESLint) and formatter (Prettier).
-    - [ ] Setup testing framework (e.g., Jest or Vitest).
-    - [ ] Define basic project structure (folders as per overview).
+    - [x] Initialize TypeScript project (`npm init`, `tsc --init`).
+    - [x] Setup linter (ESLint) and formatter (Prettier).
+    - [x] Setup testing framework (e.g., Jest or Vitest).
+    - [x] Define basic project structure (folders as per overview).
 - **Task 1.2: Google OAuth Implementation**
-    - [ ] Research Google OAuth requirements for accessing Google Docs data.
-    - [ ] **Test:** Write initial tests for OAuth flow.
-    - [ ] Implement OAuth 2.0 flow for user authentication.
-        - [ ] Handle token acquisition, storage (securely, e.g., `chrome.storage.local`), and refresh.
-    - [ ] **Test:** Verify successful authentication and token handling.
+    - [x] Research Google OAuth requirements for accessing Google Docs data.
+    - [x] **Test:** Write initial tests for OAuth flow.
+    - [x] Implement OAuth 2.0 flow for user authentication.
+        - [x] Handle token acquisition, storage (securely, e.g., `chrome.storage.local` and Firefox equivalent), and refresh.
+    - [x] **Test:** Verify successful authentication and token handling.
 - **Task 1.3: Core Data Fetching Mechanism**
     - [ ] Investigate Google Docs API or other methods to access fine-grained edit data (this is the most challenging part, inspired by Draftback's approach).
     - [ ] **Test:** Write tests for mock API calls and data retrieval.
