@@ -70,10 +70,10 @@ docrewind/
         - [x] Handle token acquisition, storage (securely, e.g., `chrome.storage.local` and Firefox equivalent), and refresh.
     - [x] **Test:** Verify successful authentication and token handling.
 - **Task 1.3: Core Data Fetching Mechanism**
-    - [ ] Investigate Google Docs API or other methods to access fine-grained edit data (this is the most challenging part, inspired by Draftback's approach).
-    - [ ] **Test:** Write tests for mock API calls and data retrieval.
-    - [ ] Develop `dataFetcher.ts` to retrieve revision data for a given document (respecting user permissions).
-    - [ ] **Test:** Ensure correct data is fetched and errors are handled.
+    - [x] Investigate Google Docs API or other methods to access fine-grained edit data (this is the most challenging part, inspired by Draftback's approach).
+    - [x] **Test:** Write tests for mock API calls and data retrieval.
+    - [x] Develop `dataFetcher.ts` to retrieve revision data for a given document (respecting user permissions).
+    - [x] **Test:** Ensure correct data is fetched and errors are handled.
 - **Task 1.4: Data Parsing & Transformation**
     - [ ] **Test:** Define expected output formats for parsed data and write tests.
     - [ ] Implement logic in `playbackEngine.ts` (or a dedicated parser module) to parse the raw edit data into a structured format suitable for playback.
@@ -171,4 +171,4 @@ docrewind/
     - [ ] Create production builds for Chrome Web Store and Firefox Add-ons.
     - [ ] Prepare store listing materials (screenshots, description).
 
-This plan is a guideline and may evolve as development progresses. Regular testing and adherence to DRY and TDD principles will be crucial throughout the project. 
+This plan is a guideline and may evolve as development progresses. Regular testing and adherence to DRY and TDD principles will be crucial throughout the project.

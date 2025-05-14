@@ -99,3 +99,86 @@ export interface ErrorResponse {
     details?: any[];
   };
 }
+
+/**
+ * Revision command types
+ */
+export enum CommandType {
+  INSERT = 'is',
+  DELETE = 'ds',
+  MULTI = 'mlti',
+  STYLE = 'st',
+}
+
+/**
+ * Base revision command interface
+ */
+export interface BaseCommand {
+  ty: CommandType;
+  timestamp: number;
+}
+
+/**
+ * Insert command
+ */
+export interface InsertCommand extends BaseCommand {
+  ty: CommandType.INSERT;
+  ibi: number; // Insert begin index
+  s: string;   // String to insert
+}
+
+/**
+ * Delete command
+ */
+export interface DeleteCommand extends BaseCommand {
+  ty: CommandType.DELETE;
+  si: number;  // Start index
+  ei: number;  // End index
+}
+
+/**
+ * Style command
+ */
+export interface StyleCommand extends BaseCommand {
+  ty: CommandType.STYLE;
+  si: number;  // Start index
+  ei: number;  // End index
+  s: {         // Style properties
+    [key: string]: any;
+  };
+}
+
+/**
+ * Multi command (contains multiple commands)
+ */
+export interface MultiCommand extends BaseCommand {
+  ty: CommandType.MULTI;
+  cmds: (InsertCommand | DeleteCommand | StyleCommand)[];
+}
+
+/**
+ * Union type for all command types
+ */
+export type RevisionCommand = InsertCommand | DeleteCommand | StyleCommand | MultiCommand;
+
+/**
+ * Detailed revision data
+ */
+export interface RevisionData {
+  revisionId: string;
+  timestamp: number;
+  commands: RevisionCommand[];
+  snapshot?: string;
+}
+
+/**
+ * Character in document with its properties
+ */
+export interface DocumentCharacter {
+  char: string;
+  styles?: {
+    [key: string]: any;
+  };
+  timestamp: number;
+  authorId?: string;
+}
