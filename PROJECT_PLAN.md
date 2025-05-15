@@ -75,10 +75,10 @@ docrewind/
     - [x] Develop `dataFetcher.ts` to retrieve revision data for a given document (respecting user permissions).
     - [x] **Test:** Ensure correct data is fetched and errors are handled.
 - **Task 1.4: Data Parsing & Transformation**
-    - [ ] **Test:** Define expected output formats for parsed data and write tests.
-    - [ ] Implement logic in `playbackEngine.ts` (or a dedicated parser module) to parse the raw edit data into a structured format suitable for playback.
-        - [ ] Identify additions, deletions, and potentially formatting changes.
-    - [ ] **Test:** Validate parsing logic against various document edit scenarios.
+    - [x] **Test:** Define expected output formats for parsed data and write tests.
+    - [x] Implement logic in `playbackEngine.ts` (or a dedicated parser module) to parse the raw edit data into a structured format suitable for playback.
+        - [x] Identify additions, deletions, and potentially formatting changes.
+    - [x] **Test:** Validate parsing logic against various document edit scenarios.
 - **Task 1.5: Basic Playback Engine**
     - [ ] **Test:** Write tests for basic playback state transitions (e.g., step forward, step backward).
     - [ ] Develop initial version of `playbackEngine.ts` to manage the state of the document at different points in its history.
