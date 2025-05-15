@@ -97,10 +97,10 @@ docrewind/
     - [x] Connect `PlaybackView.tsx` to `playbackEngine.ts` to show the document at a specific revision.
     - [x] **Test:** Ensure UI updates correctly when playback engine state changes.
 - **Task 2.3: Playback Controls UI**
-    - [ ] **Test:** Write tests for control interactions (play, pause).
-    - [ ] Create `PlaybackControls.tsx` component with Play and Pause buttons.
-    - [ ] Implement logic to trigger playback engine's play/pause functionality.
-    - [ ] **Test:** Verify controls correctly interact with the playback engine.
+    - [x] **Test:** Write tests for control interactions (play, pause).
+    - [x] Create `PlaybackControls.tsx` component with Play and Pause buttons.
+    - [x] Implement logic to trigger playback engine's play/pause functionality.
+    - [x] **Test:** Verify controls correctly interact with the playback engine.
 - **Task 2.4: Extension Manifest & Basic Packaging (Chrome)**
     - [ ] Create `manifest.json` for Chrome extension (permissions for OAuth, activeTab, storage, scripting if needed for Google Docs).
     - [ ] Setup bundler (e.g., Webpack, Parcel) to package `src` into `dist`.

@@ -6,6 +6,7 @@
 import React, { useEffect, useState } from 'react';
 import { PlaybackEngine } from '@/core/playbackEngine';
 import { PlaybackState } from '@/core/types';
+import PlaybackControls from '@/ui/components/PlaybackControls';
 
 interface PlaybackViewProps {
   playbackEngine: PlaybackEngine;
@@ -88,6 +89,11 @@ const PlaybackView: React.FC<PlaybackViewProps> = ({ playbackEngine }) => {
             </span>
           </div>
         </div>
+      </div>
+
+      {/* Playback controls */}
+      <div className="py-2 border-b border-gray-200">
+        <PlaybackControls playbackEngine={playbackEngine} />
       </div>
 
       {/* Document content */}
