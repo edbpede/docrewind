@@ -6,10 +6,7 @@ import {
 } from '@/core/playbackEngine';
 import {
   CommandType,
-  InsertCommand,
-  DeleteCommand,
-  StyleCommand,
-  MultiCommand,
+  // Import only what we use to avoid unused import warnings
   RevisionCommand,
   RevisionData,
   PlaybackState

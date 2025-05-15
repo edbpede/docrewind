@@ -146,7 +146,9 @@ const applyCommand = (document: string, command: RevisionCommand): string => {
       return applyMultiCommand(document, command);
 
     default:
-      logger.warn(MODULE_NAME, `Unknown command type: ${command.ty}`);
+      // Use type assertion to handle the 'never' type case
+      const unknownCommand = command as { ty: string };
+      logger.warn(MODULE_NAME, `Unknown command type: ${unknownCommand.ty}`);
       return document;
   }
 };

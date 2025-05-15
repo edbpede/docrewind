@@ -24,12 +24,12 @@ export const getStorageAPI = () => {
  */
 export const getFromStorage = async <T>(keys: string | string[] | null): Promise<T> => {
   const storage = getStorageAPI();
-  
+
   if (isFirefox()) {
     return storage.local.get(keys) as Promise<T>;
   } else {
     return new Promise((resolve, reject) => {
-      storage.local.get(keys, (result) => {
+      storage.local.get(keys, (result: { [key: string]: any }) => {
         if (chrome.runtime.lastError) {
           reject(new Error(chrome.runtime.lastError.message));
         } else {
@@ -47,7 +47,7 @@ export const getFromStorage = async <T>(keys: string | string[] | null): Promise
  */
 export const saveToStorage = async (items: Record<string, any>): Promise<void> => {
   const storage = getStorageAPI();
-  
+
   if (isFirefox()) {
     return storage.local.set(items);
   } else {
@@ -70,7 +70,7 @@ export const saveToStorage = async (items: Record<string, any>): Promise<void> =
  */
 export const removeFromStorage = async (keys: string | string[]): Promise<void> => {
   const storage = getStorageAPI();
-  
+
   if (isFirefox()) {
     return storage.local.remove(keys);
   } else {
@@ -92,7 +92,7 @@ export const removeFromStorage = async (keys: string | string[]): Promise<void> 
  */
 export const clearStorage = async (): Promise<void> => {
   const storage = getStorageAPI();
-  
+
   if (isFirefox()) {
     return storage.local.clear();
   } else {

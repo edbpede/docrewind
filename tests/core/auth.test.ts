@@ -96,7 +96,7 @@ describe('Auth Module', () => {
 
     it('should launch web auth flow in Chrome', async () => {
       // Setup Chrome mock
-      mockChrome.identity.launchWebAuthFlow.mockImplementation((options, callback) => {
+      mockChrome.identity.launchWebAuthFlow.mockImplementation((_options, callback) => {
         callback('https://example.com/callback?code=test-auth-code');
       });
 
@@ -111,13 +111,14 @@ describe('Auth Module', () => {
       });
 
       // Mock storage
-      mockChrome.storage.local.set.mockImplementation((data, callback) => {
+      mockChrome.storage.local.set.mockImplementation((_data, callback) => {
         callback();
       });
 
       // Remove browser for this test
+      // @ts-ignore - Allow access to global.browser
       const originalBrowser = global.browser;
-      // @ts-ignore
+      // @ts-ignore - Allow setting global.browser
       global.browser = undefined;
 
       const result = await startAuthFlow();
@@ -126,6 +127,7 @@ describe('Auth Module', () => {
       expect(result).toBe(true);
 
       // Restore browser
+      // @ts-ignore - Allow setting global.browser
       global.browser = originalBrowser;
     });
 
@@ -147,6 +149,7 @@ describe('Auth Module', () => {
       mockBrowser.storage.local.set.mockImplementation(() => Promise.resolve());
 
       // Make sure we're using the Firefox API
+      // @ts-ignore - Allow access to global.chrome
       const originalChrome = global.chrome;
       // @ts-ignore - We want to force using the Firefox API path
       global.chrome = undefined;
@@ -157,24 +160,28 @@ describe('Auth Module', () => {
       expect(result).toBe(true);
 
       // Restore Chrome
+      // @ts-ignore - Allow setting global.chrome
       global.chrome = originalChrome;
     });
 
     it('should handle auth flow errors', async () => {
       // Setup error in Chrome
-      mockChrome.identity.launchWebAuthFlow.mockImplementation((options, callback) => {
-        mockChrome.runtime.lastError = { message: 'Auth flow error' };
+      mockChrome.identity.launchWebAuthFlow.mockImplementation((_options, callback) => {
+        // Use type assertion to avoid type error
+        (mockChrome.runtime as any).lastError = { message: 'Auth flow error' };
         callback(undefined);
       });
 
       // Remove browser for this test
+      // @ts-ignore - Allow access to global.browser
       const originalBrowser = global.browser;
-      // @ts-ignore
+      // @ts-ignore - Allow setting global.browser
       global.browser = undefined;
 
       await expect(startAuthFlow()).rejects.toThrow('Auth flow error');
 
       // Restore browser and clear lastError
+      // @ts-ignore - Allow setting global.browser
       global.browser = originalBrowser;
       mockChrome.runtime.lastError = null;
     });
@@ -199,7 +206,7 @@ describe('Auth Module', () => {
   describe('getAuthToken', () => {
     it('should return token from storage in Chrome', async () => {
       // Setup Chrome storage mock
-      mockChrome.storage.local.get.mockImplementation((keys, callback) => {
+      mockChrome.storage.local.get.mockImplementation((_keys, callback) => {
         callback({
           'auth_token': {
             access_token: 'test-access-token',
@@ -210,8 +217,9 @@ describe('Auth Module', () => {
       });
 
       // Remove browser for this test
+      // @ts-ignore - Allow access to global.browser
       const originalBrowser = global.browser;
-      // @ts-ignore
+      // @ts-ignore - Allow setting global.browser
       global.browser = undefined;
 
       const token = await getAuthToken();
@@ -224,6 +232,7 @@ describe('Auth Module', () => {
       });
 
       // Restore browser
+      // @ts-ignore - Allow setting global.browser
       global.browser = originalBrowser;
     });
 
@@ -241,6 +250,7 @@ describe('Auth Module', () => {
       mockBrowser.storage.local.get.mockImplementation(() => Promise.resolve(mockData));
 
       // Make sure we're using the Firefox API
+      // @ts-ignore - Allow access to global.chrome
       const originalChrome = global.chrome;
       // @ts-ignore - We want to force using the Firefox API path
       global.chrome = undefined;
@@ -255,6 +265,7 @@ describe('Auth Module', () => {
       });
 
       // Restore Chrome
+      // @ts-ignore - Allow setting global.chrome
       global.chrome = originalChrome;
     });
   });
@@ -270,13 +281,14 @@ describe('Auth Module', () => {
   describe('clearAuthData', () => {
     it('should clear auth data from storage in Chrome', async () => {
       // Setup Chrome storage mock
-      mockChrome.storage.local.remove.mockImplementation((keys, callback) => {
+      mockChrome.storage.local.remove.mockImplementation((_keys, callback) => {
         callback();
       });
 
       // Remove browser for this test
+      // @ts-ignore - Allow access to global.browser
       const originalBrowser = global.browser;
-      // @ts-ignore
+      // @ts-ignore - Allow setting global.browser
       global.browser = undefined;
 
       await clearAuthData();
@@ -284,6 +296,7 @@ describe('Auth Module', () => {
       expect(mockChrome.storage.local.remove).toHaveBeenCalledWith(['auth_token'], expect.any(Function));
 
       // Restore browser
+      // @ts-ignore - Allow setting global.browser
       global.browser = originalBrowser;
     });
 
@@ -292,6 +305,7 @@ describe('Auth Module', () => {
       mockBrowser.storage.local.remove.mockImplementation(() => Promise.resolve());
 
       // Make sure we're using the Firefox API
+      // @ts-ignore - Allow access to global.chrome
       const originalChrome = global.chrome;
       // @ts-ignore - We want to force using the Firefox API path
       global.chrome = undefined;
@@ -301,6 +315,7 @@ describe('Auth Module', () => {
       expect(mockBrowser.storage.local.remove).toHaveBeenCalledWith(['auth_token']);
 
       // Restore Chrome
+      // @ts-ignore - Allow setting global.chrome
       global.chrome = originalChrome;
     });
   });

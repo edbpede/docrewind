@@ -21,11 +21,11 @@ const App: React.FC = () => {
     try {
       setIsLoading(true);
       const response = await sendMessageToBackground({ type: 'AUTH_CHECK' });
-      
+
       if (!response.success) {
         throw new Error(response.error || 'Unknown error');
       }
-      
+
       setIsAuthenticated(response.authenticated);
     } catch (error) {
       setError((error as Error).message);
@@ -41,11 +41,11 @@ const App: React.FC = () => {
     try {
       setIsLoading(true);
       const response = await sendMessageToBackground({ type: 'AUTH_START' });
-      
+
       if (!response.success) {
         throw new Error(response.error || 'Authentication failed');
       }
-      
+
       // Check auth status again after login
       await checkAuthStatus();
     } catch (error) {
@@ -61,7 +61,7 @@ const App: React.FC = () => {
    */
   const sendMessageToBackground = (message: any): Promise<any> => {
     return new Promise((resolve, reject) => {
-      chrome.runtime.sendMessage(message, (response) => {
+      chrome.runtime.sendMessage(message, (response: any) => {
         if (chrome.runtime.lastError) {
           reject(new Error(chrome.runtime.lastError.message));
         } else {
@@ -85,7 +85,7 @@ const App: React.FC = () => {
     return (
       <div className="p-4">
         <p className="text-red-500">Error: {error}</p>
-        <button 
+        <button
           className="mt-2 px-4 py-2 bg-blue-500 text-white rounded"
           onClick={() => setError(null)}
         >
@@ -111,7 +111,7 @@ const App: React.FC = () => {
     <div className="p-4">
       <h1 className="text-xl font-bold">DocRewind</h1>
       <p className="mt-2">Please log in to use DocRewind.</p>
-      <button 
+      <button
         className="mt-4 px-4 py-2 bg-blue-500 text-white rounded"
         onClick={handleLogin}
       >

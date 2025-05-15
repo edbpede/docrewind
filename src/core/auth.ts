@@ -49,7 +49,7 @@ export const initializeAuth = (config: AuthConfig): boolean => {
 
     // Update OAuth constants with config values
     OAUTH.CLIENT_ID = config.clientId;
-    OAUTH.REDIRECT_URL = authConfig.redirectUrl;
+    OAUTH.REDIRECT_URL = authConfig.redirectUrl || '';
 
     logger.info(MODULE_NAME, 'Auth initialized with config', authConfig);
     return true;
@@ -105,7 +105,7 @@ export const startAuthFlow = async (): Promise<boolean> => {
         chrome.identity.launchWebAuthFlow({
           url: authUrl.toString(),
           interactive: true
-        }, (responseUrl) => {
+        }, (responseUrl?: string) => {
           if (chrome.runtime.lastError) {
             reject(new Error(chrome.runtime.lastError.message));
           } else if (!responseUrl) {
@@ -228,7 +228,9 @@ export const saveAuthToken = async (token: AuthToken): Promise<void> => {
  */
 export const getAuthToken = async (): Promise<AuthToken | null> => {
   try {
-    const data = await getFromStorage<{ [OAUTH.STORAGE_KEY]?: AuthToken }>([OAUTH.STORAGE_KEY]);
+    // Use a type with an index signature for the storage key
+    type StorageData = { [key: string]: AuthToken | undefined };
+    const data = await getFromStorage<StorageData>([OAUTH.STORAGE_KEY]);
     const token = data[OAUTH.STORAGE_KEY];
 
     if (!token) {

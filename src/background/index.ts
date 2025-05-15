@@ -13,44 +13,48 @@ const MODULE_NAME = 'Background';
 // Initialize the extension
 const initialize = async () => {
   logger.info(MODULE_NAME, 'Initializing background script');
-  
+
   // Get the client ID from the manifest
   const manifest = chrome.runtime.getManifest();
   const clientId = manifest.oauth2?.client_id || '';
-  
+
   if (!clientId || clientId === '${CLIENT_ID}') {
     logger.error(MODULE_NAME, 'Client ID not configured in manifest');
     return;
   }
-  
+
   // Initialize auth with the client ID and scopes
   const authInitialized = initializeAuth({
     clientId,
     scopes: OAUTH.SCOPES,
   });
-  
+
   if (!authInitialized) {
     logger.error(MODULE_NAME, 'Failed to initialize auth');
     return;
   }
-  
+
   logger.info(MODULE_NAME, 'Background script initialized');
 };
 
 // Handle messages from content scripts and popup
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((
+  message: { type: string; [key: string]: any },
+  sender: any, // Use any type to avoid namespace issues
+  sendResponse: (response: any) => void
+) => {
   logger.debug(MODULE_NAME, 'Received message', { message, sender });
-  
+
   // Handle different message types
   switch (message.type) {
     case 'AUTH_START':
       handleAuthStart(sendResponse);
       return true; // Keep the message channel open for async response
-      
+
     case 'AUTH_CHECK':
       handleAuthCheck(sendResponse);
       return true; // Keep the message channel open for async response
-      
+
     default:
       logger.warn(MODULE_NAME, 'Unknown message type', message.type);
       sendResponse({ success: false, error: 'Unknown message type' });
