@@ -58,7 +58,6 @@ interface Chrome {
 declare namespace chrome.runtime {
   interface MessageSender extends MessageSender {}
 }
-}
 
 // Firefox extension API
 interface Browser {

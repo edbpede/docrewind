@@ -88,9 +88,9 @@ docrewind/
 ## Phase 2: User Interface (React & Tailwind CSS) & Initial Playback
 
 - **Task 2.1: UI Setup**
-    - [ ] Integrate React into the project.
-    - [ ] Setup Tailwind CSS for styling.
-    - [ ] Consider Headless UI for accessible components if complex interactions are foreseen.
+    - [x] Integrate React into the project.
+    - [x] Setup Tailwind CSS (v4 or newer) for styling.
+    - [x] Consider Headless UI for accessible components if complex interactions are foreseen.
 - **Task 2.2: Basic Document Display View**
     - [ ] **Test:** Write basic tests for rendering document content.
     - [ ] Create `PlaybackView.tsx` to display the document content.

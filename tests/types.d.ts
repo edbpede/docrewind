@@ -9,9 +9,10 @@ declare global {
     chrome: any;
     browser: any;
   }
-  
+
   var chrome: any;
   var browser: any;
+  var global: typeof globalThis;
 }
 
 // Export as a module
