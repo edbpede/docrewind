@@ -92,10 +92,10 @@ docrewind/
     - [x] Setup Tailwind CSS (v4 or newer) for styling.
     - [x] Consider Headless UI for accessible components if complex interactions are foreseen.
 - **Task 2.2: Basic Document Display View**
-    - [ ] **Test:** Write basic tests for rendering document content.
-    - [ ] Create `PlaybackView.tsx` to display the document content.
-    - [ ] Connect `PlaybackView.tsx` to `playbackEngine.ts` to show the document at a specific revision.
-    - [ ] **Test:** Ensure UI updates correctly when playback engine state changes.
+    - [x] **Test:** Write basic tests for rendering document content.
+    - [x] Create `PlaybackView.tsx` to display the document content.
+    - [x] Connect `PlaybackView.tsx` to `playbackEngine.ts` to show the document at a specific revision.
+    - [x] **Test:** Ensure UI updates correctly when playback engine state changes.
 - **Task 2.3: Playback Controls UI**
     - [ ] **Test:** Write tests for control interactions (play, pause).
     - [ ] Create `PlaybackControls.tsx` component with Play and Pause buttons.
