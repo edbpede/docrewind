@@ -1,6 +1,19 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { parseRevisionData, applyCommandsToDocument } from '@/core/playbackEngine';
-import { CommandType, InsertCommand, DeleteCommand, StyleCommand, MultiCommand, RevisionCommand } from '@/core/types';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import {
+  parseRevisionData,
+  applyCommandsToDocument,
+  PlaybackEngine
+} from '@/core/playbackEngine';
+import {
+  CommandType,
+  InsertCommand,
+  DeleteCommand,
+  StyleCommand,
+  MultiCommand,
+  RevisionCommand,
+  RevisionData,
+  PlaybackState
+} from '@/core/types';
 
 describe('Playback Engine - Data Parsing', () => {
   describe('parseRevisionData', () => {
@@ -248,6 +261,199 @@ describe('Playback Engine - Data Parsing', () => {
 
       const result = applyCommandsToDocument(document, commands);
       expect(result).toBe('Hello world');
+    });
+  });
+});
+
+// New tests for the PlaybackEngine class
+describe('PlaybackEngine - State Management', () => {
+  let playbackEngine: PlaybackEngine;
+  let mockRevisions: RevisionData[];
+
+  beforeEach(() => {
+    // Setup mock revision data for testing
+    mockRevisions = [
+      {
+        revisionId: 'rev-1',
+        timestamp: 1672531200000,
+        commands: [
+          {
+            ty: CommandType.INSERT,
+            ibi: 0,
+            s: 'Hello',
+            timestamp: 1672531200000
+          }
+        ]
+      },
+      {
+        revisionId: 'rev-2',
+        timestamp: 1672531210000,
+        commands: [
+          {
+            ty: CommandType.INSERT,
+            ibi: 5,
+            s: ' world',
+            timestamp: 1672531210000
+          }
+        ]
+      },
+      {
+        revisionId: 'rev-3',
+        timestamp: 1672531220000,
+        commands: [
+          {
+            ty: CommandType.INSERT,
+            ibi: 11,
+            s: '!',
+            timestamp: 1672531220000
+          }
+        ]
+      }
+    ];
+
+    // Initialize the playback engine with mock revisions
+    playbackEngine = new PlaybackEngine(mockRevisions);
+  });
+
+  describe('initialization', () => {
+    it('should initialize with the correct state', () => {
+      expect(playbackEngine.getState()).toBe(PlaybackState.IDLE);
+      expect(playbackEngine.getCurrentRevisionIndex()).toBe(-1);
+      expect(playbackEngine.getCurrentContent()).toBe('');
+    });
+  });
+
+  describe('step forward/backward', () => {
+    it('should step forward through revisions', () => {
+      // Step to first revision
+      playbackEngine.stepForward();
+      expect(playbackEngine.getCurrentRevisionIndex()).toBe(0);
+      expect(playbackEngine.getCurrentContent()).toBe('Hello');
+
+      // Step to second revision
+      playbackEngine.stepForward();
+      expect(playbackEngine.getCurrentRevisionIndex()).toBe(1);
+      expect(playbackEngine.getCurrentContent()).toBe('Hello world');
+
+      // Step to third revision
+      playbackEngine.stepForward();
+      expect(playbackEngine.getCurrentRevisionIndex()).toBe(2);
+      expect(playbackEngine.getCurrentContent()).toBe('Hello world!');
+
+      // Try to step beyond the last revision
+      playbackEngine.stepForward();
+      expect(playbackEngine.getCurrentRevisionIndex()).toBe(2); // Should stay at the last revision
+      expect(playbackEngine.getCurrentContent()).toBe('Hello world!');
+    });
+
+    it('should step backward through revisions', () => {
+      // First go to the end
+      playbackEngine.jumpToRevision(2);
+      expect(playbackEngine.getCurrentRevisionIndex()).toBe(2);
+      expect(playbackEngine.getCurrentContent()).toBe('Hello world!');
+
+      // Step back to second revision
+      playbackEngine.stepBackward();
+      expect(playbackEngine.getCurrentRevisionIndex()).toBe(1);
+      expect(playbackEngine.getCurrentContent()).toBe('Hello world');
+
+      // Step back to first revision
+      playbackEngine.stepBackward();
+      expect(playbackEngine.getCurrentRevisionIndex()).toBe(0);
+      expect(playbackEngine.getCurrentContent()).toBe('Hello');
+
+      // Try to step before the first revision
+      playbackEngine.stepBackward();
+      expect(playbackEngine.getCurrentRevisionIndex()).toBe(-1); // Should go to initial state
+      expect(playbackEngine.getCurrentContent()).toBe('');
+    });
+  });
+
+  describe('jump to revision', () => {
+    it('should jump to a specific revision', () => {
+      // Jump to second revision
+      playbackEngine.jumpToRevision(1);
+      expect(playbackEngine.getCurrentRevisionIndex()).toBe(1);
+      expect(playbackEngine.getCurrentContent()).toBe('Hello world');
+
+      // Jump to first revision
+      playbackEngine.jumpToRevision(0);
+      expect(playbackEngine.getCurrentRevisionIndex()).toBe(0);
+      expect(playbackEngine.getCurrentContent()).toBe('Hello');
+
+      // Jump to invalid revision (negative)
+      playbackEngine.jumpToRevision(-1);
+      expect(playbackEngine.getCurrentRevisionIndex()).toBe(-1);
+      expect(playbackEngine.getCurrentContent()).toBe('');
+
+      // Jump to invalid revision (beyond array)
+      playbackEngine.jumpToRevision(10);
+      expect(playbackEngine.getCurrentRevisionIndex()).toBe(2); // Should go to last revision
+      expect(playbackEngine.getCurrentContent()).toBe('Hello world!');
+    });
+  });
+
+  describe('play/pause', () => {
+    beforeEach(() => {
+      // Mock the setTimeout function
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('should play through revisions', () => {
+      playbackEngine.play();
+      expect(playbackEngine.getState()).toBe(PlaybackState.PLAYING);
+
+      // Fast-forward through the timeouts
+      vi.advanceTimersByTime(100); // Default interval is 100ms
+      expect(playbackEngine.getCurrentRevisionIndex()).toBe(0);
+      expect(playbackEngine.getCurrentContent()).toBe('Hello');
+
+      vi.advanceTimersByTime(100);
+      expect(playbackEngine.getCurrentRevisionIndex()).toBe(1);
+      expect(playbackEngine.getCurrentContent()).toBe('Hello world');
+
+      vi.advanceTimersByTime(100);
+      expect(playbackEngine.getCurrentRevisionIndex()).toBe(2);
+      expect(playbackEngine.getCurrentContent()).toBe('Hello world!');
+
+      // Should stop at the end
+      vi.advanceTimersByTime(100);
+      expect(playbackEngine.getState()).toBe(PlaybackState.IDLE);
+      expect(playbackEngine.getCurrentRevisionIndex()).toBe(2);
+    });
+
+    it('should pause playback', () => {
+      playbackEngine.play();
+      expect(playbackEngine.getState()).toBe(PlaybackState.PLAYING);
+
+      vi.advanceTimersByTime(100);
+      expect(playbackEngine.getCurrentRevisionIndex()).toBe(0);
+
+      playbackEngine.pause();
+      expect(playbackEngine.getState()).toBe(PlaybackState.PAUSED);
+
+      // Advancing time should not change the state when paused
+      vi.advanceTimersByTime(500);
+      expect(playbackEngine.getCurrentRevisionIndex()).toBe(0);
+      expect(playbackEngine.getCurrentContent()).toBe('Hello');
+    });
+
+    it('should resume playback from paused state', () => {
+      playbackEngine.play();
+      vi.advanceTimersByTime(100);
+      playbackEngine.pause();
+      expect(playbackEngine.getState()).toBe(PlaybackState.PAUSED);
+
+      playbackEngine.play();
+      expect(playbackEngine.getState()).toBe(PlaybackState.PLAYING);
+
+      vi.advanceTimersByTime(100);
+      expect(playbackEngine.getCurrentRevisionIndex()).toBe(1);
+      expect(playbackEngine.getCurrentContent()).toBe('Hello world');
     });
   });
 });

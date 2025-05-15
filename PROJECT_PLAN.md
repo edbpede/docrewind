@@ -80,10 +80,10 @@ docrewind/
         - [x] Identify additions, deletions, and potentially formatting changes.
     - [x] **Test:** Validate parsing logic against various document edit scenarios.
 - **Task 1.5: Basic Playback Engine**
-    - [ ] **Test:** Write tests for basic playback state transitions (e.g., step forward, step backward).
-    - [ ] Develop initial version of `playbackEngine.ts` to manage the state of the document at different points in its history.
-    - [ ] Implement functions to reconstruct document state based on parsed edits.
-    - [ ] **Test:** Ensure document state is accurately reconstructed.
+    - [x] **Test:** Write tests for basic playback state transitions (e.g., step forward, step backward).
+    - [x] Develop initial version of `playbackEngine.ts` to manage the state of the document at different points in its history.
+    - [x] Implement functions to reconstruct document state based on parsed edits.
+    - [x] **Test:** Ensure document state is accurately reconstructed.
 
 ## Phase 2: User Interface (React & Tailwind CSS) & Initial Playback
 
