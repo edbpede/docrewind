@@ -3,9 +3,9 @@
  * Handles OAuth redirects and manages extension state
  */
 
-import { initializeAuth, startAuthFlow, isAuthenticated } from '@/core/auth';
-import { OAUTH } from '@/utils/constants';
+import { initializeAuth, startAuthFlow, isAuthenticated, logout } from '@/core/auth';
 import logger from '@/utils/logger';
+import { CLIENT_ID, SCOPES } from '@/config/oauth';
 
 // Module name for logging
 const MODULE_NAME = 'Background';
@@ -14,19 +14,18 @@ const MODULE_NAME = 'Background';
 const initialize = async () => {
   logger.info(MODULE_NAME, 'Initializing background script');
 
-  // Get the client ID from the manifest
-  const manifest = chrome.runtime.getManifest();
-  const clientId = manifest.oauth2?.client_id || '';
+  // Get the client ID from our config
+  const clientId = CLIENT_ID;
 
-  if (!clientId || clientId === '${CLIENT_ID}') {
-    logger.error(MODULE_NAME, 'Client ID not configured in manifest');
+  if (!clientId || clientId === 'YOUR_GOOGLE_OAUTH_CLIENT_ID') {
+    logger.error(MODULE_NAME, 'Client ID not configured in config/oauth.ts');
     return;
   }
 
   // Initialize auth with the client ID and scopes
   const authInitialized = initializeAuth({
     clientId,
-    scopes: OAUTH.SCOPES,
+    scopes: SCOPES,
   });
 
   if (!authInitialized) {
@@ -53,6 +52,10 @@ chrome.runtime.onMessage.addListener((
 
     case 'AUTH_CHECK':
       handleAuthCheck(sendResponse);
+      return true; // Keep the message channel open for async response
+
+    case 'AUTH_LOGOUT':
+      handleAuthLogout(sendResponse);
       return true; // Keep the message channel open for async response
 
     default:
@@ -88,6 +91,21 @@ const handleAuthCheck = async (sendResponse: (response: any) => void) => {
     sendResponse({ success: true, authenticated });
   } catch (error) {
     logger.error(MODULE_NAME, 'Auth check failed', error);
+    sendResponse({ success: false, error: (error as Error).message });
+  }
+};
+
+/**
+ * Handle auth logout message
+ * @param sendResponse - Function to send response back to sender
+ */
+const handleAuthLogout = async (sendResponse: (response: any) => void) => {
+  try {
+    logger.info(MODULE_NAME, 'Logging out user');
+    const success = await logout();
+    sendResponse({ success });
+  } catch (error) {
+    logger.error(MODULE_NAME, 'Logout failed', error);
     sendResponse({ success: false, error: (error as Error).message });
   }
 };

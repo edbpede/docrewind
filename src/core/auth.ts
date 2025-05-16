@@ -6,6 +6,7 @@
 import { OAUTH, ERRORS } from '@/utils/constants';
 import { getFromStorage, saveToStorage, removeFromStorage } from '@/utils/storageHelper';
 import logger from '@/utils/logger';
+import { OAUTH_CONFIG } from '@/config/oauth';
 
 // Module name for logging
 const MODULE_NAME = 'Auth';
@@ -79,6 +80,31 @@ export const startAuthFlow = async (): Promise<boolean> => {
   try {
     const config = getAuthConfig();
 
+    logger.debug(MODULE_NAME, 'Starting auth flow');
+
+    // For Chrome, we can use the identity.getAuthToken API which is simpler
+    if (typeof chrome !== 'undefined' && chrome.identity && typeof chrome.identity.getAuthToken === 'function') {
+      try {
+        // Try to use the simpler Chrome-specific method first
+        const token = await getChromeAuthToken(config.scopes);
+
+        // Save the token to storage
+        await saveAuthToken({
+          access_token: token,
+          refresh_token: '', // Chrome manages refresh automatically
+          expiry_time: Date.now() + (3600 * 1000), // Default 1 hour expiry
+          token_type: 'Bearer'
+        });
+
+        logger.info(MODULE_NAME, 'Auth flow completed successfully using Chrome identity API');
+        return true;
+      } catch (chromeAuthError) {
+        // If Chrome's getAuthToken fails, fall back to the web flow
+        logger.warn(MODULE_NAME, 'Chrome identity API failed, falling back to web flow', chromeAuthError);
+      }
+    }
+
+    // Fall back to web auth flow for Firefox or if Chrome's getAuthToken failed
     // Build the auth URL
     const authUrl = new URL(OAUTH.AUTH_ENDPOINT);
     authUrl.searchParams.append('client_id', config.clientId);
@@ -88,7 +114,7 @@ export const startAuthFlow = async (): Promise<boolean> => {
     authUrl.searchParams.append('access_type', OAUTH.ACCESS_TYPE);
     authUrl.searchParams.append('prompt', OAUTH.PROMPT);
 
-    logger.debug(MODULE_NAME, 'Starting auth flow with URL', authUrl.toString());
+    logger.debug(MODULE_NAME, 'Starting web auth flow with URL', authUrl.toString());
 
     // Launch the web auth flow
     let redirectUrl: string;
@@ -123,12 +149,34 @@ export const startAuthFlow = async (): Promise<boolean> => {
     // Exchange the auth code for tokens
     await exchangeCodeForTokens(authCode);
 
-    logger.info(MODULE_NAME, 'Auth flow completed successfully');
+    logger.info(MODULE_NAME, 'Auth flow completed successfully using web flow');
     return true;
   } catch (error) {
     logger.error(MODULE_NAME, ERRORS.AUTH_FLOW_FAILED, error);
     throw error;
   }
+};
+
+/**
+ * Get an auth token using Chrome's identity API
+ * @param scopes - The OAuth scopes to request
+ * @returns A promise that resolves with the auth token
+ */
+const getChromeAuthToken = async (scopes: string[]): Promise<string> => {
+  return new Promise<string>((resolve, reject) => {
+    chrome.identity.getAuthToken({
+      interactive: true,
+      scopes: scopes
+    }, (token) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+      } else if (!token) {
+        reject(new Error(ERRORS.AUTH_FLOW_FAILED));
+      } else {
+        resolve(token);
+      }
+    });
+  });
 };
 
 /**
@@ -330,4 +378,70 @@ export const clearAuthData = async (): Promise<void> => {
 export const isAuthenticated = async (): Promise<boolean> => {
   const token = await getAuthToken();
   return !!token;
+};
+
+/**
+ * Log out the current user
+ * Clears the auth token from storage and revokes the token if possible
+ */
+export const logout = async (): Promise<boolean> => {
+  try {
+    // Get the current token
+    const token = await getAuthToken();
+
+    if (!token) {
+      // No token to revoke, just clear storage
+      await clearAuthData();
+      return true;
+    }
+
+    // Try to revoke the token with Chrome's API first
+    if (typeof chrome !== 'undefined' && chrome.identity && typeof chrome.identity.removeCachedAuthToken === 'function') {
+      try {
+        await new Promise<void>((resolve, reject) => {
+          chrome.identity.removeCachedAuthToken({ token: token.access_token }, () => {
+            if (chrome.runtime.lastError) {
+              reject(new Error(chrome.runtime.lastError.message));
+            } else {
+              resolve();
+            }
+          });
+        });
+        logger.info(MODULE_NAME, 'Auth token removed from Chrome cache');
+      } catch (error) {
+        logger.warn(MODULE_NAME, 'Failed to remove token from Chrome cache', error);
+        // Continue with the logout process even if this fails
+      }
+    }
+
+    // Also try to revoke the token with Google's API
+    try {
+      const revokeUrl = new URL(OAUTH.REVOKE_ENDPOINT);
+      revokeUrl.searchParams.append('token', token.access_token);
+
+      const response = await fetch(revokeUrl.toString(), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded'
+        }
+      });
+
+      if (response.ok) {
+        logger.info(MODULE_NAME, 'Auth token revoked successfully');
+      } else {
+        logger.warn(MODULE_NAME, 'Failed to revoke token', await response.text());
+      }
+    } catch (error) {
+      logger.warn(MODULE_NAME, 'Failed to revoke token with Google API', error);
+      // Continue with the logout process even if this fails
+    }
+
+    // Clear the token from storage
+    await clearAuthData();
+    logger.info(MODULE_NAME, 'User logged out successfully');
+    return true;
+  } catch (error) {
+    logger.error(MODULE_NAME, 'Logout failed', error);
+    return false;
+  }
 };

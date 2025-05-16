@@ -2,8 +2,9 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import * as path from 'path';
 import * as fs from 'fs';
+import { CLIENT_ID } from './src/config/oauth';
 
-// Function to copy files recursively
+// Function to copy files recursively with content replacement
 function copyPublicFolder(src: string, dest: string) {
   const files = fs.readdirSync(src);
 
@@ -25,8 +26,15 @@ function copyPublicFolder(src: string, dest: string) {
       // Copy contents recursively
       copyPublicFolder(srcPath, destPath);
     } else {
-      // Copy file
-      fs.copyFileSync(srcPath, destPath);
+      // Special handling for manifest.json to replace CLIENT_ID
+      if (file === 'manifest.json') {
+        let content = fs.readFileSync(srcPath, 'utf8');
+        content = content.replace('${CLIENT_ID}', CLIENT_ID);
+        fs.writeFileSync(destPath, content);
+      } else {
+        // Copy file normally
+        fs.copyFileSync(srcPath, destPath);
+      }
     }
   }
 }

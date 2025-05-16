@@ -42,6 +42,13 @@ interface Chrome {
       url: string;
       interactive: boolean;
     }, callback: (responseUrl?: string) => void): void;
+    getAuthToken(options: {
+      interactive: boolean;
+      scopes?: string[];
+    }, callback: (token?: string) => void): void;
+    removeCachedAuthToken(options: {
+      token: string;
+    }, callback?: () => void): void;
   };
 
   storage: {
@@ -83,6 +90,13 @@ interface Browser {
       url: string;
       interactive: boolean;
     }): Promise<string>;
+    getAuthToken(options: {
+      interactive: boolean;
+      scopes?: string[];
+    }): Promise<string>;
+    removeCachedAuthToken(options: {
+      token: string;
+    }): Promise<void>;
   };
   storage: {
     local: {
