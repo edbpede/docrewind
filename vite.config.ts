@@ -2,7 +2,15 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import * as path from 'path';
 import * as fs from 'fs';
-import { CLIENT_ID } from './src/config/oauth';
+import dotenv from 'dotenv';
+import dotenvExpand from 'dotenv-expand';
+
+// Load environment variables
+const env = dotenv.config();
+dotenvExpand.expand(env);
+
+// Get the client ID from environment variables
+const CLIENT_ID = process.env.VITE_GOOGLE_OAUTH_CLIENT_ID || 'YOUR_GOOGLE_OAUTH_CLIENT_ID';
 
 // Function to copy files recursively with content replacement
 function copyPublicFolder(src: string, dest: string) {
@@ -54,6 +62,11 @@ export default defineConfig({
     alias: {
       '@': path.resolve(__dirname, './src'),
     },
+  },
+  define: {
+    // Make environment variables available to the client code
+    'import.meta.env.VITE_GOOGLE_OAUTH_CLIENT_ID':
+      JSON.stringify(process.env.VITE_GOOGLE_OAUTH_CLIENT_ID || ''),
   },
   build: {
     outDir: 'dist',
