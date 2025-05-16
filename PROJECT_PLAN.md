@@ -106,7 +106,7 @@ docrewind/
     - [x] Setup bundler (e.g., Webpack, Parcel) to package `src` into `dist`.
     - [x] Implement basic background script (`background/index.ts`) for OAuth redirects and managing extension state.
     - [x] Implement basic content script (`contentScript/index.ts`) if needed to inject UI or interact with Google Docs page.
-    - [ ] **Test:** Load the extension in Chrome and test basic OAuth and UI display on a Google Doc.
+    - [x] **Test:** Load the extension in Chrome and test basic OAuth and UI display on a Google Doc.
 
 ## Phase 3: Advanced Playback Features & UI Refinement
 
