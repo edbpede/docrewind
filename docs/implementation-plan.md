@@ -56,8 +56,9 @@ A task is `[x]` only when:
 1. Type-check passes: `bun run typecheck`
 2. Tests pass: `bun test`
 3. Build passes for both targets: `bun run build` (Chromium) and `bun run build:firefox`
-4. Any new manifest field is documented in `docs/permissions.md`
-5. The phase Verification block at the bottom of the section has been walked through manually
+4. Pre-commit hooks pass: `prek run --all-files` (see §3.1)
+5. Any new manifest field is documented in `docs/permissions.md`
+6. The phase Verification block at the bottom of the section has been walked through manually
 
 ### 2.5 Tooling we deliberately do NOT adopt (yet)
 
@@ -126,14 +127,129 @@ Lifted from the playbook because they recur:
   - [ ] Verify the Solid version is on 1.x stable (not 2.x preview)
 - [ ] Repository hygiene
   - [ ] Add `.gitignore` entries for `.output/`, `.wxt/`, `node_modules/`, `*.log`, `fixtures/raw/` (private capture area)
-  - [ ] Create top-level directories: `entrypoints/`, `components/`, `composables/`, `lib/`, `lib/domain/`, `lib/messaging/`, `lib/storage/`, `lib/retrieval/`, `lib/decoder/`, `lib/reconstruction/`, `lib/timeline/`, `tests/`, `tests/fixtures/`, `scripts/`
+  - [ ] Create top-level directories: `entrypoints/`, `components/`, `composables/`, `lib/`, `lib/domain/`, `lib/messaging/`, `lib/storage/`, `lib/retrieval/`, `lib/reconstruction/`, `lib/timeline/`, `tests/`, `tests/fixtures/`, `scripts/`
   - [ ] Add a one-line `README.md` placeholder pointing at PRD and this plan
+- [ ] Install and configure `prek` (Rust-based pre-commit drop-in; see https://prek.j178.dev/)
+  - [ ] Install locally: `brew install prek` (macOS/Linux) or `curl --proto '=https' --tlsv1.2 -LsSf https://github.com/j178/prek/releases/download/v0.3.13/prek-installer.sh | sh`; record both options in `CONTRIBUTING.md` when that file lands in §7.3
+  - [ ] Create `prek.toml` at repo root with the config in §3.1.1
+  - [ ] Run `prek install --install-hooks` to register the `pre-commit`, `commit-msg`, and `pre-push` git shims
+  - [ ] Run `prek run --all-files` and commit any auto-fixes in the same scaffolding commit
+  - [ ] Add `bun run hooks` script alias for `prek run --all-files` in `package.json`
 - [ ] Verification of scaffolding
   - [ ] `bun install --frozen-lockfile` succeeds
   - [ ] `bun run typecheck` succeeds on an empty project
+  - [ ] `prek run --all-files` succeeds
   - [ ] `bunx wxt build` produces a Chromium zip
   - [ ] `bunx wxt build --browser firefox` produces a Firefox zip
   - [ ] Load both unpacked in their browsers; no console errors, no permissions yet
+
+#### 3.1.1 `prek.toml` reference config
+
+This is the baseline for `prek.toml`. Bump `rev` pins via `prek autoupdate` when refreshing; do not change hook IDs without updating §2.4 and §3.5.
+
+```toml
+# DocRewind — prek configuration
+# Install:  prek install --install-hooks
+# Run:      prek run --all-files
+
+minimum_prek_version = "0.3"
+default_install_hook_types = ["pre-commit", "commit-msg", "pre-push"]
+default_stages = ["pre-commit"]
+
+exclude = { glob = [
+  ".output/**",
+  ".wxt/**",
+  "node_modules/**",
+  "bun.lock",
+  "tests/__snapshots__/**",
+] }
+
+# File-format hygiene — not linters/formatters per §2.5, just byte-level checks.
+# Uses prek's `builtin` source so the standard pre-commit-hooks suite runs
+# without cloning an external repo.
+[[repos]]
+repo = "builtin"
+hooks = [
+  { id = "trailing-whitespace" },
+  { id = "end-of-file-fixer" },
+  { id = "mixed-line-ending", args = ["--fix=lf"] },
+  { id = "check-merge-conflict" },
+  { id = "check-case-conflict" },
+  { id = "check-added-large-files", args = ["--maxkb=512"] },
+  { id = "detect-private-key" },
+  { id = "check-json" },
+  { id = "check-toml" },
+  { id = "check-yaml" },
+  { id = "no-commit-to-branch", args = ["--branch", "main"] },
+]
+
+# Conventional Commits — see §2.3.
+[[repos]]
+repo = "https://github.com/compilerla/conventional-pre-commit"
+rev = "v3.6.0"
+hooks = [
+  { id = "conventional-pre-commit", stages = ["commit-msg"] },
+]
+
+# Secret / credential leak guard — fixtures and dotfiles must never carry tokens.
+[[repos]]
+repo = "https://github.com/gitleaks/gitleaks"
+rev = "v8.21.2"
+hooks = [
+  { id = "gitleaks" },
+]
+
+# DocRewind-specific guards.
+[[repos]]
+repo = "local"
+hooks = [
+  # Fixture redaction enforcement (PRD §14, plan §3.2).
+  # Rejects email-shaped strings inside any captured fixture.
+  {
+    id = "fixture-no-email",
+    name = "fixture redaction: no email-like strings",
+    language = "pygrep",
+    entry = "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}",
+    files = "^tests/fixtures/.*\\.fixture\\.json$",
+  },
+  # Reject non-ASCII content in fixtures (Latin filler only — see §3.2).
+  {
+    id = "fixture-ascii-only",
+    name = "fixture redaction: ASCII-only payloads",
+    language = "pygrep",
+    entry = "[^\\x00-\\x7F]",
+    files = "^tests/fixtures/.*\\.fixture\\.json$",
+  },
+  # Block manifest V2 / banned APIs landing in extension code (§2.6).
+  {
+    id = "no-mv2-apis",
+    name = "block MV2 / deprecated extension APIs",
+    language = "pygrep",
+    entry = "\\b(browser_action|page_action|extension\\.getURL)\\b",
+    files = "\\.(ts|tsx|js|json)$",
+    exclude = "^docs/",
+  },
+  # Slow gates — only on pre-push so commits stay fast.
+  {
+    id = "typecheck",
+    name = "bun run typecheck",
+    language = "system",
+    entry = "bun run typecheck",
+    pass_filenames = false,
+    always_run = true,
+    stages = ["pre-push"],
+  },
+  {
+    id = "bun-test",
+    name = "bun test",
+    language = "system",
+    entry = "bun test",
+    pass_filenames = false,
+    always_run = true,
+    stages = ["pre-push"],
+  },
+]
+```
 
 ### 3.2 Revision retrieval probe (behind a debug entrypoint)
 
@@ -188,6 +304,7 @@ Lifted from the playbook because they recur:
 
 - [ ] `bun test` green
 - [ ] `bun run typecheck` green
+- [ ] `prek run --all-files` green (includes `fixture-no-email`, `fixture-ascii-only`, conventional-commit, and gitleaks gates)
 - [ ] `bunx wxt build` green for both targets
 - [ ] Fixture redaction test passes
 - [ ] No real document content committed (manual grep + `git log -p` review)
