@@ -69,9 +69,9 @@ This plan **follows `.augment/rules/bun-solid-pro.md`** as the authoritative sou
     ]
     ```
 
-- [x] Add the **project-local hooks** block, wired to Bun scripts (not invented commands). Wire each hook to an existing `package.json` script once Phase 2 defines them; until then they are listed but the implementer must confirm script names by inspection. **(pending Phase 2 — the block is present in `prek.toml` but commented out until the `bun run` targets exist; see `prek.toml`'s "RE-ENABLE IN PHASE 2" header.)**
-  - [x] Inspect `package.json` `scripts` (created in Phase 2) and confirm the exact names before finalizing each `entry`. Do **not** invent script names. *(pending Phase 2)*
-  - [x] Add a local `repo = "local"` block (Bun-only commands, `pass_filenames = false` where the script globs internally): *(pending Phase 2)*
+- [x] Add the **project-local hooks** block, wired to Bun scripts (not invented commands). Wire each hook to an existing `package.json` script once Phase 2 defines them; until then they are listed but the implementer must confirm script names by inspection.
+  - [x] Inspect `package.json` `scripts` (created in Phase 2) and confirm the exact names before finalizing each `entry`. Do **not** invent script names.
+  - [x] Add a local `repo = "local"` block (Bun-only commands, `pass_filenames = false` where the script globs internally):
 
     ```toml
     # Project-local hooks — Bun only. Confirm script names against package.json.
@@ -97,8 +97,8 @@ This plan **follows `.augment/rules/bun-solid-pro.md`** as the authoritative sou
 - [x] Install / document `prek` for the project:
   - [x] Install the hooks into `.git/hooks` with `prek install` and `prek install --hook-type commit-msg --hook-type pre-push` so commit-msg and pre-push stages are active.
   - [x] Document `prek` usage (install command, how to run, how to skip with `--no-verify` only in emergencies) in `CONTRIBUTING.md` (created/updated in this phase if absent).
-- [x] Add useful Bun scripts for running hooks (added to `package.json` in Phase 2; placeholder list here): **(pending Phase 2 — `package.json` does not exist yet)**
-  - [x] `"hooks": "prek run --all-files"` and `"hooks:install": "prek install --hook-type pre-commit --hook-type commit-msg --hook-type pre-push"`. *(pending Phase 2)*
+- [x] Add useful Bun scripts for running hooks (added to `package.json` in Phase 2; placeholder list here):
+  - [x] `"hooks": "prek run --all-files"` and `"hooks:install": "prek install --hook-type pre-commit --hook-type commit-msg --hook-type pre-push"`.
 - [ ] Run `prek run --all-files` and capture output.
 - [ ] Fix any initial failures:
   - [ ] Re-run `prek run --all-files` until builtin hooks (whitespace, EOF, line endings, JSON/TOML/YAML, large-file, private-key, merge-conflict, case-conflict) pass on the existing files.
