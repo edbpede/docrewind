@@ -21,8 +21,14 @@ function pathOf(url: string): string {
   try {
     return new URL(url).pathname;
   } catch {
-    // Relative/path-only inputs throw in `new URL` (no base): use the raw string.
-    return url;
+    // Relative/path-only inputs throw in `new URL` (no base): re-parse against the
+    // Docs origin so the WHATWG parser still isolates the pathname (dropping any
+    // query/fragment), preserving the pathname-only guarantee for these inputs.
+    try {
+      return new URL(url, "https://docs.google.com").pathname;
+    } catch {
+      return url;
+    }
   }
 }
 

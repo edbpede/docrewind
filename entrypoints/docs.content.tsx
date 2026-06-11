@@ -38,6 +38,11 @@ export default defineContentScript({
                 void sendMessage("startRetrieval", {
                   docId: info.docId,
                   userIndex: info.userIndex,
+                }).catch(() => {
+                  // Best-effort: the background SW may be restarting or the page
+                  // navigating away (MV3 idle termination). Swallow the rejection
+                  // so it doesn't surface as an unhandled promise rejection; the
+                  // user can simply re-activate.
                 });
               }}
             />

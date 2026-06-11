@@ -28,6 +28,11 @@ export default defineBackground(() => {
 
   // Per-document cancellation flags for in-flight retrievals.
   const cancelledDocs = new Set<string>();
+  // Per-document run epoch. A fresh `startRetrieval` bumps the epoch, so any
+  // still-pending earlier run for the same docId sees `isCancelled() === true`
+  // and stops — preventing two concurrent runs from racing the IDB store when
+  // MV3 dispatches overlapping messages (handlers are not serialized).
+  const runEpochByDoc = new Map<string, number>();
 
   // ── BLOCKED §24 — live-retrieval activation site ─────────────────────────
   // Replace these two pure stubs with the live `fetch` adapter +
@@ -46,12 +51,19 @@ export default defineBackground(() => {
 
   onMessage("cancelRetrieval", ({ data }) => {
     cancelledDocs.add(data.docId);
+    // Bump the epoch too: a later `startRetrieval` clears `cancelledDocs`, but
+    // the in-flight run is pinned to its own epoch and still observes the bump.
+    runEpochByDoc.set(data.docId, (runEpochByDoc.get(data.docId) ?? 0) + 1);
   });
 
   onMessage("startRetrieval", async ({ data }) => {
     cancelledDocs.delete(data.docId);
+    // Claim a fresh epoch; any earlier run for this docId is now stale and will
+    // self-cancel on its next `isCancelled()` check.
+    const epoch = (runEpochByDoc.get(data.docId) ?? 0) + 1;
+    runEpochByDoc.set(data.docId, epoch);
     const cancellation: CancellationToken = {
-      isCancelled: () => cancelledDocs.has(data.docId),
+      isCancelled: () => cancelledDocs.has(data.docId) || runEpochByDoc.get(data.docId) !== epoch,
     };
     const result = await runRetrieval(
       {
@@ -64,6 +76,12 @@ export default defineBackground(() => {
       },
       { docId: data.docId, userIndex: data.userIndex, cancellation },
     );
+    // Drop our epoch entry if still current (a newer start would have replaced
+    // it), and clear any cancel flag this run consumed — keeps both maps bounded.
+    if (runEpochByDoc.get(data.docId) === epoch) {
+      runEpochByDoc.delete(data.docId);
+      cancelledDocs.delete(data.docId);
+    }
     // The error is content-free by construction — never log raw bodies (§13.7).
     return result.ok ? { ok: true } : { ok: false, error: result.error };
   });

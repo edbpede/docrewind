@@ -29,6 +29,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function isValidByteCap(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
 /**
  * Versioned migrations for `storageBudget`. Keyed by the version migrated TO.
  * v1 builds stored only `perDocumentBytes`; v2 adds the global cap. Exported so
@@ -39,7 +43,7 @@ export const STORAGE_BUDGET_MIGRATIONS: Readonly<Record<number, (old: unknown) =
   {
     2: (old: unknown): StorageBudget => {
       const perDocumentBytes =
-        isRecord(old) && typeof old.perDocumentBytes === "number"
+        isRecord(old) && isValidByteCap(old.perDocumentBytes)
           ? old.perDocumentBytes
           : DEFAULT_STORAGE_BUDGET.perDocumentBytes;
       return { perDocumentBytes, globalCapBytes: DEFAULT_STORAGE_BUDGET.globalCapBytes };

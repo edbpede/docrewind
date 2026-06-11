@@ -18,9 +18,11 @@ describe("extractDocId", () => {
     expect(extractDocId("https://docs.google.com/spreadsheets/d/abc/edit")).toBeNull();
   });
 
-  test("returns null for an unrelated URL", () => {
+  test("extracts the id regardless of host (host is gated by the content-script `matches`, not here)", () => {
     expect(extractDocId("https://example.com/document/d/abc")).not.toBeNull();
-    // (host is not checked here — the content-script `matches` gate does that)
+  });
+
+  test("returns null when there is no /document/d/ segment", () => {
     expect(extractDocId("https://docs.google.com/")).toBeNull();
   });
 

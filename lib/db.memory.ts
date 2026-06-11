@@ -60,6 +60,16 @@ function rangeKey(start: RevisionId, end: RevisionId): string {
   return `${start}:${end}`;
 }
 
+/**
+ * Deep-copy a value crossing the backend boundary. The idb backend isolates
+ * callers from stored state via IndexedDB's structured-clone algorithm; this
+ * helper gives the in-memory twin the same value-level isolation so a mutation
+ * after a `get` cannot reach back into the store (header parity with lib/db.ts).
+ */
+function cloneValue<T>(value: T): T {
+  return structuredClone(value);
+}
+
 function estimateRawBytes(payload: RawPayload): number {
   try {
     const serialized = JSON.stringify(payload.body);
@@ -98,56 +108,59 @@ export function createMemoryStore(options: MemoryStoreOptions = {}): RevisionSto
   async function saveRawChunk(chunk: RawPayload): Promise<void> {
     const docKey = chunk.docId;
     const perDoc = backend.rawChunks.get(docKey) ?? new Map<string, RawPayload>();
-    perDoc.set(rangeKey(chunk.range.received.start, chunk.range.received.end), chunk);
+    perDoc.set(rangeKey(chunk.range.received.start, chunk.range.received.end), cloneValue(chunk));
     backend.rawChunks.set(docKey, perDoc);
   }
 
   async function getRawChunks(docId: DocId): Promise<readonly RawPayload[]> {
     const perDoc = backend.rawChunks.get(docId);
     if (perDoc === undefined) return [];
-    return [...perDoc.values()].sort(
-      (a, b) =>
-        a.range.received.start - b.range.received.start ||
-        a.range.received.end - b.range.received.end,
-    );
+    return [...perDoc.values()]
+      .sort(
+        (a, b) =>
+          a.range.received.start - b.range.received.start ||
+          a.range.received.end - b.range.received.end,
+      )
+      .map(cloneValue);
   }
 
   async function saveDecoded(docId: DocId, revisions: readonly DecodedRevision[]): Promise<void> {
-    backend.decoded.set(docId, { parserVersion, revisions });
+    backend.decoded.set(docId, { parserVersion, revisions: cloneValue(revisions) });
   }
 
   async function getDecoded(docId: DocId): Promise<readonly DecodedRevision[]> {
     const rec = backend.decoded.get(docId);
     if (rec === undefined || rec.parserVersion < parserVersion) return [];
-    return rec.revisions;
+    return cloneValue(rec.revisions);
   }
 
   async function saveSnapshots(docId: DocId, snapshots: readonly StoredSnapshot[]): Promise<void> {
-    backend.snapshots.set(docId, { parserVersion, snapshots });
+    backend.snapshots.set(docId, { parserVersion, snapshots: cloneValue(snapshots) });
   }
 
   async function getSnapshots(docId: DocId): Promise<readonly StoredSnapshot[]> {
     const rec = backend.snapshots.get(docId);
     if (rec === undefined || rec.parserVersion < parserVersion) return [];
-    return rec.snapshots;
+    return cloneValue(rec.snapshots);
   }
 
   async function saveTimeline(docId: DocId, events: readonly TimelineEvent[]): Promise<void> {
-    backend.timeline.set(docId, { parserVersion, events });
+    backend.timeline.set(docId, { parserVersion, events: cloneValue(events) });
   }
 
   async function getTimeline(docId: DocId): Promise<readonly TimelineEvent[]> {
     const rec = backend.timeline.get(docId);
     if (rec === undefined || rec.parserVersion < parserVersion) return [];
-    return rec.events;
+    return cloneValue(rec.events);
   }
 
   async function getCacheMeta(docId: DocId): Promise<CacheRecord | null> {
-    return backend.cacheMeta.get(docId) ?? null;
+    const meta = backend.cacheMeta.get(docId);
+    return meta === undefined ? null : cloneValue(meta);
   }
 
   async function putCacheMeta(record: CacheRecord): Promise<void> {
-    backend.cacheMeta.set(record.docId, record);
+    backend.cacheMeta.set(record.docId, cloneValue(record));
   }
 
   async function touch(docId: DocId, now: number): Promise<void> {
@@ -157,11 +170,12 @@ export function createMemoryStore(options: MemoryStoreOptions = {}): RevisionSto
   }
 
   async function readCheckpoint(docId: DocId): Promise<RetrievalCheckpoint | null> {
-    return backend.checkpoints.get(docId) ?? null;
+    const checkpoint = backend.checkpoints.get(docId);
+    return checkpoint === undefined ? null : cloneValue(checkpoint);
   }
 
   async function writeCheckpoint(checkpoint: RetrievalCheckpoint): Promise<void> {
-    backend.checkpoints.set(checkpoint.docId, checkpoint);
+    backend.checkpoints.set(checkpoint.docId, cloneValue(checkpoint));
   }
 
   function deleteRawForDoc(docId: DocId): number {

@@ -40,8 +40,27 @@ const scope = self as unknown as WorkerScope;
 // The worker's own store connection (separate realm from background).
 const store = createIdbStore();
 
+/** Runtime guard: the worker boundary is untyped, so validate the shape. */
+function isParseRequest(value: unknown): value is ParseRequest {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { docId?: unknown }).docId === "string"
+  );
+}
+
 scope.addEventListener("message", (event: MessageEvent) => {
-  void handleParse(event.data as ParseRequest);
+  const request: unknown = event.data;
+  if (!isParseRequest(request)) {
+    // Malformed message — no usable docId, so we cannot post a per-doc signal;
+    // drop it rather than crash the worker with an unhandled rejection.
+    return;
+  }
+  // Async rejections (invalid docId, store I/O) would otherwise be unhandled and
+  // leave the page waiting forever; post a terminal signal instead.
+  void handleParse(request).catch(() => {
+    post({ kind: "unsupported", docId: request.docId, revisionCount: 0 });
+  });
 });
 
 async function handleParse(request: ParseRequest): Promise<void> {

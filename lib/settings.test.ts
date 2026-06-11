@@ -73,6 +73,16 @@ describe("settings", () => {
       expect(migrate?.("not-an-object")).toEqual(DEFAULT_STORAGE_BUDGET);
     });
 
+    it("the migration fn falls back to the default for numeric-but-invalid inputs", () => {
+      const migrate = STORAGE_BUDGET_MIGRATIONS[2];
+      expect(migrate?.({ perDocumentBytes: NaN })).toEqual(DEFAULT_STORAGE_BUDGET);
+      expect(migrate?.({ perDocumentBytes: Infinity })).toEqual(DEFAULT_STORAGE_BUDGET);
+      expect(migrate?.({ perDocumentBytes: -Infinity })).toEqual(DEFAULT_STORAGE_BUDGET);
+      expect(migrate?.({ perDocumentBytes: -1 })).toEqual(DEFAULT_STORAGE_BUDGET);
+      expect(migrate?.({ perDocumentBytes: 0 })).toEqual(DEFAULT_STORAGE_BUDGET);
+      expect(migrate?.({ perDocumentBytes: 0.5 })).toEqual(DEFAULT_STORAGE_BUDGET);
+    });
+
     // NOTE: the v1→v2 migration is wired into `storage.defineItem` via
     // `version: 2` + `migrations: STORAGE_BUDGET_MIGRATIONS`. We exercise the
     // migration logic by testing the exported function directly rather than

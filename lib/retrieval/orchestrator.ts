@@ -92,15 +92,21 @@ export async function runRetrieval(
     return fail(retrievalError("endpoint-unavailable"));
   }
 
-  // Resume from a checkpoint if one exists and isn't already complete.
+  // Resume from a checkpoint if one exists. The resume cursor is the first
+  // revision not yet retrieved; absent a checkpoint we start at revision 1.
   const checkpoint = await deps.store.readCheckpoint(docId);
-  const resumed = checkpoint !== null && !checkpoint.completed;
-  if (checkpoint?.completed) {
+  const checkpointNextStart: RevisionId = checkpoint?.nextStart ?? asRevisionId(1);
+  const resumed = checkpoint !== null && checkpointNextStart > asRevisionId(1);
+
+  // Short-circuit a completed checkpoint ONLY when its cursor is already past
+  // the freshly discovered upper bound. If the document grew since we finished
+  // (upperBound now exceeds the stored cursor), fall through and fetch the new
+  // revisions instead of falsely reporting a no-op success (silent data loss).
+  if (checkpoint?.completed && checkpointNextStart > upperBound) {
     return ok({ docId, upperBound, chunksFetched: 0, resumed: false });
   }
 
-  let nextStart: RevisionId =
-    resumed && checkpoint !== null ? checkpoint.nextStart : asRevisionId(1);
+  let nextStart: RevisionId = checkpointNextStart;
   let size = deps.initialChunkSize ?? DEFAULT_CHUNK_SIZE;
   let chunksFetched = 0;
 
@@ -120,12 +126,20 @@ export async function runRetrieval(
       const result = await deps.fetcher.fetchChunk({ docId, span, userIndex: request.userIndex });
 
       if (result.ok) {
-        // Persist raw + advance the resume cursor past the requested span. The
-        // payload body stays opaque; advancement is by the requested range, so a
-        // discovery over/under-shoot can't stall the loop.
+        // Persist raw + advance the resume cursor past the ACTUALLY-received
+        // end, so a transport that narrows the range can't leave a silent gap
+        // in `(received.end, requested.end]`. The payload body stays opaque.
+        // Guard: `received.end` must lie in `[span.start, upperBound]`. The
+        // lower bound guarantees strict forward progress (received.end + 1 >
+        // span.start), so a server that fails to advance can't spin the loop;
+        // an out-of-range end is unparseable range data we stop on safely.
+        const receivedEnd = result.value.range.received.end;
+        if (receivedEnd < span.start || receivedEnd > upperBound) {
+          return fail(retrievalError("unsupported-format"));
+        }
         await deps.store.saveRawChunk(result.value);
         chunksFetched += 1;
-        nextStart = unsafeAsRevisionId(span.end + 1);
+        nextStart = unsafeAsRevisionId(receivedEnd + 1);
         await deps.store.writeCheckpoint({
           docId,
           upperBound,
