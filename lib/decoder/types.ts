@@ -1,0 +1,113 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// Operation grammar ported from the MIT-licensed `harvard-vpal/gdocrevisions`
+// (https://github.com/harvard-vpal/gdocrevisions, last release 2018) and
+// corroborated by the 2014 Google Docs teardown — see PRD Appendix A.2.
+//
+//   Copyright (c) 2018 Harvard VPAL — MIT License (operation vocabulary).
+//   Portions of the `ty`-discriminated grammar below derive from that work and
+//   are reproduced under the MIT terms alongside DocRewind's AGPL-3.0-or-later
+//   license, per PRD §11.6.
+//
+// This module is TYPES ONLY (the closed-world `Operation` union). The runtime
+// open-world decode funnel lives in `decode.ts`. Both the domain model and the
+// reconstruction engine depend on these shapes, so the types land first.
+
+import type { RevisionId } from "../domain/ids";
+
+/** Non-text structures that ride outside the plain character stream (A.8). */
+export type OpaqueStructure =
+  | "image"
+  | "table"
+  | "footnote"
+  | "equation"
+  | "drawing"
+  | "list-format"
+  | "comment-ref";
+
+/** `is` — InsertString: splice `s` at `ibi - 1` (1-indexed insert-begin-index). */
+export interface InsertString {
+  readonly ty: "is";
+  readonly s: string;
+  readonly ibi: number;
+}
+
+/** `ds` — DeleteString: remove the inclusive 1-indexed `si..ei` range. */
+export interface DeleteString {
+  readonly ty: "ds";
+  readonly si: number;
+  readonly ei: number;
+}
+
+/** `mlti` — MultiOperation: compound op; recurse depth-first over `mts`. */
+export interface MultiOperation {
+  readonly ty: "mlti";
+  readonly mts: readonly Operation[];
+}
+
+/** `iss` — InsertStringSuggestion: suggestion form of insert. */
+export interface InsertStringSuggestion {
+  readonly ty: "iss";
+  readonly s: string;
+  readonly ibi: number;
+}
+
+/** `dss` — DeleteStringSuggestion: suggestion delete over the inclusive range. */
+export interface DeleteStringSuggestion {
+  readonly ty: "dss";
+  readonly si: number;
+  readonly ei: number;
+}
+
+/** `msfd` — MarkStringForDeletion: mark the inclusive range as suggested-delete. */
+export interface MarkStringForDeletion {
+  readonly ty: "msfd";
+  readonly si: number;
+  readonly ei: number;
+}
+
+/** `usfd` — UnmarkStringForDeletion: clear a suggested-delete mark on the range. */
+export interface UnmarkStringForDeletion {
+  readonly ty: "usfd";
+  readonly si: number;
+  readonly ei: number;
+}
+
+/**
+ * A recognized non-text structure. Preserves position + timing so replay keeps
+ * a labeled slot, but carries no decoded content (A.8, §15.3) — never aborts.
+ */
+export interface OpaquePlaceholder {
+  readonly ty: "opaque";
+  readonly structure: OpaqueStructure;
+  readonly position: number;
+  readonly revisionId: RevisionId;
+}
+
+/**
+ * An unrecognized wire operation. Privacy-safe by construction (R5, §13.7):
+ * carries ONLY the unrecognized wire op-code and the byte length of the skipped
+ * payload — never any verbatim text. Lets decoding continue past unknown ops.
+ */
+export interface UnknownOp {
+  readonly ty: "unknown";
+  readonly opCode: string;
+  readonly byteLength: number;
+  readonly revisionId: RevisionId;
+}
+
+/**
+ * Closed-world discriminated union of every operation the core understands.
+ * `apply.ts` switches over this with a `never` exhaustiveness default — adding
+ * a variant here without a matching apply arm is a compile error.
+ */
+export type Operation =
+  | InsertString
+  | DeleteString
+  | MultiOperation
+  | InsertStringSuggestion
+  | DeleteStringSuggestion
+  | MarkStringForDeletion
+  | UnmarkStringForDeletion
+  | OpaquePlaceholder
+  | UnknownOp;
