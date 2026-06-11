@@ -1,699 +1,526 @@
-# Product Requirements Document: FLOSS Local-First Google Docs Revision Replay Extension
+# Product Requirements Document: DocRewind — Local-First Google Docs Revision Replay Extension
+
+**Working name:** DocRewind (repository / package slug: `docrewind`)
+**License:** AGPL-3.0-or-later
+**Status:** Revision 5 — Phase 0 research (two rounds) complete; verdict **Conditional-Go**, pending live network capture
+**Revision note:** Revision 3 folded in Round 1 research; Revision 4 folded in Round 2 (operation grammar source-confirmed; stack settled). Revision 5 aligns the technical stack to the project coding guidelines in `.augment/rules/bun-solid-pro.md`, which is the **authoritative reference** for stack versions, project layout, and framework idioms. That alignment: (a) **keeps `presetWind4`** (reversing Revision 4's interim downgrade to `presetWind3` — the guidelines pin presetWind4 and the incompatibility that prompted the downgrade only affects legacy-Tailwind migrations, which do not apply to a greenfield codebase); (b) adopts WXT's **polyfill-free `browser` global** (no `webextension-polyfill` wrapper); (c) makes **`idb`-backed IndexedDB the single bulk-storage engine**, demoting OPFS to a deferred, profile-driven optimization; (d) splits testing into **Bun (pure logic) + Vitest (Solid/storage/browser-API) + Playwright (Chromium-only E2E)**, with Firefox validated manually / via `web-ext`; and (e) adds **Biome** for lint+format. The hard unknowns remain transport-layer and are routed to live capture (§24). See the Decision Log below.
+
+---
+
+## 0. Decision Log (through Revision 5)
+
+These were previously open or underspecified. Each is now a committed decision; rationale lives in the referenced section. **Authoritative stack reference:** all framework, tooling, layout, and idiom choices defer to `.augment/rules/bun-solid-pro.md`; where this PRD and that document could differ, the guidelines govern, and §11 records the reconciliation.
+
+1. **License:** AGPL-3.0-or-later, DCO sign-off for contributors (no CLA). → §11.6
+2. **Primary extension surface:** dedicated replay page in its own browser tab, opened from the toolbar action. → §10.3, §8.4
+3. **Raw payload retention:** retained by default after parsing, bounded by a storage budget with LRU pruning that drops raw chunks before derived data; user-configurable. → §9.8, §10.6
+4. **MVP reconstruction fidelity:** faithful linear-text reconstruction (insert/delete order + timing + paragraph structure); end-of-replay text equals current document text; non-text structures degrade to placeholders, never crash. → §9.4, §15.3
+5. **Collaborative attribution:** pseudonymous color+label authors by default; real identities only on explicit opt-in. → §9.7, §9.11
+6. **Diagnostics redaction:** anonymized-by-construction (no document text) by default; structural/length-only operation mode for parser bugs; interactive redaction UI deferred. → §10.8
+7. **Non-text structures:** suggestions/tracked-changes are inline character-stream operations (`iss`/`dss`/`msfd`/`usfd`) and are therefore best-effort *reconstructable* in MVP; comments (out-of-band) and images/tables/footnotes/equations/drawings/list-formatting (outside the plain character stream) degrade to typed placeholders / timeline annotations, never crash. → §9.4, §9.6, §15.3
+8. **Background context model:** ephemeral on both browsers (MV3 service worker on Chromium — terminating after ~30s idle / 5min hard cap; MV3 event page on Firefox); no authoritative in-memory state. The credentialed, chunked, **resumable** retrieval runs in the background context, checkpointed to IndexedDB so a terminated worker resumes; heavy parsing/reconstruction runs in a Web Worker owned by the replay page. The content script only detects and triggers, via WXT's promise-based `browser` global (no `webextension-polyfill`). → §10.3, §10.9
+9. **Build claim:** "verifiable, pinned builds with published checksums," not byte-for-byte reproducibility (the latter is a stretch goal via a pinned container). → §11.4
+10. **Quantified success metrics:** concrete MVP targets for fidelity, load time, responsiveness, coverage, and network isolation. → §17
+11. **ToS/legal position:** documented known risk with mitigations and a distribution fallback; requires project legal review before public launch. → §21.5
+12. **Name:** DocRewind (subtitle: "Local revision replay for Google Docs"). → §26
+13. **Extension framework:** WXT (Vite-based, framework-agnostic with a first-class SolidJS template, per-browser MV3 outputs, polyfill-free `browser`, generated manifest), per `.augment/rules/bun-solid-pro.md`. Plasmo (maintenance mode) and CRXJS (build-only/abandonment risk) rejected. → §11.4
+14. **Styling preset:** UnoCSS **`presetWind4`** (the current Tailwind-4-compatible preset, per the guidelines), with its integrated reset. The oklch/`presetLegacyCompat` incompatibility noted in earlier research applies only to legacy-Tailwind migration, which does not apply here; an early-build watch-item verifies `@apply`/color behavior against the component set. → §11.3
+15. **Storage engines:** a single bulk engine — **IndexedDB accessed via `idb`** — for raw revision chunks, decoded operations, snapshots, indexes, and resumable-retrieval checkpoints; WXT typed `storage.defineItem` over `storage.local` for settings; `storage.session` for ephemeral per-session cache. OPFS is **deferred** as a profile-driven optimization for the heaviest documents only (typical docs are a few MB; heavy ones tens of MB — within comfortable IndexedDB range). Default ~50 MB/document budget; global LRU cap ~500 MB–1 GB; call `navigator.storage.persist()`; handle `QuotaExceededError`. → §9.8, §10.6
+16. **Firefox target:** Firefox ≥127 for install-time host-permission grant; older Firefox gets a clear first-run prompt to enable access on `docs.google.com`. → §9.10, §12
+17. **Permission fallback:** if a store rejects the `*://docs.google.com/*` host permission, fall back to `activeTab` / optional permission granted on the open Docs tab. → §12, §23
+18. **Browser-API access:** WXT's unified promise-based `browser` global throughout (typed from `@types/chrome`); never `webextension-polyfill` or `chrome.*` callbacks. Typed cross-context messaging via `@webext-core/messaging`. → §9.10, §10.9, §11.4
+19. **Testing split:** Bun's test runner for pure, DOM-free logic (parser, reconstruction, timeline); Vitest with `WxtVitest`, `@solidjs/testing-library`, and the in-memory `fakeBrowser` for Solid components, storage, and browser-API behavior; Playwright for end-to-end — **Chromium-only**, so Firefox is validated by manual exploratory testing and `web-ext` smoke checks. → §11.5
+20. **Lint/format:** Biome (single tool, replacing ESLint+Prettier), relying on Biome's recommended + type-aware rules plus Solid's compile-time reactivity warnings. → §11.4
+
+The two prior research rounds are complete (verdict: **Conditional-Go**) and the build stack is now aligned to `.augment/rules/bun-solid-pro.md`, leaving only transport-layer unknowns (response framing, required headers/tokens, revision-count discovery, non-text encoding, chunk sizes, rate limits). These cannot be resolved from public sources and are routed to a focused live-capture pass (Phase 0, §16, §24). Do not hard-code the parser to assumptions about the `)]}'` prefix, headers, or discovery method until that capture passes.
+
+---
 
 ## 1. Product Summary
 
-The product is a free/libre and open-source browser extension that allows users to replay, inspect, and analyze the revision history of Google Docs documents they are authorized to access. It is inspired by Draftback’s core user value: transforming Google Docs’ fine-grained revision data into an interactive writing playback experience.
+DocRewind is a free/libre and open-source browser extension that lets users replay, inspect, and analyze the revision history of Google Docs documents they are authorized to access. It is inspired by Draftback's core user value: transforming Google Docs' fine-grained revision data into an interactive writing-playback experience.
 
-The extension must be privacy-first, local-only, cross-browser, and transparent. It must work on Chromium-based browsers and Firefox. It must not require user accounts, remote servers, telemetry, analytics, subscriptions, or cloud processing.
+The extension is privacy-first, local-only, cross-browser, and transparent. It works on Chromium-based browsers and Firefox. It does not require user accounts, remote servers, telemetry, analytics, subscriptions, or cloud processing.
 
-The product should be built with SolidJS, TypeScript, UnoCSS using a Tailwind CSS v4-compatible preset (presetWind4), and a browser-extension framework suitable for Chrome and Firefox builds. Bun should be used as the package manager, script runner, and test runner where appropriate, while the extension runtime itself must depend only on standard browser and WebExtension APIs.
+The product is built with SolidJS (fine-grained reactivity, no virtual DOM), TypeScript (strict), UnoCSS `presetWind4`, and the WXT extension framework (Vite under the hood) producing Chromium and Firefox builds, with Biome for lint+format. Bun is the package manager, script runner, and runner for pure-logic unit tests; the extension runtime depends only on standard browser and WebExtension APIs. The authoritative reference for stack versions, project layout, and framework idioms is `.augment/rules/bun-solid-pro.md` (see §11).
 
 ## 2. Product Vision
 
 Writers, teachers, researchers, editors, and students should be able to understand how a Google Doc was written without surrendering document content to a third party.
 
-The extension should make document evolution visible: when text appeared, how writing sessions unfolded, where large pasted sections entered the document, and how the document changed over time. It should do this while keeping all document data inside the user’s browser.
+The extension makes document evolution visible: when text appeared, how writing sessions unfolded, where large pasted sections entered, and how the document changed over time — while keeping all document data inside the user's browser.
 
-The long-term vision is a trustworthy local writing-process microscope for Google Docs.
+The long-term vision is a trustworthy, local writing-process microscope for Google Docs.
 
 ## 3. Problem Statement
 
-Google Docs stores detailed revision information to support collaboration and document history, but the native Google Docs interface does not provide a rich replay experience of the writing process. Existing tools demonstrate that such a replay experience is possible, but users may want a transparent, auditable, FLOSS alternative that does not rely on remote infrastructure or opaque data handling.
+Google Docs stores detailed revision information to support collaboration and history, but the native interface does not offer a rich replay of the writing process. Existing tools show such replay is possible, but users may want a transparent, auditable, FLOSS alternative that does not rely on remote infrastructure or opaque data handling.
 
-Users need a way to inspect document authorship and writing process while preserving privacy, respecting browser permissions, and avoiding unnecessary data extraction.
+Users need to inspect document authorship and writing process while preserving privacy, respecting browser permissions, and avoiding unnecessary data extraction.
 
 ## 4. Target Users
 
 ### 4.1 Primary Users
-
-Teachers and academic staff who want to review writing process evidence in student-submitted Google Docs.
-
-Writers and editors who want to understand the evolution of their own drafts.
-
-Researchers studying writing process, revision behavior, or collaborative composition.
-
-Privacy-conscious users who want local-only tooling for document inspection.
+- Teachers and academic staff reviewing writing-process evidence in student-submitted Google Docs.
+- Writers and editors understanding the evolution of their own drafts.
+- Researchers studying writing process, revision behavior, or collaborative composition.
+- Privacy-conscious users who want local-only document tooling.
 
 ### 4.2 Secondary Users
-
-Open-source contributors who want to audit or improve the extension.
-
-Institutions that want a self-contained browser extension without vendor lock-in.
-
-Developers experimenting with document reconstruction and playback systems.
+- Open-source contributors who want to audit or improve the extension.
+- Institutions wanting a self-contained extension without vendor lock-in.
+- Developers experimenting with document reconstruction and playback.
 
 ## 5. Goals
-
-Provide a local replay experience for Google Docs revision history.
-
-Support Chrome-compatible browsers and Firefox from the start or shortly after MVP.
-
-Keep all parsed document content, revision history, derived events, and caches local to the browser.
-
-Avoid all telemetry, analytics, remote licensing, cloud processing, or third-party document transmission.
-
-Use a modern, type-safe frontend architecture based on SolidJS and TypeScript.
-
-Provide a transparent FLOSS codebase with clear privacy guarantees and reproducible builds.
-
-Handle large documents through chunked loading, incremental parsing, cache management, and efficient rendering.
-
-Make technical limitations explicit, especially the reliance on undocumented Google Docs revision behavior.
+- Provide a local replay experience for Google Docs revision history.
+- Support Chromium-compatible browsers and Firefox from MVP, with Firefox validated by real browser testing.
+- Keep all parsed content, revision history, derived events, and caches local to the browser.
+- Avoid all telemetry, analytics, remote licensing, cloud processing, or third-party document transmission.
+- Use a modern, type-safe SolidJS + TypeScript frontend.
+- Ship a transparent AGPL-3.0-or-later codebase with clear privacy guarantees and verifiable builds.
+- Handle large documents via chunked loading, incremental parsing, cache management, and efficient rendering.
+- Make technical limitations explicit, especially reliance on undocumented Google Docs revision behavior.
 
 ## 6. Non-Goals
-
-The product will not provide AI-writing detection or make claims about whether text was generated by AI.
-
-The product will not bypass Google Docs permissions or access documents unavailable to the current user.
-
-The product will not store document data on a server.
-
-The product will not synchronize document history across devices.
-
-The product will not attempt to support every Google Workspace editor in the MVP.
-
-The product will not replace Google Docs revision history.
-
-The product will not guarantee compatibility with future Google Docs internal changes.
-
-The product will not run as a standalone web service.
+- No AI-writing detection or claims about AI-generated text.
+- No bypassing Google Docs permissions or accessing documents unavailable to the current user.
+- No server-side storage of document data.
+- No cross-device synchronization of history.
+- No attempt to support every Google Workspace editor in MVP.
+- Not a replacement for Google Docs revision history.
+- No guarantee of compatibility with future Google Docs internal changes.
+- Not a standalone web service.
 
 ## 7. Product Positioning
 
-This product should be positioned as a local, auditable revision replay tool for documents the user already has permission to access. It should avoid adversarial or surveillance-oriented messaging.
+DocRewind is a local, auditable revision-replay tool for documents the user already has permission to access. It avoids adversarial or surveillance-oriented messaging.
 
-Recommended positioning language: “Replay how a Google Doc changed over time, locally in your browser.”
+Recommended positioning: "Replay how a Google Doc changed over time, locally in your browser."
 
-Avoid positioning language such as “catch cheaters,” “detect AI,” or “prove authorship.” The extension may surface process signals, but interpretation remains the user’s responsibility.
+Avoid "catch cheaters," "detect AI," or "prove authorship." The extension may surface process signals, but interpretation remains the user's responsibility.
 
 ## 8. Core User Experience
 
 ### 8.1 First Install
-
-The user installs the extension from a browser extension store or from a verified release package. The onboarding screen explains that the extension only activates on Google Docs pages and stores data locally.
-
-The user sees a simple privacy summary: no accounts, no telemetry, no remote backend, no document upload, local cache only.
+The user installs from a browser extension store or a verified release package. Onboarding explains that the extension activates only on Google Docs pages and stores data locally. The user sees a plain privacy summary: no accounts, no telemetry, no remote backend, no document upload, local cache only. (Canonical guarantees: §13.)
 
 ### 8.2 Activation on a Google Doc
-
-When the user opens a supported Google Docs document, the extension detects that the page is a document editing or viewing context. The extension presents a clear, unobtrusive entry point such as a browser action, floating button, or side-panel trigger.
-
-The extension does not begin loading revision history until the user explicitly activates replay for the current document.
+When the user opens a supported document, the content script detects the editing/viewing context and presents an unobtrusive entry point (toolbar action; optional small in-page affordance). The extension does **not** load revision history until the user explicitly activates replay.
 
 ### 8.3 Revision Loading
-
-After activation, the extension identifies the current document and attempts to retrieve revision data available to the current user session. It displays progress in high-level terms: discovering revision range, loading revisions, reconstructing document states, preparing playback.
-
-The extension should provide meaningful failure states if the document is unsupported, inaccessible, too large for available storage, or affected by a Google Docs format change.
+After activation, the extension identifies the current document and retrieves revision data available to the current session. It shows high-level progress: discovering revision range, loading revisions, reconstructing states, preparing playback. Meaningful failure states are shown for unsupported, inaccessible, too-large, or format-changed documents (error model: §10.7).
 
 ### 8.4 Replay View
-
-The user sees an interactive playback interface with a document viewport, timeline, play/pause controls, speed controls, and navigation to key events.
-
-The replay should emphasize writing flow rather than raw technical data. Users should be able to watch the document appear over time, jump to moments in the timeline, and inspect revision density or major edit events.
+Replay opens in a **dedicated extension page in its own browser tab** (primary surface; rationale §10.3). It provides a document viewport, timeline, play/pause, speed control, and navigation to key events. It emphasizes writing flow over raw technical data and communicates that it is a reconstruction from available revision data.
 
 ### 8.5 Local Cache Management
-
-The extension caches parsed revision data locally to avoid repeated loading and reconstruction. Users can clear the cache for the current document or all documents. The cache interface should disclose approximate storage usage.
+The extension caches parsed revision data locally to avoid repeated loading. Users can clear the cache for the current document or all documents. The cache UI discloses approximate storage usage (§9.8, §10.6).
 
 ### 8.6 Export and Sharing
-
-The MVP may include local-only exports of summary data or timeline metadata. Exports should be generated entirely in the browser. Any export feature must clearly indicate what data is included.
-
-Video export, animated replay export, or shareable reports should be deferred until the core replay engine is stable.
+MVP may include local-only exports of summary/timeline metadata, generated entirely in-browser, with a clear statement of what is included. Video export, animated replay export, and shareable reports are deferred until the core replay engine is stable.
 
 ## 9. Functional Requirements
 
 ### 9.1 Document Detection
-
-The extension must detect when the active browser tab is a supported Google Docs document.
-
-The extension must extract the document identifier from the current page context in a browser-safe way.
-
-The extension must distinguish unsupported Google Workspace pages from supported document pages.
-
-The extension should degrade gracefully if Google Docs changes its URL structure or page behavior.
+- Detect when the active tab is a supported Google Docs document.
+- Extract the document identifier from page context in a browser-safe way.
+- Distinguish unsupported Google Workspace pages from supported document pages.
+- Degrade gracefully if Google Docs changes URL structure or page behavior.
 
 ### 9.2 User-Initiated Loading
-
-The extension must not retrieve revision history automatically on page load.
-
-The extension must require user activation before revision retrieval begins.
-
-The extension should show the current document title when available, while avoiding unnecessary extraction of page metadata.
+- Never retrieve revision history automatically on page load.
+- Require explicit user activation before retrieval.
+- Show the current document title when available, avoiding unnecessary metadata extraction.
 
 ### 9.3 Revision Retrieval
-
-The extension must retrieve revision data using the authenticated browser session of the current user.
-
-The extension must only request data from Google Docs origins necessary for current-document replay.
-
-The extension must handle revision data in chunks rather than assuming a single complete payload.
-
-The extension must support retry, partial progress, and cancellation.
-
-The extension must detect and report common failure states such as insufficient permission, unavailable revision data, network interruption, unsupported response format, and document too large.
+- Retrieve revision data using the authenticated browser session of the current user.
+- Request data only from Google Docs origins necessary for current-document replay.
+- Handle revision data in chunks, not as a single complete payload.
+- Support retry, partial progress, and cancellation.
+- Detect and report common failures: insufficient permission, unavailable revision data, network interruption, unsupported response format, document too large.
+- Retrieve the fine-grained changelog from the internal `revisions/load` endpoint (Appendix A.1) via a first-party credentialed request from the `docs.google.com` context; the public Drive/Docs APIs do not expose keystroke-level history and are not a usable source (Appendix A.6).
+- Discover the available revision range via the binary-search bound-finding technique (treating HTTP 500 as "range too high"), seeded where possible by the document-info blob in the editor page (Appendix A.4).
+- Handle the multi-account URL variant (`/u/{N}/d/...`) — the documented historical cause of third-party-tool breakage (Appendix A.5).
 
 ### 9.4 Revision Decoding and Reconstruction
-
-The extension must transform retrieved revision payloads into an internal typed representation.
-
-The extension must reconstruct document states over time by applying document operations in order.
-
-The extension must preserve enough timing and ordering information to support playback.
-
-The extension must tolerate partially unknown operation types by isolating unsupported operations and continuing when safe.
-
-The extension must avoid corrupting cached data when reconstruction fails.
-
-The extension should include a diagnostics mode for users or contributors to report unsupported formats without uploading document content by default.
+- Transform retrieved payloads into an internal typed representation.
+- Reconstruct document states over time by applying operations in order, against a flat character-array model (insert splices at the insert index; delete pops the range; compound "multi" operations recurse over their sub-operations), per Appendix A.2.
+- Preserve enough timing and ordering to support playback (each revision carries user, session, revision id, and timestamp; characters carry insert/delete revision and a suggestion flag — Appendix A.2).
+- Tolerate partially unknown operation types by isolating unsupported operations and continuing when safe.
+- **Suggestions / tracked changes** are inline character-stream operations (`iss`/`dss`/`msfd`/`usfd`) and are reconstructed best-effort (shown distinctly from accepted text).
+- **Other non-text structures** — comments (out-of-band) and images, tables, footnotes, equations, drawings, and list formatting (which ride outside the plain character stream) — are decoded as typed opaque placeholders that preserve position and timing and must never abort reconstruction. (Rendering: §9.6; fidelity bar: §15.3.)
+- Decode against the source-confirmed operation grammar in Appendix A.2, strip Google's `)]}'` anti-hijacking guard before parsing (Appendix A.3), and treat the *transport* details (framing, headers, discovery) as **provisional** until confirmed by live capture (§24). The grammar is confirmed from open MIT source; the 2026 wire format is not, so include schema-version detection that fails safe rather than corrupting playback.
+- Avoid corrupting cached data when reconstruction fails.
+- Include an opt-in diagnostics mode for reporting unsupported formats without uploading document content by default (§10.8).
 
 ### 9.5 Timeline Generation
-
-The extension must derive a replay timeline from decoded revisions.
-
-The timeline should represent writing activity, pauses, large insertions, deletions, and major structural changes.
-
-The timeline should support playback at multiple speeds.
-
-The timeline should allow the user to jump to a timestamp, revision cluster, or notable event.
-
-The timeline should expose uncertainty where event grouping is inferred rather than directly available.
+- Derive a replay timeline from decoded revisions.
+- Represent writing activity, pauses, large insertions, deletions, and major structural changes.
+- Support multiple playback speeds.
+- Allow jumping to a timestamp, revision cluster, or notable event.
+- Expose uncertainty where event grouping is inferred rather than directly available.
 
 ### 9.6 Playback Interface
-
-The replay interface must include play, pause, restart, speed selection, scrubber navigation, and progress display.
-
-The replay interface must show the reconstructed document state at the selected point in time.
-
-The replay interface should support large documents through virtualized or incremental rendering where needed.
-
-The interface should prioritize readability and responsiveness over pixel-perfect imitation of Google Docs.
-
-The interface should communicate that it is a reconstruction based on available revision data.
+- Include play, pause, restart, speed selection, scrubber navigation, and progress display.
+- Show the reconstructed document state at the selected point in time.
+- Support large documents via virtualized or incremental rendering where needed.
+- Prioritize readability and responsiveness over pixel-perfect imitation of Google Docs.
+- Render suggestions/tracked changes inline but visually distinct from accepted text; render comments as timeline annotations and other non-text structures (images, tables, footnotes, equations, drawings) as labeled inline placeholders rather than merging them into the main text stream (MVP).
+- Communicate clearly that the view is a reconstruction.
 
 ### 9.7 Summary Insights
-
-The extension should provide local summary insights such as total replay duration, number of revision events, major writing sessions, large inserted blocks, large deletions, and periods of inactivity.
-
-Summary insights must avoid unsupported judgments about authorship, intent, plagiarism, or AI generation.
-
-Insights should be presented as process signals, not conclusions.
+- Provide local summary insights: total replay duration, number of revision events, major writing sessions, large inserted blocks, large deletions, and inactivity periods.
+- Where author attribution is available, present per-event authors as pseudonymous, color-coded labels (Author 1, Author 2…) by default. Real names/emails are shown only on explicit user opt-in, and always labeled as "attributed by revision data, may be incomplete."
+- Insights are process signals, not conclusions. No judgments about authorship, intent, plagiarism, or AI generation.
 
 ### 9.8 Local Storage
-
-The extension must use local browser storage only.
-
-The extension should use IndexedDB for revision payloads, parsed operation data, reconstructed snapshots, and timeline indexes.
-
-The extension should use browser extension local storage only for lightweight settings and preferences.
-
-The extension must provide a clear cache deletion interface.
-
-The extension should apply cache versioning so that parser upgrades can invalidate stale data safely.
-
-The extension should support per-document cache metadata including document identifier, cache creation time, last accessed time, parser version, estimated storage size, and reconstruction status.
+- Use local browser storage only, under the extension's own origin (`chrome-extension://` / `moz-extension://`), which is largely exempt from the web-origin LRU eviction that affects ordinary sites. Still call `navigator.storage.persist()` and handle `QuotaExceededError`.
+- **Storage engines (per `.augment/rules/bun-solid-pro.md`):** all bulk and structured data — raw revision chunks, decoded operations, reconstruction snapshots, operation/timeline indexes, and resumable-retrieval checkpoints — lives in **IndexedDB accessed through the `idb` wrapper** (which works in the background, the replay page, and Workers alike). Lightweight settings/preferences use WXT's typed `storage.defineItem` over `storage.local` (area-prefixed, versioned with migrations, non-synced); ephemeral per-session cache uses `storage.session`. `localStorage` is never used (unavailable in service workers).
+- **OPFS is deferred:** the Origin Private File System (Worker-only sync access, materially faster for very large sequential blob writes) is a profile-driven optimization reserved for the heaviest documents, adopted only if IndexedDB write throughput proves a bottleneck in practice. It is not part of the MVP storage path.
+- Provide a clear cache-deletion interface.
+- Apply cache versioning so parser upgrades can invalidate stale data safely.
+- **Raw payload retention:** retain raw revision chunks by default after parsing so parser upgrades can re-decode locally without re-fetching (re-fetching is the most fragile, ToS-sensitive operation). Retention is bounded by a storage budget — default **~50 MB per document**, with a global LRU cap of **~500 MB–1 GB**, evicting whole-document caches least-recently-viewed first and polling `navigator.storage.estimate()` to stay under ~80% of reported quota. When over budget, pruning removes raw chunks **first**, preserving decoded operations, snapshots, and timeline indexes (expensive to recompute, equally sensitive). A setting — "Keep raw revision data for faster re-parsing (uses more storage)," default ON — lets users discard raw after successful reconstruction.
+- Sizing reference: a ~10,000-word / ~500-revision document occupies a few MB of raw JSON; a ~10,000-revision document occupies tens of MB — comfortably within IndexedDB's per-origin quota, so the per-document budget rarely binds for typical documents.
+- Per-document cache metadata: document identifier, cache creation time, last accessed time, parser version, estimated storage size, reconstruction status, and whether raw payloads are retained.
 
 ### 9.9 Privacy Controls
-
-The extension must not send document content, revision data, metadata, or usage behavior to any non-Google remote server.
-
-The extension must not include analytics, crash reporting, third-party tracking, or remote feature flags.
-
-The extension must not require account creation.
-
-The extension must not request broad host permissions beyond what is required for Google Docs operation.
-
-The extension must present clear privacy documentation in the extension UI and project repository.
+All privacy controls implement the canonical specification in §13. Summary: no transmission of document content, revision data, metadata, or usage to any non-Google server; no analytics, crash reporting, third-party tracking, or remote feature flags; no account creation; no host permissions beyond what Google Docs operation requires; clear in-UI and in-repo privacy documentation.
 
 ### 9.10 Cross-Browser Support
-
-The extension must support Chromium-based browsers and Firefox using a shared codebase.
-
-The extension should use a browser API abstraction layer to avoid direct dependence on Chrome-only extension APIs.
-
-The extension must account for Manifest V3 differences across browsers.
-
-The extension should have separate browser build targets and packaging outputs.
-
-Firefox support must be validated with real browser testing, not assumed from Chromium behavior.
+- Support Chromium-based browsers and Firefox from a shared codebase.
+- Use WXT's unified, promise-based `browser` global (auto-imported, polyfill-free, typed from `@types/chrome`) to smooth Chromium/Firefox differences; never import `webextension-polyfill` or use `chrome.*` callback APIs. Feature-detect APIs that do not exist everywhere (e.g., side panel) rather than assuming presence.
+- Author the manifest in MV3 form in `wxt.config.ts` and let WXT generate per-browser manifests; target **Firefox MV3 (event page)** to keep a single ephemeral-background mental model. Firefox MV2 (persistent background) is a sanctioned fallback if MV3 event-page issues arise — its persistent background would, if anything, simplify long-fetch resumability.
+- Provide separate browser build targets and packaging outputs.
+- Validate Firefox with real browser testing, not assumed from Chromium behavior. Note that automated end-to-end testing (Playwright) is **Chromium-only**; Firefox validation is therefore manual exploratory testing plus `web-ext`-based smoke checks (§11.5).
+- Target Firefox ≥127, where host permissions are shown in the install prompt and granted at install; on older Firefox, host permissions are opt-in/runtime-granted, so ship a clear first-run prompt guiding the user to enable access on `docs.google.com`. Chrome grants host permissions at install.
 
 ### 9.11 Accessibility
-
-The extension UI must be keyboard navigable.
-
-Playback controls must be reachable and operable without a mouse.
-
-The interface must provide visible focus states.
-
-Timeline controls must have accessible names and state descriptions.
-
-The extension must avoid conveying critical information through color alone.
-
-The replay view should support reduced-motion preferences where possible.
+- Keyboard-navigable UI; playback controls fully operable without a mouse.
+- Visible focus states.
+- Accessible names and state descriptions for timeline controls.
+- Never convey critical information through color alone (author labels pair color with text/pattern).
+- Support reduced-motion preferences in the replay view where possible.
 
 ### 9.12 Internationalization Readiness
-
-The MVP may ship in English only, but user-visible strings should be organized so that localization can be added later.
-
-The reconstruction engine should not assume English-language content.
-
-The UI should handle right-to-left document text gracefully where browser rendering allows.
+- MVP may ship English-only, but user-visible strings are organized for later localization.
+- The reconstruction engine must not assume English-language content.
+- The UI handles right-to-left document text gracefully where browser rendering allows.
 
 ## 10. High-Level Programmatic Design
 
 ### 10.1 System Shape
-
-The extension should be organized as a set of isolated, typed subsystems that communicate through explicit data boundaries.
-
-The content-page integration layer detects the current Google Docs context and provides activation points.
-
-The extension orchestration layer manages user intent, document identity, permission checks, task progress, cancellation, and error states.
-
-The revision retrieval layer fetches revision ranges from Google Docs using the user’s authenticated browser session.
-
-The decoding layer converts raw revision payloads into typed revision events and document operations.
-
-The reconstruction layer applies operations to an internal document model and emits replayable states or state deltas.
-
-The timeline layer groups low-level revisions into user-comprehensible playback events.
-
-The persistence layer manages local IndexedDB caches, schema versions, cache invalidation, and storage limits.
-
-The presentation layer renders the playback interface, controls, timeline, summaries, diagnostics, and settings.
+Isolated, typed subsystems communicating through explicit data boundaries:
+- **Content-page integration** — detects Google Docs context; provides activation points.
+- **Orchestration** — manages user intent, document identity, permission checks, task progress, cancellation, error states.
+- **Revision retrieval** — fetches revision ranges via the user's authenticated session.
+- **Decoding** — converts raw payloads into typed revision events and operations.
+- **Reconstruction** — applies operations to an internal model; emits replayable states or deltas.
+- **Timeline** — groups low-level revisions into user-comprehensible events.
+- **Persistence** — manages IndexedDB caches, schema versions, invalidation, storage limits.
+- **Presentation** — renders playback, controls, timeline, summaries, diagnostics, settings.
 
 ### 10.2 Separation of Concerns
+Google Docs integration knows how to discover context, not how to render UI. Retrieval knows how to request data, not how to reconstruct. The reconstruction engine operates on typed inputs and does not depend on browser-extension APIs. Playback consumes timeline/document-state abstractions, not raw payloads. The storage layer is replaceable with an in-memory implementation in tests.
 
-The Google Docs integration layer should know how to discover document context but should not know how to render replay UI.
+This matters because Google Docs internals are the least stable part of the product; the rest must remain testable and maintainable even when retrieval or decoding needs repair.
 
-The revision retrieval layer should know how to request revision data but should not know how to reconstruct a document.
+### 10.3 Extension Contexts and Primary Surface
+Each context is a WXT entrypoint (the manifest is generated, never hand-written; §11.4):
+- **Content script** — page detection, user-visible activation, safe messaging into the extension environment. Minimizes DOM coupling and never injects large application state into the Google Docs page; any in-page UI mounts in a style-isolated shadow root (§11.2).
+- **Background context** — coordinates privileged operations, typed cross-context messaging, the resumable retrieval task, and lightweight cache-lifecycle work. Treated as ephemeral (§10.9).
+- **Replay page (PRIMARY surface)** — a dedicated extension page opened in its own browser tab, the main application surface for analysis and playback, and the long-lived host for parsing/reconstruction Web Workers.
+- **Options page** — privacy information, cache controls, diagnostic preferences, settings.
 
-The reconstruction engine should operate on typed internal inputs and should not depend on browser extension APIs.
-
-The playback UI should consume timeline and document-state abstractions rather than raw Google Docs payloads.
-
-The storage layer should be replaceable in tests with an in-memory implementation.
-
-This separation is essential because the Google Docs internals are the least stable part of the product. The rest of the application should remain testable and maintainable even when the retrieval or decoding layer needs repair.
-
-### 10.3 Extension Contexts
-
-The content script should be responsible for page detection, user-visible activation, and safe communication with the extension environment.
-
-The background context should coordinate privileged extension operations, cross-context messaging, cache lifecycle tasks, and browser API access.
-
-The replay page should be the primary application surface for analysis and playback. It may open as a dedicated extension page, side panel, or separate tab depending on browser support and product decision.
-
-The options page should provide privacy information, cache controls, diagnostic preferences, and extension settings.
+**Why a dedicated tab over popup / side panel / injected panel:** replay is a rich, sustained experience needing real viewport space; popups are cramped and die on blur; side-panel APIs diverge across Chromium and Firefox and are width-constrained; an injected panel risks style leakage into Google Docs (which §11.3 forbids). A dedicated tab also provides a long-lived context to host Web Workers, which the ephemeral background cannot. A side panel may be added as a Phase 2+ enhancement sharing the same SolidJS app.
 
 ### 10.4 Internal Data Flow
-
-The user activates the extension on a Google Doc.
-
-The extension creates a local replay task for the current document.
-
-The retrieval layer discovers available revision ranges and loads them incrementally.
-
-Raw revision payloads are stored locally with cache metadata.
-
-The decoder converts raw payloads into typed operations.
-
-The reconstruction engine applies operations and produces replay states, snapshots, or state deltas.
-
-The timeline layer derives user-facing events from the operation stream.
-
-The UI renders progress during processing and switches to replay mode when a usable timeline is ready.
-
-The cache records successful processing state for future sessions.
+1. User activates the extension on a Google Doc.
+2. A local replay task is created for the current document.
+3. Retrieval discovers available revision ranges and loads them incrementally.
+4. Raw payloads are stored locally with cache metadata.
+5. The decoder converts raw payloads into typed operations.
+6. The reconstruction engine applies operations and produces states/snapshots/deltas.
+7. The timeline layer derives user-facing events.
+8. The UI renders progress, then switches to replay mode when a usable timeline is ready.
+9. The cache records successful processing state for future sessions.
 
 ### 10.5 Typed Domain Model
-
-The product should define a typed domain model around documents, revision ranges, raw payloads, decoded revisions, document operations, document state, timeline events, playback sessions, cache records, and diagnostic reports.
-
-Document identity should be treated carefully. The document identifier is necessary for cache lookup, but UI and export features should avoid exposing unnecessary metadata.
-
-Revision ranges should represent both requested and received spans so that partial loads can be tracked.
-
-Decoded operations should preserve source order, approximate time, author attribution where available, operation type, affected range, inserted content where relevant, and structural effects where known.
-
-Document state should be represented in a way that supports efficient incremental updates, snapshotting, and replay rendering.
-
-Timeline events should be higher-level interpretations of lower-level operations and must carry confidence or provenance where useful.
+A typed model around documents, revision ranges (requested vs received spans), raw payloads, decoded revisions, document operations, document state, timeline events, playback sessions, cache records, and diagnostic reports. Document identity is handled carefully: the identifier is needed for cache lookup, but UI/export avoid exposing unnecessary metadata. Decoded operations preserve source order, approximate time, author attribution where available, operation type, affected range, inserted content where relevant, and structural effects where known. Document state supports efficient incremental updates, snapshotting, and replay rendering. Timeline events carry confidence/provenance where useful.
 
 ### 10.6 Storage Design
-
-The local database should be organized by document cache records.
-
-Each document cache record should reference raw revision chunks, decoded operation chunks, timeline indexes, reconstruction snapshots, and processing metadata.
-
-The cache schema should be versioned.
-
-Parser version changes should be able to mark old decoded data as stale while retaining raw payloads when safe.
-
-The storage layer should support deleting a single document, deleting all documents, estimating usage, and pruning least-recently-used records if needed.
-
-Sensitive document content must not be written to logs, browser console output, remote endpoints, or error messages.
+The local store is organized by document cache record and held in **IndexedDB via `idb`** — raw revision chunks, decoded operations, reconstruction snapshots, operation/timeline indexes, per-document processing metadata, LRU bookkeeping, and resumable-retrieval checkpoints (object stores with appropriate indexes, e.g. by-updated). The schema is versioned through `idb`'s upgrade path. Parser-version changes mark decoded data stale while retaining raw payloads when safe; if raw was discarded, the record is flagged for re-fetch on next activation. The storage layer supports deleting one document, deleting all, estimating usage, and LRU pruning (raw chunks first, per §9.8), and is replaceable with an in-memory implementation in tests (§10.2). OPFS may later back only the raw-chunk store if profiling shows IndexedDB write throughput is a bottleneck (§9.8). Sensitive content is never written to logs, console, remote endpoints, or error messages.
 
 ### 10.7 Error Model
-
-Errors should be classified by domain rather than exposed as raw exceptions.
-
-Expected error categories include unsupported page, missing document identifier, insufficient document permission, revision endpoint unavailable, unsupported revision format, network failure, quota or storage failure, reconstruction failure, and user cancellation.
-
-Each error should include a user-facing message, a technical category, recoverability status, and suggested next action.
-
-The extension should avoid showing raw response bodies or document fragments in error views.
+Errors are classified by domain, not raw exceptions. Categories: unsupported page, missing document identifier, insufficient document permission, revision endpoint unavailable, unsupported revision format, network failure, quota/storage failure, reconstruction failure, user cancellation. Each carries a user-facing message, a technical category, recoverability status, and a suggested next action. Raw response bodies and document fragments are never shown in error views.
 
 ### 10.8 Diagnostics Model
+Diagnostics are opt-in and local by default, and are **anonymized by construction**:
+- **Default report:** environment metadata only — browser family, extension version, parser version, manifest target, high-level error category, anonymized operation statistics. No document content.
+- **Structural mode** (for parser bugs): operation types, counts, ranges, and structural shape, with all inserted text replaced by length-only tokens (e.g., `insert: 42 chars`).
+- **Full raw export:** requires a separate, explicit user action with a clear warning.
+- Interactive redaction tooling (reviewing/scrubbing specific content before sharing) is deferred beyond MVP.
+- The repo provides guidance for filing useful bug reports without sharing private content.
 
-Diagnostics should be opt-in and local by default.
-
-A diagnostics report should separate environment metadata from document content. Environment metadata may include browser family, extension version, parser version, manifest target, high-level error category, and anonymized operation statistics.
-
-Any diagnostic export that includes raw revision payloads or document text must require explicit user action and clear warning.
-
-The project should provide guidance for filing useful bug reports without sharing private document content.
+### 10.9 Background and Heavy-Work Architecture (cross-browser)
+- The background context is **ephemeral on both browsers**: an MV3 service worker on Chromium, an MV3 event page on Firefox (the Firefox event page retains DOM/WebAPI access; the Chromium service worker does not, and per its lifecycle terminates after roughly 30 seconds of inactivity, with a hard cap around 5 minutes for a single running activity). It holds no authoritative in-memory state; all durable state lives in IndexedDB. All `browser.*` calls sit inside the entrypoint's main callback, never at module top level (WXT imports the file at build time).
+- **Retrieval** runs in the background context, gated on the `*://docs.google.com/*` host permission, using WXT's promise-based `browser`. A credentialed first-party request attaches the user's Docs session cookies in both browsers — a same-site request, not a third-party-cookie scenario, so SameSite, CHIPS, and Firefox Total Cookie Protection do not block it. Because the service worker can be terminated mid-task, retrieval is **chunked and resumable**, checkpointing progress to IndexedDB (via `idb`) so a restarted worker continues rather than restarts. The content script only detects the document and triggers (typed `@webext-core/messaging`); it does not own the fetch. (`declarativeNetRequest` is not needed for authenticated GETs; the multi-account `/u/{N}/` URL prefix must be detected or requests silently fail — Appendix A.5.)
+- **Heavy work** (decoding, reconstruction, timeline derivation) runs in a **Web Worker owned by the long-lived replay page**, never in the ephemeral background. The Worker reads raw chunks and writes decoded results through `idb`, and posts reconstructed states/deltas to the SolidJS UI via messages (using Transferable buffers for zero-copy) to hold main-thread blocking under the §18 budget.
+- Pipeline: content script triggers → background fetches chunks (resumable) → parse Worker decodes against the operation grammar and reconstructs the character array, persisting through `idb` → posts frames to the replay UI, leaving the main thread free for timeline playback.
+- All Google Docs protocol assumptions are isolated in a dedicated module (§19, Appendix A).
 
 ## 11. Technical Stack Requirements
 
 ### 11.1 Language
+All application source in TypeScript under `strict` (with the additional safety flags the guidelines specify, e.g. `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `verbatimModuleSyntax`), and domain-specific types — discriminated unions for message and operation shapes, branded types for opaque identifiers (document id, revision id) — for revision, reconstruction, storage, and playback concepts. TypeScript is a type-checker only here (`noEmit`); WXT/Vite transpiles for the browser and Bun runs scripts directly. JavaScript only where generated by tooling. Conventions follow `.augment/rules/bun-solid-pro.md`.
 
-All application source should be written in TypeScript. JavaScript should be avoided for application logic unless generated by tooling.
-
-The codebase should use strict type checking and domain-specific types for revision, reconstruction, storage, and playback concepts.
+The §11 sections below record stack choices; where any detail here could diverge from `.augment/rules/bun-solid-pro.md`, that document governs.
 
 ### 11.2 UI Framework
+SolidJS for the replay page, options page, and any extension-rendered interactive surfaces, mounted with `render` from `solid-js/web` (never React or `react-dom`). The fine-grained model is load-bearing: components run once and only signal-reading expressions update, so the codebase follows Solid idioms — props accessed reactively (never destructured; `mergeProps`/`splitProps` where needed), derived values via `createMemo` rather than effect-driven state mirroring, and control flow via `<For>`/`<Index>`/`<Show>`/`<Switch>` rather than array `map`/ternaries. Module-scope signals are an idiomatic option for shared state.
 
-The UI should be built with SolidJS.
-
-SolidJS should be used for popup, replay, options, and any extension-rendered interactive surfaces.
-
-Google Docs page integration should minimize direct DOM coupling and should avoid inserting large application state into the Google Docs page.
+In-page UI (the content-script affordance and any injected panels) mounts through WXT's `createShadowRootUi`, which creates a style-isolated shadow root and injects the extension's generated CSS inside it, so styles neither leak into nor inherit from the Google Docs page; page-event leakage is suppressed via the mount's event-isolation option. The replay surface itself is a dedicated extension page (§10.3), not an injected panel.
 
 ### 11.3 Styling
-
-Styling should use UnoCSS with a Tailwind CSS v4-compatible preset.
-
-The design system should define reusable primitives for buttons, panels, timelines, progress states, warnings, and document rendering.
-
-The UI should avoid style leakage into Google Docs and should isolate extension styles where possible.
+UnoCSS with **`presetWind4`** (the current Tailwind-4-compatible preset, per `.augment/rules/bun-solid-pro.md`), wired through the `@wxt-dev/unocss` module and excluded from the background entrypoint (no DOM there); the virtual stylesheet is imported once per UI entrypoint. presetWind4's reset is integrated (no separate reset dependency). The oklch-color-model and `presetLegacyCompat` incompatibility that earlier research raised applies only to migrating an existing legacy-Tailwind project; DocRewind is greenfield, so it does not bind — an early-build watch-item nonetheless verifies `@apply` and color behavior against the actual component set, with no expectation of a blocker. A design system defines reusable primitives (buttons, panels, timelines, progress states, warnings, document rendering). Generated styles are scoped inside the content-script shadow root (§11.2) to avoid leakage into Google Docs.
 
 ### 11.4 Build and Tooling
-
-Bun should be used for package management and local script execution.
-
-Bun may be used for fast unit tests of pure TypeScript modules.
-
-The browser extension build should be handled by extension-oriented tooling that supports Chromium and Firefox outputs.
-
-The build system should support reproducible release artifacts for browser stores and manual installation.
+- **Bun** for package management and script running, with the committed `bun.lock` text lockfile and `--frozen-lockfile` in CI. Bun's server/runtime APIs are irrelevant here (nothing Bun-runtime ships to the browser); its role is install, run scripts, and run pure-logic tests fast.
+- **Extension framework: WXT** — Vite-based, framework-agnostic with a first-class SolidJS template (`@wxt-dev/module-solid`), UnoCSS via `@wxt-dev/unocss`, and WXT typed storage; it generates per-browser manifests from `wxt.config.ts` and the `entrypoints/` convention (no hand-written `manifest.json`), exposes all utilities through the `#imports` virtual module and a polyfill-free `browser`, and handles the Chromium-service-worker vs Firefox-event-page split with HMR. Plasmo (maintenance mode) and CRXJS (build-only/abandonment risk) are rejected.
+- **Lint/format: Biome** — a single tool replacing ESLint+Prettier, run as a combined check (format + lint + import-organize); there is no Biome equivalent of an `eslint-plugin-solid`, so Solid correctness relies on Biome's recommended + type-aware rules plus Solid's compile-time reactivity warnings from `vite-plugin-solid`.
+- **Build verifiability and AMO source review:** pin the toolchain (Bun version, any Node version) and all dependencies via the committed lockfile; publish SHA-256 checksums and build provenance for every release artifact. Firefox AMO requires reviewable source for bundled/minified output — a reviewer rebuilds from submitted source + lockfile and diffs against the artifact, which must match — so the WXT build must be **deterministic from the committed lockfile** (obfuscation prohibited; minification allowed with sources), and the AMO submission documents the exact Bun version (WXT/Vite output under Bun should reproduce deterministically; native-dependency edge cases under Bun are validated as part of release). This makes a deterministic source build a release gate.
 
 ### 11.5 Testing
+- **Pure logic — Bun test runner.** The parser, reconstruction engine, and timeline derivation are pure and DOM-free, so they run under Bun's fast runner: fixture-based parser/reconstruction tests, and deterministic timeline tests for session grouping, large-insertion detection, deletion events, and pause detection.
+- **Components, storage, browser APIs — Vitest.** Solid components, the `idb` storage layer (migrations and cache invalidation), and browser-API behavior run under Vitest with the `WxtVitest` plugin (jsdom, `@solidjs/testing-library`, and the in-memory `fakeBrowser` reset between tests). Solid component tests render a function returning JSX and drive updates via signals, never via re-render. (Bun's runner is not used for these — it does not apply the Solid JSX transform or provide the fake browser.)
+- **End-to-end — Playwright, Chromium-only.** Playwright drives the built extension via a persistent context loading `.output/chrome-mv3`. Extension loading is **Chromium-only**, so E2E coverage is Chromium.
+- **Firefox validation.** Because Playwright cannot load the Firefox build, Firefox is validated by manual exploratory testing and `web-ext`-based smoke checks (load, activate, retrieve, replay) — this is how the §9.10 "validate Firefox for real" requirement is met in the absence of automated Firefox E2E.
+- **Manual exploratory matrix** (both browsers): small / long / collaborative documents, copied-and-pasted content, comments and suggestions, images and tables, and mixed-language / RTL content.
 
-Parser and reconstruction logic should have fixture-based unit tests.
-
-Timeline derivation should have deterministic tests for session grouping, large insertion detection, deletion events, and pause detection.
-
-Storage logic should have migration and cache invalidation tests.
-
-Browser integration should be tested in Chromium and Firefox.
-
-Manual exploratory testing should include small documents, long documents, collaborative documents, copied-and-pasted content, documents with comments or suggestions, documents with images or tables, and documents with mixed languages.
+### 11.6 Licensing and Contribution
+- **License:** AGPL-3.0-or-later for all first-party source. (`-or-later` permits adopting future AGPL versions; switch to `AGPL-3.0-only` if the project prefers to pin the version.) A `LICENSE` file and per-file SPDX headers (`SPDX-License-Identifier: AGPL-3.0-or-later`) are required.
+- **Practical note:** AGPL's §13 network-interaction clause is effectively inert for a local-only extension with no network-accessible service, but AGPL remains a strong-copyleft signal aligned with the project's transparency goals, and is accepted by both the Chrome Web Store and AMO. Forks distributed to users must carry the same license and offer corresponding source.
+- **Dependencies:** must be AGPL-compatible. Audit licenses in CI; reject incompatible (e.g., proprietary or non-redistributable) dependencies. The core stack — WXT, SolidJS, UnoCSS, Bun, Biome, `idb`, `@webext-core/messaging` — is permissively licensed (MIT/Apache-class) and compatible.
+- **Contributions:** Developer Certificate of Origin (DCO) sign-off (`Signed-off-by`) on commits; no CLA and no copyright assignment, keeping the project decentralized and trustworthy.
+- **Prior-art provenance (important for an AGPL project):** the operation grammar may be ported directly from `harvard-vpal/gdocrevisions`, which is **MIT-licensed** (MIT → AGPL incorporation is permitted) — retain the MIT attribution alongside the AGPL header on derived files. Etherpad (Apache-2.0) and operational-transform literature are safe conceptual references. The `jsomers/draftback` repository (no license = all-rights-reserved, and in any case the old Rails/PHP web app, not the current closed-source extension) and the benmarwick gist (no license) are **study-for-facts-only**: confirm protocol facts from them, never reuse their code. Draftback's shipping extension is proprietary and must not be decompiled or copied.
 
 ## 12. Permissions Model
+- Request the narrowest permissions possible.
+- Host permissions limited to the Google Docs origins required for operation; no broad all-sites access.
+- No persistent access to page content until the user activates the extension on a supported document.
+- Plain-language permission explanations so users understand why each permission is needed.
+- Research confirms a minimal viable footprint of a single host permission, `*://docs.google.com/*`, with no broader access required (Appendix A.7). Declare "no remote code" (the extension is fully local) and a single-purpose statement for store review (§21.5).
+- **Fallback:** if either store rejects the standing `*://docs.google.com/*` host permission, fall back to an `activeTab` / optional-permission model granted on the open Docs tab at activation time.
 
-The extension should request the narrowest permissions possible.
+## 13. Privacy & Data Handling Specification (Canonical)
 
-Host permissions should be limited to Google Docs origins required for operation.
+This section is the single source of truth for privacy guarantees. Other sections reference it rather than restating it.
 
-The extension should avoid broad access to all websites.
-
-The extension should avoid persistent access to page content until the user activates the extension on a supported document.
-
-The extension permission explanation should be written in plain language.
-
-The product should be designed so that users can understand why each permission is needed.
-
-## 13. Security and Privacy Requirements
-
-The extension must operate without a remote backend.
-
-The extension must not include third-party analytics or tracking dependencies.
-
-The extension must not transmit document content to the extension authors, maintainers, or any analytics provider.
-
-The extension must use browser-local persistence only.
-
-The extension should minimize the lifetime of sensitive data in memory where practical.
-
-The extension should sanitize any UI display of data derived from document content.
-
-The extension must not use remote code execution or remotely hosted application scripts.
-
-The extension should follow browser extension store policies for content security and remote code restrictions.
-
-The repository should include a clear privacy policy, security policy, and threat model.
+1. The extension operates without a remote backend.
+2. It does not transmit document content, revision data, metadata, derived signals, or usage behavior to the authors, maintainers, or any analytics/third-party provider. The only network requests are to Google Docs origins, using the user's existing session, for the current document.
+3. It includes no analytics, crash reporting, third-party tracking, or remote feature flags.
+4. It requires no account creation.
+5. It uses browser-local persistence only (IndexedDB for document-derived data; extension local storage for lightweight settings).
+6. It minimizes the lifetime of sensitive data in memory where practical.
+7. It sanitizes any UI display of data derived from document content and never renders raw response bodies or document fragments in errors.
+8. It uses no remote code execution or remotely hosted application scripts, complying with browser-store content-security and remote-code policies.
+9. It does not request host permissions beyond what Google Docs operation requires.
+10. The repository includes a clear privacy policy, security policy, and threat model; the UI surfaces a plain-language privacy summary.
 
 ## 14. Threat Model
-
-The main assets are document content, revision history, document metadata, author information, and derived writing-process signals.
-
-The main privacy risk is accidental leakage through telemetry, logs, diagnostics, exports, browser sync, overly broad permissions, or third-party libraries.
-
-The main technical risk is misinterpreting undocumented Google Docs revision data.
-
-The main user-risk scenario is a reader overinterpreting replay data as proof of misconduct or authorship. The UI must avoid making unsupported conclusions.
-
-The main maintenance risk is Google changing revision internals in a way that breaks retrieval or decoding.
+- **Assets:** document content, revision history, document metadata, author information, derived writing-process signals.
+- **Primary privacy risk:** accidental leakage via telemetry, logs, diagnostics, exports, browser sync, overly broad permissions, or third-party libraries. Mitigated by §13, the anonymized diagnostics model (§10.8), and dependency auditing (§11.6).
+- **Primary technical risk:** misinterpreting undocumented Google Docs revision data. Mitigated by isolation (§19), fixture tests (§11.5), and conservative fidelity claims (§15.3).
+- **Primary user risk:** a reader overinterpreting replay as proof of misconduct or authorship. Mitigated by positioning (§7), uncertainty disclosure (§9.5, §9.7), and disclaimers (§21).
+- **Primary maintenance risk:** Google changing revision internals, breaking retrieval/decoding. Mitigated by isolation and fixture-driven regression detection.
+- **Note on browser sync:** settings stored in extension storage must use non-synced (`storage.local`) storage to avoid leaking preferences or document identifiers through browser account sync.
 
 ## 15. MVP Scope
 
 ### 15.1 Included in MVP
-
-Support current Google Docs documents opened in the browser.
-
-Manual user activation per document.
-
-Local revision retrieval and parsing.
-
-Basic document reconstruction.
-
-Interactive replay with play, pause, scrubber, and speed control.
-
-Basic activity timeline.
-
-Local cache using IndexedDB.
-
-Cache clearing controls.
-
-Chrome-compatible browser build.
-
-Firefox build or Firefox beta support.
-
-Privacy documentation.
-
-Open-source repository with build instructions.
+- Support for current Google Docs documents opened in the browser.
+- Manual per-document activation.
+- Local revision retrieval and parsing.
+- Basic document reconstruction (fidelity bar §15.3).
+- Interactive replay: play, pause, scrubber, speed control.
+- Basic activity timeline.
+- Local IndexedDB cache with clearing controls.
+- Chromium-compatible build and Firefox build (first-class, validated before public release).
+- Privacy documentation and AGPL-licensed open-source repository with build instructions.
 
 ### 15.2 Deferred Beyond MVP
+Video export; PDF report generation; multi-document comparison; Google Slides/Sheets support; advanced collaborative attribution views; institutional deployment controls; cloud sync; remote diagnostics; AI-generation detection claims; automated grading/scoring; interactive diagnostic redaction tooling; side-panel surface; full rendering of images/tables/footnotes/comments and list formatting (text content and suggestions are in MVP scope per §15.3).
 
-Video export.
-
-PDF report generation.
-
-Multi-document comparison.
-
-Google Slides support.
-
-Google Sheets support.
-
-Advanced collaborative attribution views.
-
-Institutional deployment controls.
-
-Cloud sync.
-
-Remote diagnostics.
-
-AI-generation detection claims.
-
-Automated grading or scoring.
+### 15.3 MVP Reconstruction Fidelity Bar
+- **MUST:** plain-text insertions, deletions, their ordering and timestamps, and paragraph structure. Playing to the end of the timeline must reproduce text equal to the document's current text (text-level equality, ignoring rich formatting) for the simple fixture corpus.
+- **SHOULD (best-effort, non-blocking):** basic styling (bold/italic); list *text* content (which lives in the character stream) reconstructed as paragraphs even where list *formatting* is approximated; and suggestions/tracked changes, which are inline operations (`iss`/`dss`/`msfd`/`usfd`) shown distinctly from accepted text.
+- **OUT OF SCOPE for fidelity (degrade to placeholders / annotations):** images, tables, footnotes, equations, drawings, and list formatting (all outside the plain character stream), plus comments (out-of-band). These render as labeled placeholders or timeline annotations and must never abort reconstruction.
 
 ## 16. Release Phases
 
-### Phase 0: Research Prototype
-
-Validate current Google Docs revision retrieval behavior.
-
-Build a minimal parser for a limited set of revision operations.
-
-Confirm whether replay can be reconstructed for simple documents.
-
-Create sanitized fixtures for testing.
-
-Identify major unsupported operation categories.
+### Phase 0: Live Capture Prototype (gating)
+Desk research across two rounds is complete (Conditional-Go; the operation grammar is source-confirmed in Appendix A.2). Phase 0 narrows to the transport-layer residue that only a live capture can settle. Run an authenticated network capture in current Chrome and Firefox against three documents: (a) a small text doc, (b) a doc containing images, tables, footnotes, equations, and lists, and (c) a multi-account (`/u/1/`) session. Record: response framing (is the `)]}'` prefix present; JSON vs a `batchexecute`-style wrapper), the operation codes actually present, any required headers/XSRF/page token for the *read*, the revision-count discovery mechanism and its location, per-call chunk size/latency and any soft rate limits, and how non-text structures appear (inline vs out-of-band). Also confirm a credentialed first-party fetch succeeds from an MV3 service worker and from a Firefox event page, and exercise Chromium service-worker termination during a long chunked fetch (resumability). Build a minimal parser for the confirmed operations and create sanitized fixtures. **Go/no-go:** Phase 1 does not begin until retrieval + decoding of a simple document is confirmed live in both browsers, and is re-triggered if any stop condition in §24 appears.
 
 ### Phase 1: Local Replay MVP
-
-Build the extension shell, document detection, user activation flow, revision retrieval, local cache, parser, reconstruction engine, and basic replay UI.
-
-Focus on single-author and simple multi-author text documents.
-
-Provide clear failure messages for unsupported documents.
+Build the extension shell, document detection, user activation, revision retrieval, local cache, parser, reconstruction engine, and basic replay UI. Focus on single-author and simple multi-author text documents. Provide clear failure messages for unsupported documents.
 
 ### Phase 2: Robustness and Firefox Parity
-
-Improve parser coverage.
-
-Add Firefox validation.
-
-Improve storage migration and cache management.
-
-Add diagnostics export controls.
-
-Test larger and more complex documents.
+Improve parser coverage. Add full Firefox validation — manual exploratory plus `web-ext`-based smoke checks, since Playwright E2E is Chromium-only (§11.5). Confirm the Firefox MV3 event-page background and host-permission first-run UX on a real build (falling back to Firefox MV2 only if MV3 event-page issues arise, §9.10). Improve storage migration and cache management. Add diagnostics export controls (anonymized/structural modes). Test larger and more complex documents.
 
 ### Phase 3: Process Insights
-
-Add writing session summaries, large paste indicators, deletion summaries, pause visualization, and timeline clustering.
-
-Keep insights descriptive and avoid unsupported judgments.
+Add writing-session summaries, large-paste indicators, deletion summaries, pause visualization, and timeline clustering. Keep insights descriptive; avoid unsupported judgments.
 
 ### Phase 4: Distribution Readiness
+Prepare a deterministic `bun run build` with committed lockfile and an AMO source-submission README *before* first submission. Submit to AMO (source review is the long pole — automated review can be minutes, human review of a build-tooled extension days to weeks) and the Chrome Web Store in parallel; on CWS, file the single-purpose statement, the "no remote code" declaration, and the `docs.google.com` host-permission justification emphasizing local-only processing. Finalize privacy policy, security policy, contributor documentation (DCO), and release process; publish verifiable release artifacts with checksums and provenance. Complete legal/ToS review (§21.5) before public launch. If either store rejects on host-permission grounds, switch to the `activeTab`/optional-permission fallback (§12).
 
-Prepare browser store submissions.
-
-Finalize privacy policy, security policy, contributor documentation, and release process.
-
-Publish reproducible release artifacts.
-
-## 17. Success Metrics
-
-The extension successfully reconstructs and replays a representative set of simple Google Docs.
-
-The extension supports both Chromium and Firefox builds from one codebase.
-
-The extension stores all document data locally and makes no non-Google network requests for document processing.
-
-The extension provides understandable failure messages when reconstruction is not possible.
-
-The parser and reconstruction engine have high unit-test coverage over available fixtures.
-
-Users can clear cached data easily.
-
-Open-source contributors can reproduce builds and run tests with documented steps.
+## 17. Success Metrics (quantified MVP targets, subject to Phase 0 validation)
+- **Fidelity/coverage:** end-to-end reconstruction with end-of-replay text equal to current text for ≥90% of a curated "simple" fixture corpus (single- and simple multi-author, text-focused).
+- **Cold load:** a ~10,000-word, ~500-revision document reaches interactive replay in ≤60s on a mid-range laptop.
+- **Warm load:** cached reload reaches interactive replay in ≤5s.
+- **Responsiveness:** no main-thread block >100ms during parsing or replay (heavy work in Web Workers).
+- **Memory:** peak heap for the reference document stays within a defined budget (target ~512MB) or degrades gracefully with explicit messaging.
+- **Network isolation:** zero non-Google network requests during document processing, verified by a network audit in CI and manual testing.
+- **Test coverage:** ≥85% line coverage on parser/reconstruction modules exercised by fixtures.
+- **Cross-browser:** Chromium and Firefox builds produced from one codebase, both passing integration tests.
+- **Usability:** users can clear cached data in ≤2 interactions; contributors can reproduce a build and run tests from documented steps on a clean machine.
 
 ## 18. Performance Requirements
-
-The extension should show immediate feedback after user activation.
-
-Revision loading should stream progress rather than blocking silently.
-
-Parsing and reconstruction should avoid freezing the UI.
-
-Large documents should be processed in chunks.
-
-The replay interface should remain responsive during timeline navigation.
-
-Cache reuse should make repeated replay significantly faster than first-time loading.
-
-The extension should provide cancellation for long-running processing.
-
-The extension should gracefully handle storage quota limitations.
+- Immediate feedback after user activation.
+- Streamed loading progress, never silent blocking.
+- Parsing/reconstruction never freeze the UI (Web Workers, §10.9).
+- Large documents processed in chunks.
+- Replay stays responsive during timeline navigation.
+- Cache reuse makes repeated replay significantly faster than first load (§17 warm-load target).
+- Cancellation available for long-running processing.
+- Graceful handling of storage-quota limits.
 
 ## 19. Compatibility Requirements
-
-The extension should support current stable Chrome-compatible browsers and current stable Firefox.
-
-The extension should be resilient to common Google Docs UI changes by minimizing dependence on page DOM structure.
-
-The extension should isolate Google Docs protocol assumptions in dedicated modules.
-
-The extension should use feature detection where possible rather than hardcoded browser assumptions.
+- Support current stable Chromium-compatible browsers and current stable Firefox.
+- Resilient to common Google Docs UI changes by minimizing dependence on page DOM structure.
+- Isolate all Google Docs protocol assumptions (endpoint URLs, request/auth shape, response framing, operation schema; Appendix A) in a single dedicated module — the one place to repair when Google changes internals.
+- Use feature detection rather than hardcoded browser assumptions.
 
 ## 20. UX Principles
-
-The product should feel calm, transparent, and trustworthy.
-
-The extension should never surprise users by loading or storing document history without activation.
-
-The UI should communicate uncertainty and limitations clearly.
-
-The product should prioritize “show what changed” over “judge what happened.”
-
-The extension should make privacy controls easy to find.
-
-The replay experience should be understandable to non-technical users.
+- Calm, transparent, trustworthy.
+- Never load or store document history without explicit activation.
+- Communicate uncertainty and limitations clearly.
+- Prioritize "show what changed" over "judge what happened."
+- Make privacy controls easy to find.
+- Keep the replay experience understandable to non-technical users.
 
 ## 21. Legal and Ethical Considerations
 
-The extension must respect user permissions and must not attempt to access documents beyond the current browser session’s authorization.
+### 21.1
+Respect user permissions; never attempt to access documents beyond the current session's authorization.
 
-The extension should include disclaimers that replay data is reconstructed from available revision information and may be incomplete or affected by Google Docs behavior.
+### 21.2
+Include disclaimers that replay is reconstructed from available revision information and may be incomplete or affected by Google Docs behavior.
 
-The extension should discourage use as a sole basis for disciplinary or high-stakes decisions.
+### 21.3
+Discourage use as the sole basis for disciplinary or high-stakes decisions.
 
-The project should avoid implying affiliation with Google or Draftback.
+### 21.4
+Avoid implying affiliation with Google or Draftback; the name avoids trademark confusion (§26).
 
-The project name should avoid trademark confusion.
+### 21.5 Terms-of-Service Position (expanded)
+Authorization and Terms of Service are distinct concerns. DocRewind only accesses revision data the authenticated user is already entitled to view, using their own session, with no credential sharing and no access to other users' private data. **However**, programmatic use of Google Docs' internal, undocumented revision endpoints may be in tension with Google's Terms of Service even when the user is fully authorized to read the document. This is treated as a known, unresolved risk, not a solved problem.
+
+Mitigations:
+- User-initiated only; no automatic or background scraping.
+- Minimal, rate-limited requests scoped to the current document and only the needed revision ranges.
+- No circumvention of access controls or authentication.
+- Clear disclaimers and no affiliation claims.
+
+Distribution fallback if a store rejects the extension on these grounds:
+- Distribute via self-hosted signed releases plus Firefox AMO (historically more permissive about source review), in addition to or instead of the Chrome Web Store.
+- Document the risk openly in the repository.
+
+Enforcement posture (from Phase 0 research): Google's Terms broadly prohibit accessing services "through the use of any automated means," which a programmatic call to an internal endpoint plausibly implicates even for an authorized user on their own document. Recent enforcement — for example Google's December 2025 DMCA suit against a search-results scraping service — has targeted large-scale scraping of public data for resale, not single-user first-party self-access. The realistic risk to a privacy-preserving, user-initiated, local extension is therefore primarily **extension-store policy review** rather than litigation; Draftback's continued store listing (a Docs-internals reader with hundreds of thousands of users) is a non-guaranteeing data point that the category is tolerated, though commentary that it "doesn't follow best practices" signals the policy posture could tighten. The mitigations above are designed to keep DocRewind firmly on the self-access side of that line.
+
+Store-review specifics: the Chrome Web Store applies a single-purpose policy (DocRewind's purpose — "replay your Google Doc's writing history locally" — is narrow and clear), a minimum-permissions expectation (request only `*://docs.google.com/*`, never `<all_urls>`), and an MV3 remote-code ban (DocRewind is fully local and declares no remote code). Firefox AMO requires reviewable source for bundled output (§11.4). No clear store rejection-with-reasons for a revision-reader was found in research, so actual approval is itself a Phase 4 unknown to be confirmed by submission, with the `activeTab`/optional-permission model (§12) as the fallback.
+
+Official-API note: research confirms Google's Drive/Docs APIs expose only coarse, merged "named" revisions — the list may be incomplete for frequently edited Docs and revision content cannot be downloaded via the API — so no sanctioned path provides the keystroke-level data this product requires (Appendix A.6). **This PRD does not constitute legal advice; obtain project legal review before public launch.**
 
 ## 22. Key Risks
-
-Google Docs may change revision endpoints, payload structures, or access requirements.
-
-Some document structures may be difficult or impossible to reconstruct accurately.
-
-Large documents may exceed practical local processing or storage limits.
-
-Firefox and Chromium extension behavior may diverge in ways that require target-specific workarounds.
-
-Users may overinterpret process signals as proof of authorship or misconduct.
-
-Browser extension stores may scrutinize permissions related to Google Docs access.
+- Google may change revision endpoints, payload structures, or access requirements.
+- Some document structures may be difficult or impossible to reconstruct accurately.
+- Large documents may exceed practical local processing or storage limits.
+- Firefox/Chromium divergence may require target-specific workarounds, and automated E2E (Playwright) is Chromium-only; mitigated by WXT's per-browser manifest generation and polyfill-free `browser`, plus dedicated manual / `web-ext` Firefox validation (§9.10, §11.5).
+- Users may overinterpret process signals as proof of authorship or misconduct.
+- Browser stores may scrutinize Google Docs access permissions and undocumented-endpoint use (ToS, §21.5).
 
 ## 23. Risk Mitigations
+- Isolate and well-test Google Docs protocol assumptions (§19).
+- Fixture-based parser tests to detect regressions (§11.5).
+- Clear unsupported-format errors (§10.7).
+- Chunked processing and cache versioning (§9.8, §10.6).
+- Narrow permissions (§12).
+- Clear privacy policy and threat model (§13, §14).
+- Conservative product language around insights (§7, §9.7).
+- Browser-specific test coverage (§11.5, §9.10).
+- Adaptive chunk sizing and backoff; treat HTTP 500 as "range too high" (also the range-discovery signal); handle the `/u/{N}/d/` multi-account URL variant (Appendix A.4, A.5, A.9).
+- Schema-version detection so a Google-side format change degrades gracefully instead of silently corrupting playback.
+- Hard stop-and-re-evaluate triggers (mirrored in §24): the endpoint returns protobuf instead of JSON, a new mandatory page-derived token appears, or Google publishes guidance restricting the editor endpoints.
 
-Keep Google Docs protocol assumptions isolated and well-tested.
+## 24. Phase 0 Research Outcome & Remaining Live Capture
+Two research rounds returned a **Conditional-Go**. Round 1 established feasibility with a current existence proof (a maintained MV3 Draftback build). Round 2 pinned the **operation grammar from open MIT source** (`harvard-vpal/gdocrevisions`, corroborated by the 2014 teardown) — see Appendix A.2 — and confirmed that no sanctioned Google API can reconstruct keystroke-level history. What everything DocRewind needs to *grammar-decode* is now known; everything it needs to *fetch correctly in 2026* is **transport-layer and unconfirmable from public sources**.
 
-Use fixture-based parser tests to detect regressions.
+The following residue must be confirmed by live network capture in current Chromium and Firefox before Phase 1 (the gating work of Phase 0, §16). Do not hard-code the parser to assumptions about framing, headers, or discovery until these pass:
 
-Provide clear unsupported-format errors.
+1. Exact 2026 JSON shape of `revisions/load`, and whether the `)]}'` prefix is still present.
+2. Whether `revisions/load` still uses the legacy endpoint or a `batchexecute`/`rpcids` wrapper.
+3. Whether any custom header (e.g., `X-Same-Domain`) is required for the read.
+4. Whether any XSRF/`at` token is required for *reads* (it is classically a write-path requirement), and its bootstrap origin if so.
+5. The precise current-revision-count discovery mechanism (binary-search-on-HTTP-500 vs. a metadata field / changelog / tile endpoint) and its location.
+6. Sane chunk sizes and any soft rate limits on the endpoint.
+7. How images/tables/footnotes/equations/drawings/lists actually appear (inline ops vs out-of-band) in a live capture; confirm suggestions are the inline `iss`/`dss`/`msfd`/`usfd` ops.
+8. Multi-account `/u/{N}/` URL handling on a real multi-login session.
+9. Chromium service-worker termination behavior during long chunked fetches (resumability test).
+10. Credentialed first-party fetch success from an MV3 service worker and a Firefox event page.
+11. Actual CWS and AMO review outcomes for a `docs.google.com` revision-reading MV3 extension (Phase 4).
+12. WXT Firefox MV3 event-page + host-permission first-run UX, and `presetWind4` behavior against the real component set (engineering confirmations, lower-stakes).
 
-Use chunked processing and local cache versioning.
-
-Avoid broad permissions.
-
-Publish a clear privacy policy and threat model.
-
-Use conservative product language around process insights.
-
-Maintain browser-specific test coverage.
-
-## 24. Open Questions
-
-Which extension surface should be primary: popup, side panel, separate replay tab, or injected panel?
-
-How much of the raw revision payload should be cached versus discarded after parsing?
-
-What is the minimum acceptable reconstruction fidelity for MVP?
-
-How should collaborative author information be displayed, if available?
-
-Should diagnostic reports include optional redaction tooling?
-
-How should the extension handle suggested edits, comments, images, tables, footnotes, and other non-textual document structures?
-
-What project name avoids confusion with Draftback while clearly communicating revision replay?
+**Stop and re-evaluate the whole approach if** the endpoint returns protobuf instead of JSON or moves behind a `batchexecute` wrapper, a new mandatory page-derived token appears for reads, or Google publishes guidance specifically restricting the editor endpoints.
 
 ## 25. Recommended MVP Definition
+A local-only browser extension that activates on an open Google Doc, loads available revision data after explicit user action, reconstructs text-focused document history (fidelity bar §15.3), and presents an interactive replay timeline. It supports Chromium-compatible browsers first and Firefox as a first-class target before public release. It makes no authorship judgments, no AI-detection claims, and no high-fidelity rendering of every Google Docs feature. Its value is transparent, local replay of the writing process with clear privacy guarantees and honest limitations.
 
-The recommended MVP is a local-only browser extension that activates on an open Google Doc, loads available revision data after explicit user action, reconstructs text-focused document history, and presents an interactive replay timeline. It should support Chrome-compatible browsers first and Firefox as a first-class target before public release.
+## 26. Product Name
+**DocRewind** — subtitle "Local revision replay for Google Docs." Repository and package slug: `docrewind`.
 
-The MVP should not attempt to provide authorship judgments, AI detection, or high-fidelity rendering of every Google Docs feature. Its value should come from transparent, local replay of the writing process with clear privacy guarantees and honest limitations.
+The name is literal and immediately legible to the target audience (teachers, researchers, students, editors): it says what the product does — rewind a document's history. It avoids the "Draft-" stem, keeping clear distance from "Draftback," and contains no Google or Docs trademark in the core mark; "for Google Docs" is used only descriptively (nominative use). Tradeoff: "rewind" is a common term, so a trademark/availability search and a domain/handle check should be completed before the name is locked, to rule out collisions in adjacent classes. (The brand is written DocRewind; the lowercase `docrewind` is reserved for technical identifiers — repo, package, extension slug.)
 
-## 26. Product Name Placeholder
+---
 
-Working name: Local Draft Replay
+## Appendix A — Google Docs Revision Protocol (isolated assumptions, as of Phase 0 research, June 2026)
 
-The final name should emphasize privacy, locality, and document history without implying affiliation with Draftback or Google.
+This appendix is the canonical reference for the volatile, undocumented Google Docs behavior the product depends on. All of it must live behind the single protocol module (§19). Every item is labeled with confidence; items marked **provisional** are pending the live validation in §24. This is reverse-engineered, undocumented behavior that Google may change without notice.
 
+**A.1 Primary changelog endpoint.** `GET https://docs.google.com/document/d/{docId}/revisions/load?id={docId}&start={startRev}&end={endRev}`, returning a `)]}'`-guarded JSON changelog of fine-grained mutation operations. This is the source for keystroke-level replay. A separate `showrevision` endpoint returns a *rendered* single-revision snapshot (what File → Version history calls) and is **not** the replay source. *[Endpoint shape confirmed 2014–2018; consistent with a working 2026 MV3 build — treat as Likely-current, confirm live.]*
+
+**A.2 Operation vocabulary (source-confirmed grammar).** The document is modeled as a flat character array; each changelog entry carries a type discriminator `ty`. The following grammar is **confirmed from open MIT source** (`harvard-vpal/gdocrevisions`, last release 2018) and matches the 2014 teardown — two independent open sources agree:
+- `is` — InsertString: `s` (string), `ibi` (insert-begin-index, 1-indexed). Splices characters at `ibi-1`.
+- `ds` — DeleteString: `si` (start index), `ei` (end index), 1-indexed inclusive. Pops the range.
+- `mlti` — MultiOperation (compound): `mts` (array of sub-operations); recurse depth-first.
+- `iss` — InsertStringSuggestion (suggestion form of insert).
+- `dss` — DeleteStringSuggestion (suggestion delete, range).
+- `msfd` — MarkStringForDeletion (suggestion; range).
+- `usfd` — UnmarkStringForDeletion (range).
+
+Attribution/timing: each revision carries `user_id`, `session_id`, `revision_id`, and `time`; each character carries its insert/delete revision and a suggestion flag. An `EndOfBody` sentinel separates body text from footnote text. Style-apply (formatting over a character range) exists but is secondary for text replay. *[Grammar Confirmed-from-source (MIT, 2018) + corroborated by 2014 teardown. Caveat: both sources predate 2026; that the live wire format still matches is **provisional** until §24 capture. Do not assume the codes are current without confirming.]*
+
+**A.3 Response framing.** Strip Google's standard `)]}'` anti-JSON-hijacking prefix line before `JSON.parse`. The payload is JSON (text), not protobuf, per available evidence; a migration to protobuf is a defined stop condition (§24). *[Guard string confirmed as standard Google behavior; current framing for this endpoint provisional.]*
+
+**A.4 Revision-range discovery.** There is no "all revisions" call and `start=1&end=-1` is rejected; a real upper bound is required. The documented method (2014) finds the maximum revision number by binary search (HTTP 500 ⇒ range too high, HTTP 200 ⇒ in range). Draftback issue history indicates a "Changelog and RevisionCount" endpoint also exists; a direct revision-count metadata field/endpoint likely exists today but its exact name/location is unconfirmed. Somers' examples used ~10 revisions per call; sane chunk sizes and any soft limits are unpublished. *[Binary-search Confirmed-historical 2014; count-endpoint location and chunk sizing provisional — confirm live (§24).]*
+
+**A.5 Known breakage modes.** Multi-account sessions rewrite the path to `https://docs.google.com/u/{N}/document/d/...`; hardcoded single-account paths break (the documented 2017 third-party-tool failure). The protocol module must handle the `/u/{N}/` variant. *[Confirmed-historical 2017.]*
+
+**A.6 No sanctioned alternative.** The Drive `revisions` resource and the Docs API expose only coarse, merged "named" revisions; the list may be incomplete for frequently edited Docs, and Docs revision content cannot be downloaded via the API. The Drive Activity API gives change events, not the operation stream. The internal endpoint is the only source for replay. *[Confirmed-current against Google docs, ~May 2026.]*
+
+**A.7 Auth & permissions.** Authentication is the user's existing first-party `docs.google.com` session cookies — no OAuth, no API key. Evidence (a 2024 capture of the sibling `showrevision` endpoint working logged-in without `token`/`ouid`) suggests reads need only the session cookie, and that the `at`/XSRF token is classically a *write*-path requirement; whether `revisions/load` requires any header/token for the read today is **provisional** (§24). A credentialed `fetch(..., {credentials:'include'})` from the background context attaches these cookies given the `*://docs.google.com/*` host permission, in both Chromium and Firefox (mechanics: §10.9). Minimal host permission: `*://docs.google.com/*`, with no broader access. *[Cookie-only-read Likely-current; token requirement provisional; permission footprint Confirmed-current against the live Draftback manifest.]*
+
+**A.8 Non-text structures.** The model is fundamentally a character stream. Suggestions/tracked changes **are** inline operations (`iss`/`dss`/`msfd`/`usfd`) and are reconstructable. Comments are out-of-band (separate Docs comments store). Images, tables, footnotes, equations, drawings, and list *formatting* ride as styled/embedded objects outside the plain character stream (the open reference decoder renders characters only and does not decode them). DocRewind reconstructs text + suggestions and placeholders the rest (§15.3). *[Suggestion ops Confirmed-from-source; exact embedded-object encoding provisional — confirm from a live capture of a doc containing these structures (§24).]*
+
+**A.9 Rate limiting.** No public evidence of captcha or hard anti-automation friction on `revisions/load` for normal interactive use; aggressive large-range scraping risks HTTP 500s and undocumented soft limits. Use adaptive chunk sizing and backoff. *[Likely-current.]*
+
+**A.10 Currency note.** The operation grammar (A.2, A.8) is now confirmed from open MIT source; the **transport layer** (framing A.3, headers/token A.7, discovery A.4, rate limits A.9) is not, and both the grammar and transport predate 2026. Do not treat any framing detail, header requirement, discovery method, or even the operation codes as live-settled until the §24 capture passes in current Chromium and Firefox. Update this appendix from the live captures; it is the contract the protocol module (§19) implements against.
 
