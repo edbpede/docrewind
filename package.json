@@ -13,7 +13,7 @@
     "compile": "tsc --noEmit",
     "test": "vitest",
     "test:run": "vitest run",
-    "test:logic": "bun test ./lib/decoder ./lib/reconstruction ./lib/timeline ./lib/domain",
+    "test:logic": "bun test ./lib/decoder ./lib/reconstruction ./lib/timeline ./lib/domain ./lib/protocol",
     "test:e2e": "playwright test",
     "check": "biome check --write .",
     "hooks": "prek run --all-files",
