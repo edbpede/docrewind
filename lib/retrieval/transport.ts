@@ -3,8 +3,8 @@
 // Chunk-transport seam (plan §1.4, §0 / PRD §10.9). The orchestrator depends ONLY
 // on the `ChunkFetcher` interface — never on a concrete network call. This module
 // is PURE: it defines the interface and a `GatedChunkFetcher` that performs NO
-// I/O (no `fetch`, no `browser.*`) and returns the gated `endpoint-unavailable`
-// error. The single LIVE network adapter is constructed in
+// network I/O and no extension-API access, returning the gated
+// `endpoint-unavailable` error. The single LIVE network adapter is constructed in
 // `entrypoints/background.ts` (the one `// BLOCKED §24` activation site) and
 // swapped in once the §24 capture lands — a localized change, no edit here.
 

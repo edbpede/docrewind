@@ -4,7 +4,7 @@
 // classification of every way retrieval can fail. Errors carry ONLY a category,
 // a user-facing message, a recoverability flag, and a suggested action — NEVER a
 // raw response body or any document fragment (PRD §13.7). This module is pure:
-// no fetch / Worker / globalThis / browser / #imports / wxt.
+// no network I/O, no Web Worker, and no extension-API access (purity-guarded).
 
 /** The closed set of retrieval failure categories (PRD §10.7). */
 export type RetrievalErrorCategory =

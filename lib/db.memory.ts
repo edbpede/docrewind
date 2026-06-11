@@ -80,20 +80,9 @@ export interface MemoryStoreOptions {
 export function createMemoryStore(options: MemoryStoreOptions = {}): RevisionStore {
   const parserVersion = options.parserVersion ?? PARSER_VERSION;
   const backend = options.backend ?? createMemoryBackend();
-  let persistRequested = false;
 
-  async function ensurePersisted(): Promise<void> {
-    if (persistRequested) return;
-    persistRequested = true;
-    try {
-      if (typeof navigator !== "undefined" && navigator.storage?.persist) {
-        await navigator.storage.persist();
-      }
-    } catch {
-      // advisory
-    }
-  }
-
+  // An in-memory store is ephemeral, so there is nothing to persist; only
+  // `estimateUsage` is mirrored from the idb backend (the LRU path reads it).
   async function estimateUsage(): Promise<UsageEstimate> {
     try {
       if (typeof navigator !== "undefined" && navigator.storage?.estimate) {
@@ -107,7 +96,6 @@ export function createMemoryStore(options: MemoryStoreOptions = {}): RevisionSto
   }
 
   async function saveRawChunk(chunk: RawPayload): Promise<void> {
-    await ensurePersisted();
     const docKey = chunk.docId;
     const perDoc = backend.rawChunks.get(docKey) ?? new Map<string, RawPayload>();
     perDoc.set(rangeKey(chunk.range.received.start, chunk.range.received.end), chunk);
