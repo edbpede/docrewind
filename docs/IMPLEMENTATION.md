@@ -12,9 +12,10 @@ This plan **follows `.augment/rules/bun-solid-pro.md`** as the authoritative sou
 
 **UI/UX work — load the `frontend-design` skill.** Before doing any visual or interface work (building the replay page, options page, content-script affordance, the UnoCSS design system, or any later UI changes), the implementing agent **must load and use the `frontend-design` skill** to drive aesthetic direction, palette, typography, and layout. This applies to every UI/UX touchpoint in this plan — primarily Phase 5, and the in-page affordance in Phase 4. The skill governs *visual design intent*; the SolidJS/UnoCSS idioms and accessibility requirements below still govern *implementation*.
 
-**Repository facts established at planning time** (verify before acting — see Phase 1):
-- Tracked files: `.augment/rules/bun-solid-pro.md`, `.gitignore`, `LICENSE` (AGPL-3.0), `docs/docrewind-prd.md`. No `package.json`, no `wxt.config.ts`, no `CONTRIBUTING.md` yet — this is greenfield scaffolding.
-- Current branch: `main`. License: AGPL-3.0-or-later (DCO sign-off, no CLA).
+**Repository facts established at planning time** (audited in Phase 1 — see `docs/STACK.md` "Audit snapshot"):
+- Tracked files (`git ls-files` at Phase 1 audit time, **7** total): `.augment/rules/bun-solid-pro.md`, `.gitignore`, `CONTRIBUTING.md`, `LICENSE` (AGPL-3.0-or-later), `docs/IMPLEMENTATION.md`, `docs/docrewind-prd.md`, `prek.toml`. No `package.json`, `wxt.config.ts`, or `node_modules` exist yet — all tooling is deferred to Phase 2. (This Phase 1 commit then adds `docs/STACK.md` and `docs/CONSTRAINTS.md`.)
+- Phase 0 (`prek` hooks) is complete and merged (PR #1, `0b2dc37`): `prek.toml` and `CONTRIBUTING.md` are tracked, and `main` is hook-protected (`no-commit-to-branch`), so work proceeds on a feature branch. License: AGPL-3.0-or-later (DCO `Signed-off-by`, no CLA).
+- Phase 1 derived docs: `docs/STACK.md` (thin version-reference + audit snapshot) and `docs/CONSTRAINTS.md` (linear PRD-invariant checklist).
 
 ---
 
@@ -24,11 +25,11 @@ This plan **follows `.augment/rules/bun-solid-pro.md`** as the authoritative sou
 
 ### Tasks
 
-- [ ] Create the root-level `prek.toml` with the required builtin, conventional-commit, and gitleaks repos **exactly in substance**:
-  - [ ] Add the `repo = "builtin"` block with: `trailing-whitespace`, `end-of-file-fixer`, `mixed-line-ending` (`--fix=lf`), `check-merge-conflict`, `check-case-conflict`, `check-added-large-files` (`--maxkb=500`), `detect-private-key`, `check-json` (`exclude = '^tsconfig\.json$'` — DocRewind's `tsconfig.json` carries JSONC comments), `check-toml`, `check-yaml`, `no-commit-to-branch` (`--branch`, `main`).
-  - [ ] Add the `conventional-pre-commit` repo at `rev = "v4.4.0"` with the `conventional-pre-commit` hook on `stages = ["commit-msg"]`.
-  - [ ] Add the `gitleaks` repo at `rev = "v8.30.1"` with the `gitleaks` hook.
-  - [ ] Use the canonical content below verbatim, then append the project-local block:
+- [x] Create the root-level `prek.toml` with the required builtin, conventional-commit, and gitleaks repos **exactly in substance**:
+  - [x] Add the `repo = "builtin"` block with: `trailing-whitespace`, `end-of-file-fixer`, `mixed-line-ending` (`--fix=lf`), `check-merge-conflict`, `check-case-conflict`, `check-added-large-files` (`--maxkb=500`), `detect-private-key`, `check-json` (`exclude = '^tsconfig\.json$'` — DocRewind's `tsconfig.json` carries JSONC comments), `check-toml`, `check-yaml`, `no-commit-to-branch` (`--branch`, `main`).
+  - [x] Add the `conventional-pre-commit` repo at `rev = "v4.4.0"` with the `conventional-pre-commit` hook on `stages = ["commit-msg"]`.
+  - [x] Add the `gitleaks` repo at `rev = "v8.30.1"` with the `gitleaks` hook.
+  - [x] Use the canonical content below verbatim, then append the project-local block:
 
     ```toml
     # Configuration file for `prek`, a git hook framework written in Rust.
@@ -68,9 +69,9 @@ This plan **follows `.augment/rules/bun-solid-pro.md`** as the authoritative sou
     ]
     ```
 
-- [ ] Add the **project-local hooks** block, wired to Bun scripts (not invented commands). Wire each hook to an existing `package.json` script once Phase 2 defines them; until then they are listed but the implementer must confirm script names by inspection.
-  - [ ] Inspect `package.json` `scripts` (created in Phase 2) and confirm the exact names before finalizing each `entry`. Do **not** invent script names.
-  - [ ] Add a local `repo = "local"` block (Bun-only commands, `pass_filenames = false` where the script globs internally):
+- [ ] Add the **project-local hooks** block, wired to Bun scripts (not invented commands). Wire each hook to an existing `package.json` script once Phase 2 defines them; until then they are listed but the implementer must confirm script names by inspection. **(pending Phase 2 — the block is present in `prek.toml` but commented out until the `bun run` targets exist; see `prek.toml`'s "RE-ENABLE IN PHASE 2" header.)**
+  - [ ] Inspect `package.json` `scripts` (created in Phase 2) and confirm the exact names before finalizing each `entry`. Do **not** invent script names. *(pending Phase 2)*
+  - [ ] Add a local `repo = "local"` block (Bun-only commands, `pass_filenames = false` where the script globs internally): *(pending Phase 2)*
 
     ```toml
     # Project-local hooks — Bun only. Confirm script names against package.json.
@@ -93,11 +94,11 @@ This plan **follows `.augment/rules/bun-solid-pro.md`** as the authoritative sou
     ```
 
   - [ ] If extension build verification is desired as a gate, add a `pre-push`-staged local hook `entry = "bun run build"` only after Phase 7 confirms the build is fast/stable enough to gate on; otherwise leave build verification to CI to avoid slow pushes. Document the decision inline in `prek.toml`.
-- [ ] Install / document `prek` for the project:
-  - [ ] Install the hooks into `.git/hooks` with `prek install` and `prek install --hook-type commit-msg --hook-type pre-push` so commit-msg and pre-push stages are active.
-  - [ ] Document `prek` usage (install command, how to run, how to skip with `--no-verify` only in emergencies) in `CONTRIBUTING.md` (created/updated in this phase if absent).
-- [ ] Add useful Bun scripts for running hooks (added to `package.json` in Phase 2; placeholder list here):
-  - [ ] `"hooks": "prek run --all-files"` and `"hooks:install": "prek install --hook-type pre-commit --hook-type commit-msg --hook-type pre-push"`.
+- [x] Install / document `prek` for the project:
+  - [x] Install the hooks into `.git/hooks` with `prek install` and `prek install --hook-type commit-msg --hook-type pre-push` so commit-msg and pre-push stages are active.
+  - [x] Document `prek` usage (install command, how to run, how to skip with `--no-verify` only in emergencies) in `CONTRIBUTING.md` (created/updated in this phase if absent).
+- [ ] Add useful Bun scripts for running hooks (added to `package.json` in Phase 2; placeholder list here): **(pending Phase 2 — `package.json` does not exist yet)**
+  - [ ] `"hooks": "prek run --all-files"` and `"hooks:install": "prek install --hook-type pre-commit --hook-type commit-msg --hook-type pre-push"`. *(pending Phase 2)*
 - [ ] Run `prek run --all-files` and capture output.
 - [ ] Fix any initial failures:
   - [ ] Re-run `prek run --all-files` until builtin hooks (whitespace, EOF, line endings, JSON/TOML/YAML, large-file, private-key, merge-conflict, case-conflict) pass on the existing files.
@@ -107,8 +108,8 @@ This plan **follows `.augment/rules/bun-solid-pro.md`** as the authoritative sou
   - [ ] Confirm a conventional message (e.g. `chore(repo): add prek config`) is **accepted**.
 - [ ] Confirm secret scanning with gitleaks:
   - [ ] Stage a throwaway file containing a dummy token, verify `gitleaks` blocks the commit, then remove the file.
-- [ ] Update contributor documentation:
-  - [ ] If `CONTRIBUTING.md` exists, update it; if not, create `CONTRIBUTING.md` with a "Commit Messages" (Conventional Commits) section, a "Git Hooks (prek)" section, and a DCO `Signed-off-by` requirement (PRD §11.6).
+- [x] Update contributor documentation:
+  - [x] If `CONTRIBUTING.md` exists, update it; if not, create `CONTRIBUTING.md` with a "Commit Messages" (Conventional Commits) section, a "Git Hooks (prek)" section, and a DCO `Signed-off-by` requirement (PRD §11.6).
 - [ ] Verify `no-commit-to-branch` blocks direct commits to `main` (commits must go through a feature branch + PR).
 
 ### Validation / acceptance criteria
@@ -128,26 +129,26 @@ This plan **follows `.augment/rules/bun-solid-pro.md`** as the authoritative sou
 
 ### Tasks
 
-- [ ] Audit the working tree:
-  - [ ] Run `git ls-files` and record the full tracked-file list; confirm no `package.json`, `wxt.config.ts`, or `node_modules` exist yet.
-  - [ ] Read `.gitignore` and confirm/append ignores for `.output/`, `.wxt/`, `node_modules/`, `coverage/`, `*.log`, and editor cruft. Do **not** ignore `bun.lock` (it must be committed).
-  - [ ] Confirm `LICENSE` is AGPL-3.0 and record that per-file `SPDX-License-Identifier: AGPL-3.0-or-later` headers are required (PRD §11.6).
-- [ ] Build a stack-version manifest from the guidelines table (single source for Phase 2 pinning): TypeScript 6.0.x, Bun 1.3.x, SolidJS 1.9.x (**not** 2.0), UnoCSS + `@unocss/preset-wind4` 66.5.x, WXT 0.20.x, `@wxt-dev/module-solid` 1.1.x, `@wxt-dev/unocss` 1.0.x, `@wxt-dev/storage` 1.2.x, Vitest 4.1.x (**not** 5.0), Playwright 1.60.x, Biome 2.4.x, `idb` 8.0.x.
-  - [ ] Record these in a short `docs/STACK.md` (or a "Stack" section appended to `CONTRIBUTING.md`) so reviewers can verify pins.
-- [ ] Extract the PRD constraints that bind implementation into a checklist the team can reference:
-  - [ ] Privacy guarantees (PRD §13) — zero non-Google requests, no telemetry, local-only storage.
-  - [ ] Storage tiering (PRD §9.8/§10.6) — `idb`/IndexedDB for bulk; `storage.defineItem`/`storage.local` for settings only; never `localStorage`.
-  - [ ] Protocol isolation (PRD §19, Appendix A) — all Google Docs assumptions live behind one module.
-  - [ ] Primary surface = dedicated replay tab (PRD §10.3); heavy work in a Web Worker owned by the replay page (PRD §10.9).
-- [ ] Confirm the planned directory layout matches the guidelines' "Project layout" section (`entrypoints/`, `components/`, `lib/`, `public/`, `assets/`, config files at root).
-- [ ] Create and switch to a working branch (since `main` is hook-protected): `git switch -c chore/phase-0-scaffolding`.
+- [x] Audit the working tree:
+  - [x] Run `git ls-files` and record the full tracked-file list; confirm no `package.json`, `wxt.config.ts`, or `node_modules` exist yet. *(recorded in `docs/STACK.md` "Audit snapshot (2026-06-11)" — 7 tracked files.)*
+  - [x] Read `.gitignore` and confirm/append ignores for `.output/`, `.wxt/`, `node_modules/`, `coverage/`, `*.log`, and editor cruft. Do **not** ignore `bun.lock` (it must be committed). *(appended `.output/`+`.wxt/` block; `node_modules/`/`coverage`/`*.log`/`dist` already present; `bun.lock` left committed.)*
+  - [x] Confirm `LICENSE` is AGPL-3.0 and record that per-file `SPDX-License-Identifier: AGPL-3.0-or-later` headers are required (PRD §11.6). *(recorded in `docs/STACK.md` and `docs/CONSTRAINTS.md` §7.)*
+- [x] Build a stack-version manifest from the guidelines table (single source for Phase 2 pinning): TypeScript 6.0.x, Bun 1.3.x, SolidJS 1.9.x (**not** 2.0), UnoCSS + `@unocss/preset-wind4` 66.5.x, WXT 0.20.x, `@wxt-dev/module-solid` 1.1.x, `@wxt-dev/unocss` 1.0.x, `@wxt-dev/storage` 1.2.x, Vitest 4.1.x (**not** 5.0), Playwright 1.60.x, Biome 2.4.x, `idb` 8.0.x. *(Per the approved Phase 1 ADR, `docs/STACK.md` is a thin reference that defers to `.augment/rules/bun-solid-pro.md` as the single authoritative pin table rather than duplicating it — eliminating version-table drift — and records only net-new facts.)*
+  - [x] Record these in a short `docs/STACK.md` (or a "Stack" section appended to `CONTRIBUTING.md`) so reviewers can verify pins.
+- [x] Extract the PRD constraints that bind implementation into a checklist the team can reference: *(captured in `docs/CONSTRAINTS.md`.)*
+  - [x] Privacy guarantees (PRD §13) — zero non-Google requests, no telemetry, local-only storage.
+  - [x] Storage tiering (PRD §9.8/§10.6) — `idb`/IndexedDB for bulk; `storage.defineItem`/`storage.local` for settings only; never `localStorage`.
+  - [x] Protocol isolation (PRD §19, Appendix A) — all Google Docs assumptions live behind one module.
+  - [x] Primary surface = dedicated replay tab (PRD §10.3); heavy work in a Web Worker owned by the replay page (PRD §10.9).
+- [x] Confirm the planned directory layout matches the guidelines' "Project layout" section (`entrypoints/`, `components/`, `lib/`, `public/`, `assets/`, config files at root). *(documented in `docs/STACK.md` "Target WXT directory layout".)*
+- [x] Create and switch to a working branch (since `main` is hook-protected): `git switch -c chore/phase-1-audit`. *(Renamed from the plan's literal `chore/phase-0-scaffolding`, which misnamed Phase 1 work and collided with the merged Phase 0 PR #1.)*
 
 ### Validation / acceptance criteria
 
-- [ ] A written stack-version manifest exists and matches the guidelines table exactly (no SolidJS 2.0, no Vitest 5.0, no presetWind3).
-- [ ] `.gitignore` excludes `.output/`, `.wxt/`, `node_modules/`, `coverage/` and does **not** ignore `bun.lock`.
-- [ ] A PRD-constraint checklist is captured and referenced by later phases.
-- [ ] Work proceeds on a non-`main` branch.
+- [x] A written stack-version manifest exists and matches the guidelines table exactly (no SolidJS 2.0, no Vitest 5.0, no presetWind3). *(`docs/STACK.md` defers to the authoritative guidelines table and records the negative constraints verbatim.)*
+- [x] `.gitignore` excludes `.output/`, `.wxt/`, `node_modules/`, `coverage/` and does **not** ignore `bun.lock`.
+- [x] A PRD-constraint checklist is captured and referenced by later phases. *(`docs/CONSTRAINTS.md`.)*
+- [x] Work proceeds on a non-`main` branch. *(`chore/phase-1-audit`.)*
 
 ---
 

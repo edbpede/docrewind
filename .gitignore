@@ -111,3 +111,11 @@ dist
 
 # TernJS port file
 .tern-port
+
+# WXT / Bun build output
+# Generated per-browser builds and WXT's generated TypeScript types.
+.output/
+.wxt/
+# NOTE: bun.lock is intentionally committed (the Bun text lockfile, stable since
+# Bun 1.2) — it is required for deterministic `bun install --frozen-lockfile`
+# builds and AMO source review. Never ignore it.
