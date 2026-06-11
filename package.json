@@ -1,0 +1,45 @@
+{
+  "name": "docrewind",
+  "description": "Local-first Google Docs revision-replay browser extension.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wxt",
+    "dev:firefox": "wxt -b firefox",
+    "build": "wxt build",
+    "build:firefox": "wxt build -b firefox",
+    "zip": "wxt zip",
+    "zip:firefox": "wxt zip -b firefox",
+    "compile": "tsc --noEmit",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:logic": "bun test ./lib/parser ./lib/reconstruction ./lib/timeline",
+    "test:e2e": "playwright test",
+    "check": "biome check --write .",
+    "hooks": "prek run --all-files",
+    "hooks:install": "prek install --hook-type pre-commit --hook-type commit-msg --hook-type pre-push",
+    "postinstall": "wxt prepare"
+  },
+  "dependencies": {
+    "@webext-core/messaging": "3.0.2",
+    "idb": "8.0.3",
+    "solid-js": "1.9.13"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.4.16",
+    "@playwright/test": "1.60.0",
+    "@solidjs/testing-library": "0.8.10",
+    "@types/chrome": "0.1.43",
+    "@types/node": "25.9.3",
+    "@unocss/preset-wind4": "66.7.0",
+    "@wxt-dev/module-solid": "1.1.4",
+    "@wxt-dev/storage": "1.2.8",
+    "@wxt-dev/unocss": "1.0.1",
+    "jsdom": "29.1.1",
+    "typescript": "6.0.3",
+    "unocss": "66.7.0",
+    "vite-plugin-solid": "2.11.12",
+    "vitest": "4.1.8",
+    "wxt": "0.20.26"
+  }
+}

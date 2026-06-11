@@ -1,0 +1,3 @@
+# Pin every added dependency to an exact version (determinism is a Phase 2 driver).
+[install]
+exact = true

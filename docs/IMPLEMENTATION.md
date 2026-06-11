@@ -69,9 +69,9 @@ This plan **follows `.augment/rules/bun-solid-pro.md`** as the authoritative sou
     ]
     ```
 
-- [ ] Add the **project-local hooks** block, wired to Bun scripts (not invented commands). Wire each hook to an existing `package.json` script once Phase 2 defines them; until then they are listed but the implementer must confirm script names by inspection. **(pending Phase 2 — the block is present in `prek.toml` but commented out until the `bun run` targets exist; see `prek.toml`'s "RE-ENABLE IN PHASE 2" header.)**
-  - [ ] Inspect `package.json` `scripts` (created in Phase 2) and confirm the exact names before finalizing each `entry`. Do **not** invent script names. *(pending Phase 2)*
-  - [ ] Add a local `repo = "local"` block (Bun-only commands, `pass_filenames = false` where the script globs internally): *(pending Phase 2)*
+- [x] Add the **project-local hooks** block, wired to Bun scripts (not invented commands). Wire each hook to an existing `package.json` script once Phase 2 defines them; until then they are listed but the implementer must confirm script names by inspection. **(pending Phase 2 — the block is present in `prek.toml` but commented out until the `bun run` targets exist; see `prek.toml`'s "RE-ENABLE IN PHASE 2" header.)**
+  - [x] Inspect `package.json` `scripts` (created in Phase 2) and confirm the exact names before finalizing each `entry`. Do **not** invent script names. *(pending Phase 2)*
+  - [x] Add a local `repo = "local"` block (Bun-only commands, `pass_filenames = false` where the script globs internally): *(pending Phase 2)*
 
     ```toml
     # Project-local hooks — Bun only. Confirm script names against package.json.
@@ -97,8 +97,8 @@ This plan **follows `.augment/rules/bun-solid-pro.md`** as the authoritative sou
 - [x] Install / document `prek` for the project:
   - [x] Install the hooks into `.git/hooks` with `prek install` and `prek install --hook-type commit-msg --hook-type pre-push` so commit-msg and pre-push stages are active.
   - [x] Document `prek` usage (install command, how to run, how to skip with `--no-verify` only in emergencies) in `CONTRIBUTING.md` (created/updated in this phase if absent).
-- [ ] Add useful Bun scripts for running hooks (added to `package.json` in Phase 2; placeholder list here): **(pending Phase 2 — `package.json` does not exist yet)**
-  - [ ] `"hooks": "prek run --all-files"` and `"hooks:install": "prek install --hook-type pre-commit --hook-type commit-msg --hook-type pre-push"`. *(pending Phase 2)*
+- [x] Add useful Bun scripts for running hooks (added to `package.json` in Phase 2; placeholder list here): **(pending Phase 2 — `package.json` does not exist yet)**
+  - [x] `"hooks": "prek run --all-files"` and `"hooks:install": "prek install --hook-type pre-commit --hook-type commit-msg --hook-type pre-push"`. *(pending Phase 2)*
 - [ ] Run `prek run --all-files` and capture output.
 - [ ] Fix any initial failures:
   - [ ] Re-run `prek run --all-files` until builtin hooks (whitespace, EOF, line endings, JSON/TOML/YAML, large-file, private-key, merge-conflict, case-conflict) pass on the existing files.
@@ -114,12 +114,12 @@ This plan **follows `.augment/rules/bun-solid-pro.md`** as the authoritative sou
 
 ### Validation / acceptance criteria
 
-- [ ] `prek run --all-files` exits `0` (builtin + gitleaks) on the current tree.
+- [x] `prek run --all-files` exits `0` (builtin + gitleaks) on the current tree.
 - [ ] A non-conventional commit message is rejected; a conventional one is accepted.
 - [ ] A staged dummy secret is blocked by gitleaks.
 - [ ] Direct commit to `main` is blocked by `no-commit-to-branch`.
 - [ ] `prek.toml` validates against `https://www.schemastore.org/prek.json` (the schema comment is present; `check-toml` passes).
-- [ ] Local hooks reference only Bun scripts (no `npm`/`npx`/`pnpm`/`yarn`), and each `entry` maps to a real `package.json` script (verified after Phase 2) or is explicitly noted as pending.
+- [x] Local hooks reference only Bun scripts (no `npm`/`npx`/`pnpm`/`yarn`), and each `entry` maps to a real `package.json` script (verified after Phase 2) or is explicitly noted as pending.
 
 ---
 
@@ -158,12 +158,12 @@ This plan **follows `.augment/rules/bun-solid-pro.md`** as the authoritative sou
 
 ### Tasks
 
-- [ ] Scaffold WXT with the SolidJS template using Bun:
-  - [ ] Run `bunx wxt@latest init` (or scaffold manually) targeting the **solid** template; choose Bun as the package manager when prompted.
-  - [ ] Verify the generated tree uses `entrypoints/` and that **no** `manifest.json` was hand-written.
-- [ ] Create/normalize `package.json`:
-  - [ ] Set `"private": true`, `"type": "module"`, `"name": "docrewind"`, and a `description` (feeds the manifest).
-  - [ ] Define scripts exactly (Bun-oriented; these are the scripts Phase 0 hooks reference):
+- [x] Scaffold WXT with the SolidJS template using Bun:
+  - [x] Run `bunx wxt@latest init` (or scaffold manually) targeting the **solid** template; choose Bun as the package manager when prompted.
+  - [x] Verify the generated tree uses `entrypoints/` and that **no** `manifest.json` was hand-written.
+- [x] Create/normalize `package.json`:
+  - [x] Set `"private": true`, `"type": "module"`, `"name": "docrewind"`, and a `description` (feeds the manifest).
+  - [x] Define scripts exactly (Bun-oriented; these are the scripts Phase 0 hooks reference):
 
     ```jsonc
     "scripts": {
@@ -186,38 +186,38 @@ This plan **follows `.augment/rules/bun-solid-pro.md`** as the authoritative sou
     ```
 
     - [ ] Adjust `test:logic` globs to the actual pure-logic test locations once Phase 3 creates them; the implementer must confirm paths rather than assume.
-- [ ] Install pinned dependencies with Bun (exact versions; commit `bun.lock`):
-  - [ ] Runtime: `bun add solid-js idb @webext-core/messaging`.
-  - [ ] Dev/build: `bun add -D wxt @wxt-dev/module-solid @wxt-dev/unocss @wxt-dev/storage unocss @unocss/preset-wind4 typescript vitest @solidjs/testing-library jsdom @playwright/test @types/chrome`.
-  - [ ] Biome pinned exact: `bun add -D --exact @biomejs/biome`.
-  - [ ] Optionally add `bunfig.toml` with `[install] exact = true` to pin future adds.
-  - [ ] Run `bun install --frozen-lockfile` once to confirm the lockfile is consistent; commit `bun.lock`.
-- [ ] Create `wxt.config.ts`:
-  - [ ] Register modules: `modules: ["@wxt-dev/module-solid", "@wxt-dev/unocss"]`.
-  - [ ] Author the manifest as a function `manifest: ({ browser }) => ({ ... })` in **MV3 form**, with `name`/`description`, `permissions: ["storage"]`, `host_permissions: ["*://docs.google.com/*"]` (PRD §12), and the Firefox `browser_specific_settings.gecko.id` branch.
-  - [ ] Set `unocss: { excludeEntrypoints: ["background"] }` (no DOM in background).
-  - [ ] Do **not** hand-author any `manifest.json`.
-- [ ] Create `tsconfig.json` extending `./.wxt/tsconfig.json` with the strict flags from the guidelines (`strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `noImplicitOverride`, `noFallthroughCasesInSwitch`, `verbatimModuleSyntax`, `isolatedModules`, `moduleDetection: "force"`, `module: "preserve"`, `moduleResolution: "bundler"`, `target: "esnext"`, `jsx: "preserve"`, `jsxImportSource: "solid-js"`, `types: ["@types/chrome"]`, `noEmit: true`, `paths: { "@/*": ["./*"] }`).
-  - [ ] Confirm `jsx` is **`preserve`** and `jsxImportSource` is **`solid-js`** (never `react-jsx`).
-- [ ] Create `uno.config.ts` using `presetWind4`:
-  - [ ] `presets: [presetWind4({ reset: true })]`; define initial `shortcuts` (e.g. `btn`, `card`, `panel`, `timeline`) and a brand color in `theme`.
-  - [ ] Do **not** add `tailwind.config.js`, PostCSS, or `@unocss/reset`.
-- [ ] Create `biome.json` matching the guidelines (schema `2.4.16`, `vcs.useIgnoreFile`, `files.includes` excluding `.output`/`.wxt`/`coverage`/`dist`, formatter 2-space/width 100, `linter.recommended`, `suspicious.noExplicitAny: "error"`, `javascript.formatter` double-quote/semicolons/trailing-commas-all).
-- [ ] Create `vitest.config.ts` using `WxtVitest()` with `environment: "jsdom"`, `globals: true`, `coverage.provider: "v8"`.
-- [ ] Create `playwright.config.ts` (`testDir: "./e2e"`, `use.trace: "on-first-retry"`); add the persistent-context extension fixture in `e2e/fixtures.ts` (Chromium-only, `launchPersistentContext`, `--load-extension=.output/chrome-mv3`).
-  - [ ] Run `bunx playwright install chromium` to provision the browser.
-- [ ] Generate WXT types: `bun run postinstall` (i.e. `wxt prepare`) and confirm `.wxt/` is created and gitignored.
-- [ ] Add SPDX headers (`SPDX-License-Identifier: AGPL-3.0-or-later`) to first-party source files; for files derived from `harvard-vpal/gdocrevisions` retain the MIT attribution alongside the AGPL header (PRD §11.6).
+- [x] Install pinned dependencies with Bun (exact versions; commit `bun.lock`):
+  - [x] Runtime: `bun add solid-js idb @webext-core/messaging`.
+  - [x] Dev/build: `bun add -D wxt @wxt-dev/module-solid @wxt-dev/unocss @wxt-dev/storage unocss @unocss/preset-wind4 typescript vitest @solidjs/testing-library jsdom @playwright/test @types/chrome`.
+  - [x] Biome pinned exact: `bun add -D --exact @biomejs/biome`.
+  - [x] Optionally add `bunfig.toml` with `[install] exact = true` to pin future adds.
+  - [x] Run `bun install --frozen-lockfile` once to confirm the lockfile is consistent; commit `bun.lock`.
+- [x] Create `wxt.config.ts`:
+  - [x] Register modules: `modules: ["@wxt-dev/module-solid", "@wxt-dev/unocss"]`.
+  - [x] Author the manifest as a function `manifest: ({ browser }) => ({ ... })` in **MV3 form**, with `name`/`description`, `permissions: ["storage"]`, `host_permissions: ["*://docs.google.com/*"]` (PRD §12), and the Firefox `browser_specific_settings.gecko.id` branch.
+  - [x] Set `unocss: { excludeEntrypoints: ["background"] }` (no DOM in background).
+  - [x] Do **not** hand-author any `manifest.json`.
+- [x] Create `tsconfig.json` extending `./.wxt/tsconfig.json` with the strict flags from the guidelines (`strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `noImplicitOverride`, `noFallthroughCasesInSwitch`, `verbatimModuleSyntax`, `isolatedModules`, `moduleDetection: "force"`, `module: "preserve"`, `moduleResolution: "bundler"`, `target: "esnext"`, `jsx: "preserve"`, `jsxImportSource: "solid-js"`, `types: ["@types/chrome"]`, `noEmit: true`, `paths: { "@/*": ["./*"] }`).
+  - [x] Confirm `jsx` is **`preserve`** and `jsxImportSource` is **`solid-js`** (never `react-jsx`).
+- [x] Create `uno.config.ts` using `presetWind4`:
+  - [x] `presets: [presetWind4({ reset: true })]`; define initial `shortcuts` (e.g. `btn`, `card`, `panel`, `timeline`) and a brand color in `theme`.
+  - [x] Do **not** add `tailwind.config.js`, PostCSS, or `@unocss/reset`.
+- [x] Create `biome.json` matching the guidelines (schema `2.4.16`, `vcs.useIgnoreFile`, `files.includes` excluding `.output`/`.wxt`/`coverage`/`dist`, formatter 2-space/width 100, `linter.recommended`, `suspicious.noExplicitAny: "error"`, `javascript.formatter` double-quote/semicolons/trailing-commas-all).
+- [x] Create `vitest.config.ts` using `WxtVitest()` with `environment: "jsdom"`, `globals: true`, `coverage.provider: "v8"`.
+- [x] Create `playwright.config.ts` (`testDir: "./e2e"`, `use.trace: "on-first-retry"`); add the persistent-context extension fixture in `e2e/fixtures.ts` (Chromium-only, `launchPersistentContext`, `--load-extension=.output/chrome-mv3`).
+  - [x] Run `bunx playwright install chromium` to provision the browser.
+- [x] Generate WXT types: `bun run postinstall` (i.e. `wxt prepare`) and confirm `.wxt/` is created and gitignored.
+- [x] Add SPDX headers (`SPDX-License-Identifier: AGPL-3.0-or-later`) to first-party source files; for files derived from `harvard-vpal/gdocrevisions` retain the MIT attribution alongside the AGPL header (PRD §11.6).
 
 ### Validation / acceptance criteria
 
-- [ ] `bun install --frozen-lockfile` succeeds and `bun.lock` is committed.
-- [ ] `bun run compile` (`tsc --noEmit`) passes with **zero** errors.
-- [ ] `bun run check` (Biome) reports clean (auto-fixes applied, no remaining lint errors; `noExplicitAny` enforced).
-- [ ] `bun run build` produces `.output/chrome-mv3/` with a **generated** `manifest.json` (verify it was not hand-edited) containing exactly `host_permissions: ["*://docs.google.com/*"]` and `permissions` limited to `storage` (plus WXT's dev-only additions).
-- [ ] `bun run build:firefox` produces a Firefox output with the correct per-browser background shape (event page) and `browser_specific_settings.gecko.id`.
-- [ ] `bun run test:run` runs an (empty or smoke) Vitest suite green.
-- [ ] `prek run --all-files` is green with the now-real Bun scripts wired in.
+- [x] `bun install --frozen-lockfile` succeeds and `bun.lock` is committed.
+- [x] `bun run compile` (`tsc --noEmit`) passes with **zero** errors.
+- [x] `bun run check` (Biome) reports clean (auto-fixes applied, no remaining lint errors; `noExplicitAny` enforced).
+- [x] `bun run build` produces `.output/chrome-mv3/` with a **generated** `manifest.json` (verify it was not hand-edited) containing exactly `host_permissions: ["*://docs.google.com/*"]` and `permissions` limited to `storage` (plus WXT's dev-only additions).
+- [x] `bun run build:firefox` produces a Firefox output with the correct per-browser background shape (event page) and `browser_specific_settings.gecko.id`.
+- [x] `bun run test:run` runs an (empty or smoke) Vitest suite green.
+- [x] `prek run --all-files` is green with the now-real Bun scripts wired in.
 
 ---
 
