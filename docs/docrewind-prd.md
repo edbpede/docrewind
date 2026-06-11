@@ -523,4 +523,3 @@ Attribution/timing: each revision carries `user_id`, `session_id`, `revision_id`
 **A.9 Rate limiting.** No public evidence of captcha or hard anti-automation friction on `revisions/load` for normal interactive use; aggressive large-range scraping risks HTTP 500s and undocumented soft limits. Use adaptive chunk sizing and backoff. *[Likely-current.]*
 
 **A.10 Currency note.** The operation grammar (A.2, A.8) is now confirmed from open MIT source; the **transport layer** (framing A.3, headers/token A.7, discovery A.4, rate limits A.9) is not, and both the grammar and transport predate 2026. Do not treat any framing detail, header requirement, discovery method, or even the operation codes as live-settled until the §24 capture passes in current Chromium and Firefox. Update this appendix from the live captures; it is the contract the protocol module (§19) implements against.
-
