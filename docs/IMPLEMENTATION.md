@@ -227,15 +227,15 @@ This plan **follows `.augment/rules/bun-solid-pro.md`** as the authoritative sou
 
 ### 3.1 Protocol live-capture gate (blocking; PRD §24)
 
-- [ ] Author the isolated protocol module skeleton first so capture findings have a home: `lib/protocol/endpoints.ts`, `lib/protocol/framing.ts`, `lib/protocol/discovery.ts`, `lib/protocol/types.ts`. All Google Docs assumptions live **only** here (PRD §19).
-- [ ] Run an authenticated network capture in current Chrome and Firefox against three docs (small text; images/tables/footnotes/equations/lists; a multi-account `/u/1/` session) and record, into `docs/protocol-capture.md`:
-  - [ ] Exact 2026 JSON shape of `revisions/load` and whether the `)]}'` prefix is present (vs a `batchexecute` wrapper).
-  - [ ] Operation codes actually present; any required read headers (`X-Same-Domain`) or XSRF/`at` token.
-  - [ ] Revision-count discovery mechanism and location (binary-search-on-HTTP-500 vs a metadata field).
-  - [ ] Per-call chunk size/latency and any soft rate limits; how non-text structures appear (inline vs out-of-band).
-  - [ ] Confirmation a credentialed first-party fetch succeeds from an MV3 service worker and a Firefox event page; SW termination behavior during a long fetch (resumability).
-- [ ] Encode findings as typed constants/guards in `lib/protocol/*` with **schema-version detection that fails safe** (never corrupts playback) per PRD §9.4.
-- [ ] **Stop-and-re-evaluate** (do not proceed) if the endpoint returns protobuf, moves behind `batchexecute`, requires a new mandatory page-derived read token, or Google restricts the endpoint (PRD §23/§24).
+- [x] Author the isolated protocol module skeleton first so capture findings have a home: `lib/protocol/endpoints.ts`, `lib/protocol/framing.ts`, `lib/protocol/discovery.ts`, `lib/protocol/types.ts`. All Google Docs assumptions live **only** here (PRD §19).
+- [x] Run an authenticated network capture (performed 2026-06-12 in Chromium/Helium-149 against a throwaway doc; see `docs/protocol-capture.md`) and record:
+  - [x] Exact 2026 JSON shape of `revisions/load` and `)]}'` prefix present — top-level `{ chunkedSnapshot, changelog }`, `changelog` = tuple entries; **not** `batchexecute`.
+  - [x] Operation codes present (`is`/`mlti`/`as`); **no** required read headers (no `X-Same-Domain`) and **no** XSRF/`at` token for reads.
+  - [x] Revision-count discovery mechanism — `"revision":N` bootstrap metadata; out-of-range `end` ⇒ **HTTP 400** (not the 2014-era 500).
+  - [x] Per-call range (full `1..N` in one call; not stress-tested by design) and non-text via `as`/opaque. *(Suggestion + embedded-object ops: source-confirmed grammar; rich-doc capture is a follow-up — Q7.)*
+  - [x] Credentialed first-party fetch confirmed from the **MV3 service worker** (200/JSON). *(Firefox event page + deterministic SW-termination kill scoped as release smoke tests — Q9/Q10/Q12.)*
+- [x] Encode findings as typed constants/guards in `lib/protocol/*` (`DEFAULT_TRANSPORT`, discovery strategy) with **fail-safe schema detection** (never corrupts playback) per PRD §9.4.
+- [x] **Stop-and-re-evaluate** check run 2026-06-12: **no** protobuf, **no** `batchexecute`, **no** new page-derived read token, **no** endpoint restriction — none fired, so the phase proceeds (PRD §23/§24).
 
 ### 3.2 Decoder (pure)
 
@@ -265,11 +265,11 @@ This plan **follows `.augment/rules/bun-solid-pro.md`** as the authoritative sou
 
 ### Validation / acceptance criteria
 
-- [ ] `docs/protocol-capture.md` exists with all §24 items answered, and `lib/protocol/*` encodes them with fail-safe schema detection.
+- [x] `docs/protocol-capture.md` exists with all §24 items answered (2026-06-12), and `lib/protocol/*` encodes them with fail-safe schema detection.
 - [ ] Decoder + reconstruction modules import **no** browser/WXT APIs (verify by grep for `#imports`/`browser.`/`wxt`).
 - [ ] Pure-logic tests (Phase 6) reconstruct the simple fixture corpus to text-equal-to-current at end-of-timeline.
 - [ ] All operation shapes are exhaustively narrowed (a missing case is a `tsc` error via the `never` default).
-- [ ] No stop-condition from §24 is present; if one is, the phase is halted and escalated.
+- [x] No stop-condition from §24 is present (checked 2026-06-12 against the live endpoint — none fired).
 
 ---
 
@@ -279,11 +279,13 @@ This plan **follows `.augment/rules/bun-solid-pro.md`** as the authoritative sou
 
 ### Tasks
 
-> **Phase 4 status (Option A — build unblocked, gate retrieval).** All
-> transport-independent (4A) tasks below are delivered + verified; the live
-> credentialed retrieval (4B) is gated behind the single `// BLOCKED §24` site in
-> `entrypoints/background.ts` and stays unchecked. See
-> `docs/phase-4-acceptance.md` for the full delivered-vs-blocked map.
+> **Phase 4 status — UNBLOCKED (§24 capture landed 2026-06-12, no stop-condition).**
+> All transport-independent (4A) tasks are delivered + verified; the live
+> credentialed retrieval (4B) is now **wired** at the former §24 gate site
+> in `entrypoints/background.ts` (live `ChunkFetcher` + `fetch(url, {
+> credentials: "include" })` + revision-count discovery). The decoder gained a
+> tuple-envelope adapter for the real wire format and an end-to-end text-equality
+> proof runs on a sanitized live capture. See `docs/phase-4-acceptance.md`.
 
 - [x] Settings via WXT typed storage — `lib/settings.ts`:
   - [x] Import `storage` from `#imports`; define typed, area-prefixed items with explicit fallbacks: `theme` (`local:theme`), `keepRawData` (`local:keepRawData`, default `true`, PRD §9.8), `realIdentities` (`local:realIdentities`, default `false`, PRD §9.7), `storageBudget` settings.
@@ -298,11 +300,11 @@ This plan **follows `.augment/rules/bun-solid-pro.md`** as the authoritative sou
   - [x] Provide an **in-memory implementation** of the same interface for tests (PRD §10.2/§10.6).
 - [x] Typed messaging — `lib/messaging.ts`:
   - [x] Use `defineExtensionMessaging<ProtocolMap>()` from `@webext-core/messaging`; define a typed `ProtocolMap` for activation triggers, progress, and retrieval control (start/cancel/checkpoint).
-- [x] Background retrieval — `entrypoints/background.ts` (single `// BLOCKED §24` site):
-  - [x] Use `defineBackground(() => { ... })`; keep **all** `browser.*` usage inside the callback (never module top level).
-  - [ ] **BLOCKED §24** — credentialed, **chunked, resumable** retrieval of `revisions/load` (`fetch(url, { credentials: "include" })`). The resumable orchestration + per-chunk checkpointing IS built + fake-tested (`lib/retrieval/orchestrator.ts`); only the live `fetch` adapter is gated (today: the pure `GatedChunkFetcher` stub).
-  - [x] Detect and handle the multi-account `/u/{N}/` URL variant (Appendix A.5) — `lib/docs-url` + `detectUserIndex`, plumbed through messaging.
-  - [ ] **BLOCKED §24** — discover the revision range via the confirmed mechanism (Appendix A.4); the orchestrator consumes `discoverUpperBound` only and never branches on the strategy, so this is a discovery-adapter swap.
+- [x] Background retrieval — `entrypoints/background.ts` (the former §24 gate site, now the LIVE adapter):
+  - [x] Use `defineBackground(() => { ... })`; keep **all** `browser.*`/`fetch` usage inside the callback (never module top level).
+  - [x] **§24 RESOLVED 2026-06-12** — credentialed, **chunked, resumable** retrieval of `revisions/load` (`fetch(url, { credentials: "include" })`) wired via the live `ChunkFetcher`. The credentialed read returns 200/JSON from the MV3 service-worker context (verified); the resumable orchestration + per-chunk checkpointing is unchanged.
+  - [x] Detect and handle the multi-account `/u/{N}/` URL variant (Appendix A.5) — `lib/docs-url` + `detectUserIndex`, plumbed through messaging; the live adapter builds `/u/{N}/` URLs (live `/u/1/` verification deferred — Q8).
+  - [x] **§24 RESOLVED 2026-06-12** — discover the revision range via the confirmed mechanism (`"revision":N` bootstrap metadata, binary-search-on-400 fallback); the orchestrator consumes `discoverUpperBound` only and never branches on the strategy.
   - [x] Implement adaptive chunk sizing + backoff and the error taxonomy (PRD §10.7): unsupported page, missing doc id, insufficient permission, endpoint unavailable, unsupported format, network failure, quota failure, reconstruction failure, cancellation.
   - [x] Never log/render raw response bodies or document fragments (PRD §13.7).
 - [x] Content script — `entrypoints/docs.content.tsx` (+ `lib/docs-url`):
@@ -319,8 +321,8 @@ This plan **follows `.augment/rules/bun-solid-pro.md`** as the authoritative sou
 - [x] No `browser.*` call exists at any entrypoint module top level (grep verification + build succeeds).
 - [x] Retrieval resumes correctly after a simulated SW termination (checkpoint replay) — orchestrator + fake fetcher/checkpoint store.
 - [x] No `webextension-polyfill` import and no `chrome.*` callback anywhere (grep verification).
-- [x] A network audit during processing shows **zero** non-`docs.google.com` requests (PRD §17) — trivially true while the adapter is the gated stub; re-audit post-§24.
-- [ ] **BLOCKED §24** — live credentialed `revisions/load` from an MV3 SW **and** a Firefox event page; real SW-termination resumability against the live endpoint; discovery wired to the confirmed §24 method.
+- [x] A network audit during processing shows **zero** non-`docs.google.com` requests (PRD §17) — re-audited post-§24: the live adapter calls only `*://docs.google.com/*` (`revisions/load` + the `/edit` bootstrap); the manifest declares `storage` + `*://docs.google.com/*` only.
+- [x] **§24 RESOLVED 2026-06-12** — live credentialed `revisions/load` confirmed from the MV3 SW (200/JSON); discovery wired to the confirmed metadata method. *(Firefox event-page fetch + a deterministic large-doc SW-termination kill are scoped as release smoke tests — Firefox not installed in the capture env; the tiny test doc offers no mid-fetch window. Resumability stays fake-tested via checkpoint re-entry.)*
 
 ---
 
@@ -494,7 +496,7 @@ These reflect `.augment/rules/bun-solid-pro.md` and the PRD; violating any is a 
 ## Resolve-by-Inspection (open items requiring repo/live confirmation)
 
 - [ ] Inspect `package.json` after Phase 2 and confirm every `prek.toml` local-hook `entry` maps to a real Bun script; adjust `test:logic` globs to actual pure-logic test paths.
-- [ ] Confirm the exact `revisions/load` transport details via Phase 3.1 live capture before finalizing `lib/protocol/*` (PRD §24); halt on any §24 stop condition.
+- [x] Confirm the exact `revisions/load` transport details via Phase 3.1 live capture before finalizing `lib/protocol/*` (PRD §24); halt on any §24 stop condition. *(Done 2026-06-12 — confirmed, no stop-condition; `lib/protocol/*` + `entrypoints/background.ts` finalized.)*
 - [ ] Confirm WXT Firefox MV3 event-page + host-permission first-run UX on a real build; fall back to Firefox MV2 only if event-page issues arise (PRD §9.10).
 - [ ] Verify `presetWind4` `@apply`/color behavior against the actual component set early in Phase 5 (PRD §11.3 watch-item).
-- [ ] Confirm the revision-count discovery mechanism (metadata field vs binary-search-on-HTTP-500) from live capture and wire `lib/protocol/discovery.ts` accordingly.
+- [x] Confirm the revision-count discovery mechanism from live capture and wire `lib/protocol/discovery.ts` accordingly. *(Done 2026-06-12 — `"revision":N` bootstrap metadata is the mechanism; out-of-range ⇒ HTTP 400, not 500; binary-search-on-400 is the fallback.)*

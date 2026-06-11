@@ -161,9 +161,8 @@ function decodeOperation(raw: unknown, revisionId: RevisionId): Operation {
   }
 }
 
-/** Read a validated RevisionId from an entry, falling back to its 1-based index. */
-function readRevisionId(entry: unknown, index: number): RevisionId {
-  const raw = field(entry, "revision_id");
+/** Validate a RevisionId from a raw value, falling back to the 1-based position. */
+function asRevisionIdOr(raw: unknown, index: number): RevisionId {
   const valid = asPositiveInt(raw);
   if (valid !== undefined) {
     return asRevisionId(valid);
@@ -173,31 +172,79 @@ function readRevisionId(entry: unknown, index: number): RevisionId {
   return unsafeAsRevisionId(index + 1);
 }
 
-/** Read an optional branded id field: validated value, or null when absent. */
-function readOptionalUserId(entry: unknown): ReturnType<typeof asUserId> | null {
-  const value = field(entry, "user_id");
-  return typeof value === "string" && value.trim().length > 0 ? asUserId(value) : null;
+/** Validate an optional branded id from a raw value, or null when absent/blank. */
+function asOptionalUserId(raw: unknown): ReturnType<typeof asUserId> | null {
+  return typeof raw === "string" && raw.trim().length > 0 ? asUserId(raw) : null;
 }
 
-function readOptionalSessionId(entry: unknown): ReturnType<typeof asSessionId> | null {
-  const value = field(entry, "session_id");
-  return typeof value === "string" && value.trim().length > 0 ? asSessionId(value) : null;
+function asOptionalSessionId(raw: unknown): ReturnType<typeof asSessionId> | null {
+  return typeof raw === "string" && raw.trim().length > 0 ? asSessionId(raw) : null;
 }
 
-function readOptionalTime(entry: unknown): number | null {
-  const value = field(entry, "time");
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
+function asOptionalTime(raw: unknown): number | null {
+  return typeof raw === "number" && Number.isFinite(raw) ? raw : null;
+}
+
+/**
+ * One changelog entry's operation plus its attribution/timing metadata, lifted
+ * out of whichever of the two accepted wire shapes the entry uses.
+ */
+interface EntryEnvelope {
+  readonly op: unknown;
+  readonly revisionId: unknown;
+  readonly userId: unknown;
+  readonly sessionId: unknown;
+  readonly time: unknown;
+}
+
+// Positional layout of a LIVE changelog tuple, confirmed by the §24 capture
+// (2026-06-12): `[ op, time(ms), sessionId, revisionId, userId, … ]`.
+// See PRD Appendix A.2 and docs/protocol-capture.md Q1.
+const TUPLE_TIME = 1;
+const TUPLE_SESSION_ID = 2;
+const TUPLE_REVISION_ID = 3;
+const TUPLE_USER_ID = 4;
+
+/**
+ * Normalize a changelog entry to its {@link EntryEnvelope}. TWO shapes are
+ * accepted so the decoder is faithful to the live wire format AND to the
+ * synthetic fixture corpus:
+ *   • Live (2026): a positional TUPLE `[op, time, sessionId, revisionId, userId, …]`.
+ *   • Synthetic fixtures: a flat OBJECT carrying the op fields alongside
+ *     `revision_id`/`user_id`/`session_id`/`time` siblings.
+ * Any other shape yields an envelope whose `op` degrades to UnknownOp downstream
+ * — the open-world contract is preserved, never a throw.
+ */
+function normalizeEntry(entry: unknown): EntryEnvelope {
+  if (Array.isArray(entry)) {
+    return {
+      op: entry[0],
+      revisionId: entry[TUPLE_REVISION_ID],
+      userId: entry[TUPLE_USER_ID],
+      sessionId: entry[TUPLE_SESSION_ID],
+      time: entry[TUPLE_TIME],
+    };
+  }
+  // Object entry: the op fields and its metadata coexist on the same record.
+  return {
+    op: entry,
+    revisionId: field(entry, "revision_id"),
+    userId: field(entry, "user_id"),
+    sessionId: field(entry, "session_id"),
+    time: field(entry, "time"),
+  };
 }
 
 /** Decode one changelog entry (one revision carrying one top-level operation). */
 function decodeRevision(entry: unknown, index: number): DecodedRevision {
-  const revisionId = readRevisionId(entry, index);
+  const env = normalizeEntry(entry);
+  const revisionId = asRevisionIdOr(env.revisionId, index);
   return {
     revisionId,
-    userId: readOptionalUserId(entry),
-    sessionId: readOptionalSessionId(entry),
-    time: readOptionalTime(entry),
-    operations: [decodeOperation(entry, revisionId)],
+    userId: asOptionalUserId(env.userId),
+    sessionId: asOptionalSessionId(env.sessionId),
+    time: asOptionalTime(env.time),
+    operations: [decodeOperation(env.op, revisionId)],
   };
 }
 

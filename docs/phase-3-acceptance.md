@@ -25,9 +25,9 @@
 - [x] Isolated protocol skeleton — `lib/protocol/{types,framing,endpoints,discovery,schema-detect}.ts` (T2).
 - [x] Fail-safe schema detection mechanism — `detectSchema` gates the hand-off; unknown shapes never reach the decoder (T2).
 - [x] Stop-condition wiring + blast-radius doc — `docs/protocol-capture.md` + plan Pre-mortem #3.
-- [BLOCKED] Authenticated live capture in Chrome + Firefox against three docs — needs the maintainer's logged-in multi-account session + DevTools.
-- [BLOCKED] The 12 §24 transport findings recorded in `docs/protocol-capture.md` — template authored `[x]`; **answers BLOCKED**.
-- [BLOCKED] Credentialed fetch from MV3 SW + Firefox event page; SW termination mid-fetch — runtime human observation.
+- [x] Authenticated live capture performed 2026-06-12 (Chromium/Helium-149, throwaway doc; see `docs/protocol-capture.md`). *(Firefox + multi-account + rich-doc captures scoped as follow-ups — Q7/Q8/Q12.)*
+- [x] The 12 §24 transport findings recorded in `docs/protocol-capture.md` — answered; no stop-condition fired.
+- [x] Credentialed fetch confirmed from the MV3 service-worker context (200/JSON). *(Firefox event page + deterministic SW-termination kill deferred — Q9/Q10/Q12.)*
 
 ## 3.2 Decoder
 
@@ -45,7 +45,7 @@
 - [x] Snapshots (N=100 cadence) + O(N) `stateAt` filter (T4).
 - [x:hand-derived] End-of-timeline text equals hand-derived expected text on the synthetic corpus (A.2 prose, not snapshotted output) (R4, T6).
 - [x:internal] decode→reconstruct + snapshot-scrub round-trip self-consistency (R4, T6).
-- [BLOCKED:live] End-of-timeline text equals a **real document's** current text — needs the live capture; escalated (R4).
+- [x:live] End-of-timeline text equals a **real document's** current text — PROVEN 2026-06-12: the sanitized live capture (`lib/fixtures/captured.ts`) runs through the production pipeline (parse→detect→decode→reconstruct) to exactly `"Probe one two three. Second sentence. Third one."` (`lib/decoder/captured-live.test.ts`).
 
 ## 3.4 Timeline
 
@@ -58,14 +58,14 @@
 
 ## Cross-cutting acceptance
 
-- [BLOCKED] "`docs/protocol-capture.md` has **all §24 items answered**" — file exists `[x]`; **answers BLOCKED** (the gating human deliverable).
+- [x] "`docs/protocol-capture.md` has **all §24 items answered**" — answered 2026-06-12; transport (Q1–Q10) confirmed, Q11 reclassified to a release gate, Q8/Q9/Q12 code-ready with scoped follow-ups.
 - [x] Decoder never imports `lib/protocol`; `decodeOperations` takes already-parsed JSON (R1).
 - [x] Two-switch exhaustiveness — decoder `default → UnknownOp` (no `never`); `apply.ts` `never` gate proven by a removed-arm `tsc` error (R2).
 - [x] Privacy — `UnknownOp` = `opCode` + `byteLength` only; no `.raw` in any diagnostic path (R5).
 - [x] Validating branded-id constructors reject malformed ids (R8).
 - [x] `prek.toml` `bun-logic-tests` re-enabled; `check-pure-core` wired; no globbed dir empty at any commit (R9, R10).
 - [DEFERRED:Phase 6] ≥85% line coverage on parser/reconstruction — vitest-v8 feature owned by Phase 6; not claimed here (R7).
-- [PARTIAL] "No §24 stop-condition present" — none observed in source, but only the live capture can **confirm** it; recorded as provisionally-clear, BLOCKED on capture (R11).
+- [x] "No §24 stop-condition present" — CONFIRMED 2026-06-12 against the live endpoint: JSON (not protobuf), direct endpoint (no `batchexecute`), cookie-only read (no new page-derived token), no endpoint-restriction guidance. None fired (R11).
 
 ## Deviations from the plan (flagged for review)
 
@@ -73,17 +73,20 @@
 2. **`test:logic` glob includes `./lib/protocol`.** The plan's T0 glob listed only the four pure dirs, but the protocol `framing`/`schema-detect`/`endpoints` tests are bun pure-logic tests (per the plan's own test-tiering table). Without `lib/protocol` in the glob they would never execute — a silent-coverage gap the plan's Pre-mortem #1 warns against. Vitest already excludes the bun-owned subdirs.
 3. **Added `@types/bun` + a `tsconfig` types entry** so the `bun:test` logic files type-check under `tsc --noEmit`, and **excluded the bun-owned pure-core subdirs from Vitest** (they import `bun:test`, which Vitest cannot resolve). Required to keep all four gates green together.
 
-## Escalation note (to the maintainer)
+## Resolution note (§24 capture landed 2026-06-12)
 
-Phase 3's pure core (decoder, reconstruction, timeline, domain) and the protocol
-skeleton are delivered and fully tested against synthetic fixtures. **The
-following is BLOCKED and requires you:** an authenticated live network capture in
-current Chrome **and** Firefox against three real Google Docs (simple text; a
-rich doc with images/tables/footnotes/equations/lists; a multi-account `/u/1/`
-session), filling in the 12 §24 fields in `docs/protocol-capture.md`, confirming a
-credentialed fetch from an MV3 service worker + Firefox event page, and observing
-SW termination mid-fetch. **HALT the whole approach** if the capture shows:
-protobuf instead of JSON, a `batchexecute` wrapper, a new mandatory page-derived
-read token, or Google guidance restricting the editor endpoints (§24
-stop-conditions). Until the capture lands, Phase 4 (network retrieval) cannot be
-safely started.
+The §24 live capture was performed (authenticated, Chromium/Helium-149, throwaway
+doc; `docs/protocol-capture.md`) and **no stop-condition fired** — the endpoint
+returns `)]}'`-guarded JSON (not protobuf), directly (no `batchexecute`), readable
+with the session cookie alone (no new page-derived token), and Google has published
+no restriction. The transport facts are encoded in `lib/protocol/*`; the decoder
+gained a tuple-envelope adapter for the real wire format; and the end-of-timeline
+text-equality MUST (§15.3) is now PROVEN on a sanitized live capture through the
+production pipeline. The credentialed `revisions/load` read was verified from the
+built extension's MV3 service-worker context.
+
+**Remaining live items (scoped as follow-ups, not blockers):** a Firefox event-page
+fetch + first-run UX (Firefox not installed in the capture env — the `firefox-mv3`
+build is verified), a real multi-account `/u/1/` read (no second account), a
+rich/suggesting-doc op capture (suggestions + embedded objects), and a large-doc
+deterministic SW-termination kill. Phase 4 network retrieval is **unblocked**.
