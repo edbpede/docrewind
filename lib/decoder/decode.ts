@@ -91,17 +91,19 @@ function decodeOperation(raw: unknown, revisionId: RevisionId): Operation {
     case "ds": {
       const si = asPositiveInt(field(raw, "si"));
       const ei = asPositiveInt(field(raw, "ei"));
-      if (si === undefined || ei === undefined) {
+      if (si === undefined || ei === undefined || si > ei) {
         return unknownOp(raw, ty, revisionId);
       }
       return { ty: "ds", si, ei };
     }
     case "mlti": {
       const mts = field(raw, "mts");
-      const subs: readonly unknown[] = Array.isArray(mts) ? mts : [];
+      if (!Array.isArray(mts)) {
+        return unknownOp(raw, ty, revisionId);
+      }
       return {
         ty: "mlti",
-        mts: subs.map((sub) => decodeOperation(sub, revisionId)),
+        mts: mts.map((sub) => decodeOperation(sub, revisionId)),
       };
     }
     case "iss": {
@@ -115,7 +117,7 @@ function decodeOperation(raw: unknown, revisionId: RevisionId): Operation {
     case "dss": {
       const si = asPositiveInt(field(raw, "si"));
       const ei = asPositiveInt(field(raw, "ei"));
-      if (si === undefined || ei === undefined) {
+      if (si === undefined || ei === undefined || si > ei) {
         return unknownOp(raw, ty, revisionId);
       }
       return { ty: "dss", si, ei };
@@ -123,7 +125,7 @@ function decodeOperation(raw: unknown, revisionId: RevisionId): Operation {
     case "msfd": {
       const si = asPositiveInt(field(raw, "si"));
       const ei = asPositiveInt(field(raw, "ei"));
-      if (si === undefined || ei === undefined) {
+      if (si === undefined || ei === undefined || si > ei) {
         return unknownOp(raw, ty, revisionId);
       }
       return { ty: "msfd", si, ei };
@@ -131,7 +133,7 @@ function decodeOperation(raw: unknown, revisionId: RevisionId): Operation {
     case "usfd": {
       const si = asPositiveInt(field(raw, "si"));
       const ei = asPositiveInt(field(raw, "ei"));
-      if (si === undefined || ei === undefined) {
+      if (si === undefined || ei === undefined || si > ei) {
         return unknownOp(raw, ty, revisionId);
       }
       return { ty: "usfd", si, ei };

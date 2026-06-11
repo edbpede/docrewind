@@ -5,8 +5,11 @@
 // JSON and never imports this module. Labeled PROVISIONAL — pending §24 — but
 // safe to implement now: the guard string is standard Google behavior (A.3).
 
+import { DEFAULT_TRANSPORT } from "./types";
+
 // The standard Google anti-JSON-hijacking guard line (A.3). PROVISIONAL — §24.
-const GUARD_PREFIX = ")]}'";
+// Single source of truth: tracks DEFAULT_TRANSPORT so a §24 change edits one site.
+const GUARD_PREFIX = DEFAULT_TRANSPORT.guardPrefix;
 
 /**
  * Fail-safe-strip the `)]}'` guard prefix (and a single trailing newline) if

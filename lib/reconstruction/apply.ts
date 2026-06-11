@@ -85,7 +85,10 @@ function tombstoneRange(
       continue; // already deleted: not a live position
     }
     count++;
-    if (count >= si && count <= ei && !isEndOfBody(el)) {
+    if (count > ei) {
+      break; // live positions only grow from here; nothing left in [si, ei]
+    }
+    if (count >= si && !isEndOfBody(el)) {
       el.deleteRevision = revisionId;
     }
   }
@@ -104,7 +107,10 @@ function markRange(
       continue;
     }
     count++;
-    if (count >= si && count <= ei && el.kind === "char") {
+    if (count > ei) {
+      break; // live positions only grow from here; nothing left in [si, ei]
+    }
+    if (count >= si && el.kind === "char") {
       el.suggestionState = state;
     }
   }

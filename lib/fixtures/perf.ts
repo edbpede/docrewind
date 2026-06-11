@@ -19,6 +19,13 @@ export interface GeneratedCorpus {
  * final text is the concatenation of the generated characters.
  */
 export function buildLinearInsertCorpus(n: number): GeneratedCorpus {
+  // Guard a non-negative safe integer so n=Infinity can't hang the loop and
+  // n=NaN/-1 can't silently yield an empty corpus; n=0 stays a valid degenerate
+  // case. TypeError mirrors the numeric-validation precedent in
+  // lib/domain/ids.ts (asRevisionId rejects non-integer/Infinity the same way).
+  if (!Number.isSafeInteger(n) || n < 0) {
+    throw new TypeError("buildLinearInsertCorpus: expected a non-negative safe integer");
+  }
   const changelog: Array<Record<string, unknown>> = [];
   let expected = "";
   for (let i = 0; i < n; i++) {

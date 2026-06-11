@@ -50,8 +50,8 @@ hooks = [
   # TypeScript type-check only (noEmit). Runs on commit.
   { id = "tsc-compile", name = "TypeScript type-check", language = "system",
     entry = "bun run compile", files = '\.(ts|tsx)$', pass_filenames = false },
-  # Pure-core purity guard — fails if #imports/browser.*/wxt leak into the four
-  # pure dirs (decoder/reconstruction/timeline/domain). Durable into Phase 4.
+  # Pure-core purity guard — fails if #imports/browser.*/wxt leak into the six
+  # pure dirs (decoder/reconstruction/timeline/domain/protocol/fixtures). Durable into Phase 4.
   { id = "check-pure-core", name = "Pure-core purity guard", language = "system",
     entry = "bash scripts/check-pure-core.sh", pass_filenames = false },
   # Vitest (Solid/storage/browser-API). Heavier — restrict to pre-push.

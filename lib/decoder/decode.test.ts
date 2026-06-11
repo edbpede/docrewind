@@ -128,6 +128,20 @@ describe("decodeOperations — unknown-op isolation + privacy (R5)", () => {
     if (op.ty !== "unknown") return;
     expect(op.opCode).toBe("(missing)");
   });
+
+  test("degrades a delete-family op with a reversed range to UnknownOp", () => {
+    const op = onlyOp(entry({ ty: "ds", si: 10, ei: 1 })); // si > ei
+    expect(op.ty).toBe("unknown");
+    if (op.ty !== "unknown") return;
+    expect(op.opCode).toBe("ds");
+  });
+
+  test("degrades an mlti op with non-array mts to UnknownOp", () => {
+    const op = onlyOp(entry({ ty: "mlti", mts: "not-array" }));
+    expect(op.ty).toBe("unknown");
+    if (op.ty !== "unknown") return;
+    expect(op.opCode).toBe("mlti");
+  });
 });
 
 describe("decodeOperations — revision metadata", () => {

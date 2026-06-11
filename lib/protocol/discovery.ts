@@ -8,7 +8,7 @@
 // is current is UNCONFIRMED until §24, so the strategy is left as a placeholder
 // rather than speculatively encoded.
 
-import type { RevisionId } from "../domain/ids";
+import type { DocId, RevisionId } from "../domain/ids";
 
 /** Candidate discovery mechanisms (A.4). Which is current is §24-gated. */
 export type DiscoveryStrategy =
@@ -33,5 +33,5 @@ export type RangeProbe = "in-range" | "too-high";
 export interface RevisionRangeDiscovery {
   readonly strategy: DiscoveryStrategy;
   /** Resolve the maximum valid revision id for a document. */
-  discoverUpperBound(docId: string): Promise<RevisionId>;
+  discoverUpperBound(docId: DocId): Promise<RevisionId>;
 }

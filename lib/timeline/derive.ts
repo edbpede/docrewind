@@ -178,9 +178,28 @@ function derivePauses(revisions: readonly DecodedRevision[], pauseMs: number): P
   return events;
 }
 
+/** Sort key placing each event at its anchoring revision (chronological order). */
+function eventRevisionKey(event: TimelineEvent): number {
+  switch (event.kind) {
+    case "session":
+      return Number(event.span.start);
+    case "large-insertion":
+    case "large-deletion":
+      return Number(event.atRevision);
+    case "pause":
+      return Number(event.afterRevision);
+  }
+}
+
 /**
  * Derive timeline events from decoded revisions: session groupings, large
  * insertions/deletions, and pauses. Deterministic given the same input.
+ *
+ * Events are returned in chronological (revision) order. Input revisions are
+ * monotonically increasing, so ordering by anchor revision == chronological
+ * order. `Array.prototype.sort` is stable (TimSort), so the merge order below
+ * (session < large-edit < pause) deterministically breaks ties at a revision
+ * that anchors more than one event kind.
  */
 export function deriveTimeline(
   revisions: readonly DecodedRevision[],
@@ -194,5 +213,5 @@ export function deriveTimeline(
     ...deriveSessions(revisions, sessionIdleMs),
     ...deriveLargeEdits(revisions, largeEditThreshold),
     ...derivePauses(revisions, pauseMs),
-  ];
+  ].sort((a, b) => eventRevisionKey(a) - eventRevisionKey(b));
 }

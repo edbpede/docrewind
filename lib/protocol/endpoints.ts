@@ -24,6 +24,9 @@ export interface RevisionsLoadParams {
  * the path/query shape is confirmed-historical but not live-settled for 2026.
  */
 export function buildRevisionsLoadUrl(params: RevisionsLoadParams): string {
+  if (params.userIndex !== null && (!Number.isInteger(params.userIndex) || params.userIndex < 0)) {
+    throw new TypeError("buildRevisionsLoadUrl: userIndex must be a non-negative integer or null");
+  }
   const userSegment = params.userIndex !== null ? `/u/${params.userIndex}` : "";
   const query = new URLSearchParams({
     id: params.docId,
@@ -41,7 +44,16 @@ const USER_INDEX_PATTERN = /\/u\/(\d+)\//;
  * a single-account path. Confirmed-historical (A.5).
  */
 export function detectUserIndex(url: string): number | null {
-  const match = USER_INDEX_PATTERN.exec(url);
+  // Match against the pathname only, so a `/u/{N}/` embedded in a query or
+  // fragment can't masquerade as the multi-account slot. Path-only/relative
+  // inputs throw in `new URL` (no base); fall back to the raw string for them.
+  let haystack: string;
+  try {
+    haystack = new URL(url).pathname;
+  } catch {
+    haystack = url;
+  }
+  const match = USER_INDEX_PATTERN.exec(haystack);
   if (match?.[1] === undefined) {
     return null;
   }
