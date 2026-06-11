@@ -16,7 +16,7 @@
     "lib": ["esnext", "dom", "dom.iterable"],
     "jsx": "preserve",
     "jsxImportSource": "solid-js",
-    "types": ["@types/chrome"],
+    "types": ["@types/chrome", "@types/bun"],
     "noEmit": true,
     "skipLibCheck": true,
     "paths": { "@/*": ["./*"] }

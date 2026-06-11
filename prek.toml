@@ -35,12 +35,10 @@ hooks = [
 ]
 
 # ============================================================
-# PROJECT-LOCAL HOOKS — Bun only. Wired to real package.json scripts (Phase 2).
-# Confirmed against package.json: `check`, `compile`, `test:run` all exist.
-#   - biome-check / tsc-compile run at PRE-COMMIT  -> the Phase 2 green gate
-#   - vitest runs at PRE-PUSH                      -> green via the Phase 2 smoke test
-# `bun-logic-tests` stays deferred: its lib/parser|reconstruction|timeline globs
-# do not exist until Phase 3 (`bun test` on missing dirs fails every push).
+# PROJECT-LOCAL HOOKS — Bun only. Wired to real package.json scripts.
+# Confirmed against package.json: `check`, `compile`, `test:run`, `test:logic` exist.
+#   - biome-check / tsc-compile / check-pure-core run at PRE-COMMIT -> green gate
+#   - vitest / bun-logic-tests run at PRE-PUSH
 # (Optional `bun run build` pre-push gate deferred to Phase 7 — CI covers it.)
 # ============================================================
 [[repos]]
@@ -52,11 +50,14 @@ hooks = [
   # TypeScript type-check only (noEmit). Runs on commit.
   { id = "tsc-compile", name = "TypeScript type-check", language = "system",
     entry = "bun run compile", files = '\.(ts|tsx)$', pass_filenames = false },
+  # Pure-core purity guard — fails if #imports/browser.*/wxt leak into the four
+  # pure dirs (decoder/reconstruction/timeline/domain). Durable into Phase 4.
+  { id = "check-pure-core", name = "Pure-core purity guard", language = "system",
+    entry = "bash scripts/check-pure-core.sh", pass_filenames = false },
   # Vitest (Solid/storage/browser-API). Heavier — restrict to pre-push.
   { id = "vitest", name = "Vitest unit/component", language = "system",
     entry = "bun run test:run", stages = ["pre-push"], pass_filenames = false },
-  # Pure-logic Bun tests — RE-ENABLE IN PHASE 3 (lib/parser|reconstruction|timeline
-  # do not exist yet; `bun test` on missing dirs fails every push).
-  # { id = "bun-logic-tests", name = "Bun pure-logic tests", language = "system",
-  #   entry = "bun run test:logic", stages = ["pre-push"], pass_filenames = false },
+  # Pure-logic Bun tests (decoder/reconstruction/timeline/domain). Pre-push.
+  { id = "bun-logic-tests", name = "Bun pure-logic tests", language = "system",
+    entry = "bun run test:logic", stages = ["pre-push"], pass_filenames = false },
 ]
