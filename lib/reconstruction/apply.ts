@@ -17,6 +17,7 @@ import type { OpaqueStructure, Operation } from "../decoder/types";
 import type { RevisionId } from "../domain/ids";
 import type { DecodedRevision } from "../domain/model";
 import type { CharElement, DocumentModel, SuggestionState, TextChar } from "./model";
+import { isEndOfBody } from "./model";
 
 /** Physical index of the `livePos`-th (1-indexed) live element, or end-of-array. */
 function physicalIndexOfLivePosition(chars: readonly CharElement[], livePos: number): number {
@@ -84,7 +85,7 @@ function tombstoneRange(
       continue; // already deleted: not a live position
     }
     count++;
-    if (count >= si && count <= ei && el.kind !== "eob") {
+    if (count >= si && count <= ei && !isEndOfBody(el)) {
       el.deleteRevision = revisionId;
     }
   }

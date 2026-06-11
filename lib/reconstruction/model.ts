@@ -74,7 +74,7 @@ export function isEndOfBody(el: CharElement): el is BodyBoundary {
 }
 
 /** Deep-clone an element (primitive fields only — a shallow copy suffices). */
-export function cloneElement(el: CharElement): CharElement {
+function cloneElement(el: CharElement): CharElement {
   switch (el.kind) {
     case "char":
       return {
