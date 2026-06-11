@@ -1,1006 +1,735 @@
 ---
-type: 'agent_requested'
-description: 'Bun + SolidJS + UnoCSS Coding Guidelines'
+type: "agent_requested"
+description: "SolidJS + WXT + Bun browser-extension stack coding guidelines"
 ---
+# SolidJS + WXT + Bun: Modern Cross-Browser Extension Engineering
 
-# Bun + SolidJS + TypeScript + UnoCSS + Browser Extension Agent Coding Playbook
+This stack builds Manifest V3 cross-browser extensions (Chrome + Firefox) with **SolidJS** fine-grained reactivity, **WXT** as the file-based extension framework (Vite under the hood), **Bun** as package manager / script runner / unit-test runtime for tooling, **UnoCSS presetWind4** for styling, **Biome** for lint+format, and **Vitest + Playwright** for tests. It is exceptional at shipping tiny, fast, no-virtual-DOM UIs into popups, options pages, side panels, and content-script shadow roots from one codebase, while WXT erases the manifest/cross-browser boilerplate. Optimize for: components that run **once**, signals read inside JSX, the unified promise-based `browser.*` global, and typed storage/messaging wrappers.
 
-## Agent Operating Contract
+The two biggest ways an agent writes wrong-but-plausible code here both come from importing habits from adjacent ecosystems. **(1) React habits poison SolidJS:** destructuring props, calling `useState`/`useEffect`, putting logic that "re-runs on render," using `.map()` and ternaries for lists/conditionals, and treating `createEffect` as a place to derive state. Solid components are **not** re-rendered — these patterns silently break reactivity. **(2) Node/npm habits poison Bun and the toolchain:** reaching for `npm install`/`npx`, hand-writing `manifest.json`, importing `chrome.*` callback APIs or `webextension-polyfill` manually, and running `bun test` against Solid component tests (which belong to Vitest). Show the modern idiom once and well; assume the latest stable floor is met.
 
-This playbook is implementation guidance for AI coding agents working in a Bun, SolidJS, TypeScript, UnoCSS codebase, including WebExtensions-style browser extension projects.
+## Stack snapshot & versions
 
-When creating code:
+- **Research date:** June 11, 2026
+- **Research basis:** current official docs, release notes, specifications, changelogs, and primary repositories.
 
-- Use the defaults and decision matrix before inventing structure.
-- Prefer stack-native APIs and repository conventions.
-- Add the smallest complete implementation that fits the task.
+| Tool | Version | Notes |
+|---|---|---|
+| TypeScript | 6.0.3 | `strict` is the default since 6.0; `moduleResolution` resolves to `bundler` from `module`. |
+| Bun | 1.3.14 | Package manager + script/test runner; `bun.lock` text lockfile stable since 1.2. |
+| SolidJS | 1.9.11 | 1.9.x is the stable line; 2.0 is beta-only — do **not** use 2.0 APIs in production. |
+| UnoCSS (`unocss`, `@unocss/preset-wind4`) | 66.5.x | presetWind4 is the current Tailwind-4-compatible preset. |
+| WXT | 0.20.26 | 0.20 is the v1.0 release candidate; introduced `#imports` and the polyfill-free `browser`. |
+| `@wxt-dev/module-solid` | 1.1.4 | Wires `vite-plugin-solid` + Solid auto-imports. |
+| `@wxt-dev/unocss` | 1.0.1 | UnoCSS WXT module. |
+| `@wxt-dev/storage` | 1.2.8 | Backs `wxt/utils/storage` / `#imports`. |
+| Vitest | 4.1.8 | 4.x stable; Browser Mode is stable; 5.0 is beta-only. |
+| Playwright | 1.60.0 | Extension E2E in Chromium only. |
+| Biome | 2.4.16 | Unified lint + format; 507 lint rules; type-aware rules since v2. |
+| `idb` | 8.0.3 | Promise wrapper for IndexedDB (Jake Archibald). |
 
-When modifying code:
+**Superseded / wrong-ecosystem choices to avoid:** Plasmo (maintenance mode → use **WXT**); CRXJS (narrower build-only tool → WXT covers it); `presetUno`/`presetWind`/`presetWind3` (older → **presetWind4**); ESLint + Prettier (heavier two-tool path → **Biome**); `bun test` for Solid component tests (→ **Vitest**); manual `webextension-polyfill` import and `chrome.*` callbacks (→ WXT's `browser`); `localStorage` in extensions (→ IndexedDB / `storage.local`).
 
-- Preserve runtime behaviour unless asked to change it.
-- Follow nearby established project conventions unless they conflict with a Reject item.
-- Improve only nearby touched code toward this playbook.
-- Do not perform broad unrelated rewrites.
+## Project layout
 
-When refactoring:
+WXT is convention-driven: files under `entrypoints/` become manifest entries automatically. There is **no hand-written `manifest.json`** — WXT generates it per browser/MV from `wxt.config.ts` + entrypoints.
 
-- Identify the stale or rejected pattern first.
-- Choose the smallest safe migration path.
-- Keep changes reviewable.
-- Surface broad migrations instead of silently doing them.
+```
+my-extension/
+├─ entrypoints/
+│  ├─ background.ts            # MV3 service worker (defineBackground)
+│  ├─ popup/
+│  │  ├─ index.html            # action popup host page
+│  │  └─ main.tsx              # Solid render() mount
+│  ├─ options/
+│  │  ├─ index.html
+│  │  └─ main.tsx
+│  ├─ sidepanel/
+│  │  ├─ index.html
+│  │  └─ main.tsx
+│  └─ content.tsx              # *.content.ts(x) → content script
+├─ components/                 # shared Solid components
+├─ lib/                        # storage.ts, messaging.ts, db.ts, etc.
+├─ public/                     # static assets + icon/*.png (copied verbatim)
+├─ assets/                     # bundled assets (imported)
+├─ uno.config.ts
+├─ wxt.config.ts
+├─ biome.json
+├─ tsconfig.json
+├─ vitest.config.ts
+├─ playwright.config.ts
+└─ package.json                # name/version/description feed the manifest
+```
 
-When reviewing:
+`.wxt/` holds generated TypeScript types (run via `wxt prepare`, usually a `postinstall`). `.output/chrome-mv3/` and `.output/firefox-mv2|mv3/` hold builds. Both are gitignored.
 
-- Check Solid reactivity, type safety, security, data flow, UnoCSS extraction, verification commands, extension boundaries, permissions, and messaging.
-- Reject adjacent-ecosystem drift.
+## Bun: package manager, script runner, test runtime
 
-When uncertain:
+In a browser-extension project Bun's server APIs (`Bun.serve`, `Bun.sql`, `Bun.file`, `Bun.password`, `Bun.$`) are **irrelevant** — nothing Bun-runtime ships to the browser; Vite (via WXT) bundles everything that runs in the extension. Bun's job here is **install deps, run scripts, and run non-DOM unit tests fast**. Bun runs `.ts`/`.tsx` directly with no compile step, which is why scripts and config files need no build.
 
-- Prefer conservative stable defaults.
-- Do not invent APIs, commands, build tools, config, routers, validation libraries, component libraries, extension helper frameworks, test runners, formatters, or migration steps.
-- Use the repository’s existing choice whenever this playbook marks something project-local.
+Use `bun` commands; never reintroduce npm/pnpm/yarn habits:
 
-## Stack Snapshot & Defaults
-
-- **Research date:** 2026-05-13
-- **Research basis:** Current official docs, release notes, migration guides, specifications, changelogs, and primary repositories.
-
-This stack is a **Bun-first**, **SolidJS TSX**, **UnoCSS presetWind4**, optionally **WebExtensions-style browser extension** stack.
-
-Stable defaults that materially affect code today:
-
-- **Bun:** Use Bun as the package manager, script runner, and default CLI surface in Bun repositories. Keep `bun.lock` authoritative. Bun transpiles TypeScript and TSX, includes a test runner, and provides Bun-specific TypeScript defaults, but it does **not** type-check and its defaults are not automatically correct for Solid or browser-only extension code. citeturn23view1turn23view2turn23view3turn22view0
-- **SolidJS:** Current stable work is in the **1.x / 1.9.x** line. Use stable Solid 1.x APIs and conventions. Components run once, then Solid updates only the reactive reads that changed. Write Solid, not React-with-different-imports. Do not import Solid 2 beta ideas into production code unless the repository has explicitly adopted them. citeturn5search1turn3search13turn0search13turn0search19
-- **TypeScript:** Repository pin wins. Modern TypeScript defaults changed materially, and recent TypeScript/Bun init defaults still need Solid-specific JSX overrides. A Solid project must explicitly set `jsx: "preserve"` and `jsxImportSource: "solid-js"`. citeturn20view0turn21view0turn22view0
-- **UnoCSS:** Current stable work is in the **66.x** line. Use an explicit `uno.config.ts`, explicit presets, and extraction-aware class patterns. `presetWind4` is the Tailwind 4-compatible preset; its config keys differ from Wind3 and Tailwind-oriented examples. citeturn19search1turn19search5turn15view3turn15view1
-- **Browser extension target:** For extension projects, default new work to **Manifest V3**. Chrome 139+ no longer runs Manifest V2. For **Chromium + Firefox**, MV3 background handling is not identical: Chromium uses `background.service_worker`; Firefox still uses `background.scripts` / `background.page` as its MV3 background context. Cross-browser code must account for that difference. citeturn33view0turn25view1turn25view0
-- **Package manager default:** Use Bun commands in a Bun repository. Do not add or update npm, pnpm, or Yarn lockfiles.
-- **Workspace boundary:** In new Bun workspaces/monorepos, isolated installs are the default. Do not rely on phantom dependencies.
-- **Project-local override policy:** Keep the repository’s existing router, bundler, test runner, deployment target, browser environment exposure mechanism, extension framework, linter, formatter, and component library unless asked to change them or they conflict with a Reject item.
-- **Bun config policy:** Use `bunfig.toml` only for Bun-specific behaviour. Keep general project config in `package.json`, `tsconfig.json`, and the existing tool config files.
-
-## Decision Matrix
-
-| Scenario | Use / Default | Conditional | Avoid / Reject |
-|---|---|---|---|
-| Install dependencies | `bun install`, `bun add`, `bun add -d` | `bun install --frozen-lockfile` for CI/repro checks | `npm`, `pnpm`, `yarn`, or manual lockfile edits in a Bun repo |
-| Run repository scripts | `bun run <script>` | Put Bun flags before `run`, e.g. `bun --watch run dev` | `bun run dev --watch` when you meant a Bun flag |
-| Run one-off local tools | `bunx <tool>` | Keep the repo’s pinned tool version | `npx` by habit |
-| TypeScript init | Explicit Solid JSX config: `jsx: "preserve"` and `jsxImportSource: "solid-js"` | Keep repository module/resolution settings unless fixing an actual mismatch | Raw `tsc --init` / `bun init` JSX defaults left unchanged |
-| Local primitive/reactive value | `createSignal` | Inline pure expressions when trivial | React hooks or ad-hoc mutable locals |
-| Nested structured state | `createStore` | `produce(...)` for dense nested edits | Direct mutation of store state; `createMutable` as general default |
-| Derived value | `createMemo` or direct derivation from signals | Inline in JSX if trivial and cheap | `createEffect` that writes another signal |
-| Async read in plain Solid | `createResource` + `<Suspense>` + `<ErrorBoundary>` | Use repo/router-native data APIs if already adopted | Manual `loading/error/data` signal triplets everywhere in new code |
-| Simple conditional UI | Plain ternary or `&&` | `<Show>` when you need a fallback, accessor child, or keyed recreation | Effect-driven DOM toggling |
-| Re-ordering / variable-length list | `<For>` |  | `.map()` in reactive JSX for dynamic lists |
-| Stable-length list with frequently changing item contents | `<Index>` |  | `<For>` by habit |
-| Common DOM events | `onClick`, `onInput`, `onKeyDown` |  | React event assumptions |
-| Custom events, direct listeners, capture/passive/once options | `on:*` | Use `handleEvent` object form when listener options matter | Deprecated `oncapture:` or custom-event handling through delegated `on*` |
-| Solid props | Read props directly or partition with `splitProps` | Use `mergeProps` for defaults; `children(...)` for repeated children reads | Destructuring props into plain locals when values must stay reactive |
-| Styling repeated patterns | UnoCSS `shortcuts` | Small local class map when variants are finite | Style-only wrapper components for every repeated utility string |
-| Dynamic-looking utility selection | Static literals, enum-like maps, `shortcuts`, or `safelist` | Extend Uno extraction for `.ts` / `.js` only when needed | Template-built utility names like ``bg-${tone}-500`` |
-| UnoCSS config | Dedicated `uno.config.ts` with explicit `presetWind4()` | Enable transformers only when used | Tailwind config assumptions or hidden inline config |
-| UnoCSS reset | `presetWind4({ preflights: { reset: true } })` if reset is needed | Leave off if the repo intentionally avoids reset | Importing old reset packages by default in new `presetWind4` work |
-| Bun-only APIs | Isolate to Bun-only files/config and add Bun types only where needed | Guard with `process.versions.bun` when one module must branch | Using `Bun` globals directly in browser/shared UI modules |
-| Routing | Use the repository’s existing router/meta-framework | Add one only if the task explicitly requires routing | Inventing `@solidjs/router` or SolidStart because examples elsewhere use them |
-| Auto-run on known hosts | `content_scripts` or `scripting.registerContentScripts()` | `registerContentScripts()` persists; `executeScript()` does not | Re-injecting everything with one-off scripting calls on every navigation |
-| User-invoked tab access | `activeTab` + `scripting.executeScript()` for one-tab, user-triggered features | Optional host permissions for broader opt-in access | Broad `host_permissions` or `<all_urls>` by default |
-| Cross-browser MV3 background | Dual background declaration or repo-specific split manifests when Firefox matters | Check browser support matrix before relying on dual declaration for old Chromium | `service_worker`-only manifests for a Firefox target |
-| Extension messaging | One typed dispatcher per context; JSON-safe payloads; `return true` for async responses by default | Namespace follows repository convention | Multiple ad-hoc `async` listeners returning accidental `undefined` / `null` |
-| Extension API namespace | Repository’s existing convention | `browser.*` is acceptable only when Chromium 148+ is guaranteed and there is no `devtools_page` | Blindly rewriting a mixed codebase to `browser.*` |
-
-## Implementation Guidelines
-
-### Code Design
-
-#### Type Solid components as plain functions first
-
-**Default:** Use plain functions with explicit props and `JSX.Element` returns. This is the safest default and handles generics cleanly.
-
-```tsx
-// src/components/Greeting.tsx
-import type { JSX } from "solid-js";
-
-type GreetingProps = {
-  name: string;
-};
-
-export function Greeting(props: GreetingProps): JSX.Element {
-  return <p>Hello, {props.name}</p>;
+```jsonc
+// package.json
+{
+  "name": "my-extension",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wxt",
+    "dev:firefox": "wxt -b firefox",
+    "build": "wxt build",
+    "build:firefox": "wxt build -b firefox",
+    "zip": "wxt zip",
+    "zip:firefox": "wxt zip -b firefox",
+    "compile": "tsc --noEmit",
+    "test": "vitest",
+    "test:e2e": "playwright test",
+    "check": "biome check --write .",
+    "postinstall": "wxt prepare"
+  }
 }
 ```
 
-**Conditional:** `Component<Props>` is fine when the surrounding codebase already uses it and the component is not generic.
+Commands: `bun install` (writes `bun.lock`, the text lockfile stable since Bun 1.2 — commit it), `bun add -D wxt`, `bun run dev`, `bunx wxt@latest init` to scaffold. In CI use `bun install --frozen-lockfile`. `bunfig.toml` is optional; add it only when you need registry/install tweaks:
 
-**Reject:** Do not force `Component` types onto generic components. Write the generic function signature explicitly.
-
-**Existing code:** Match the local file style. Do not rewrite every component signature just to standardise on one notation.
-
-#### Treat the component body as setup, not as a re-rendering function
-
-**Default:** Assume a Solid component function runs once to set up reactive relationships. Put signal/store/memo/effect creation in the component body. Put ongoing reactive work in memos, JSX expressions, resources, and effects. citeturn3search13turn0search13turn4search6
-
-**Reject:** Do not import React’s mental model of “the function runs again on every state change”. Do not add `useState`, `useEffect`, `useMemo`, or `useCallback`.
-
-**Existing code:** When touching a React-like Solid component, fix only the stale local pattern you are editing. Do not broad-rewrite the entire file unless requested.
-
-#### Do not destructure reactive props at the top of the component
-
-**Default:** Read props through `props.<name>`. For default props, use `mergeProps`. For wrapper/forwarding components, use `splitProps`. citeturn4search3turn4search11
-
-**Conditional:** If you need to read `props.children` more than once, use `children(() => props.children)` so children are resolved once and reused safely.
-
-**Reject:** Do not do this in reactive components:
-
-```ts
-const { name } = props;      // breaks reactivity
-const name = props.name;     // also breaks reactivity if cached once
+```toml
+# bunfig.toml
+[install]
+exact = true        # pin exact versions, like Biome recommends for itself
 ```
 
-Use one of these instead:
+**Critical insight:** `bun test` uses Bun's own Jest-style runner executing in the Bun runtime — it does **not** understand `vite-plugin-solid`'s JSX transform, jsdom, or WXT's fake-browser. Solid component and storage tests must run under **Vitest**. Reserve `bun test` (if used at all) for pure, DOM-free logic.
 
-```ts
-const name = () => props.name;
-```
+## TypeScript (strict)
 
-or:
-
-```ts
-const [local, rest] = splitProps(props, ["name"]);
-```
-
-**Existing code:** If a touched component destructures a prop that must stay reactive, migrate that prop access locally. Do not refactor unrelated props in the same file.
-
-### Type Safety and TypeScript Configuration
-
-#### Use a Solid-first TS config for TSX, not Bun’s generic JSX settings
-
-**Default:** In application-level TSX code, keep Solid’s JSX requirements and modern TypeScript/Bun module settings together.
+TypeScript 6.0 makes `strict` the default and resolves `moduleResolution` to `bundler` from `module`. Still declare everything explicitly so the config is self-documenting. Bun runs TS directly and WXT/Vite transpiles for the browser, so TypeScript here is a **type checker only** (`noEmit`).
 
 ```jsonc
 // tsconfig.json
 {
+  "extends": "./.wxt/tsconfig.json",
   "compilerOptions": {
     "strict": true,
-    "jsx": "preserve",
-    "jsxImportSource": "solid-js",
-    "module": "preserve",
-    "moduleResolution": "bundler",
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
     "verbatimModuleSyntax": true,
     "isolatedModules": true,
+    "moduleDetection": "force",
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "target": "esnext",
+    "lib": ["esnext", "dom", "dom.iterable"],
+    "jsx": "preserve",
+    "jsxImportSource": "solid-js",
+    "types": ["@types/chrome"],
     "noEmit": true,
-    "lib": ["es2025", "dom"],
-    "types": []
+    "skipLibCheck": true,
+    "paths": { "@/*": ["./*"] }
   }
 }
 ```
 
-**Why this is the safe default:**
+`jsxImportSource: "solid-js"` + `jsx: "preserve"` is mandatory — `vite-plugin-solid` does the real JSX compile; never set `jsx: "react-jsx"`. Extend `.wxt/tsconfig.json` so WXT's generated path aliases (`@/`, `@@/`) and entrypoint types resolve.
 
-- Solid TSX requires preserved JSX and `jsxImportSource: "solid-js"`.
-- Bun and modern bundled web apps are best represented by `module: "preserve"` plus `moduleResolution: "bundler"` in new work.
-- Recent TypeScript defaults can differ materially from older generated configs.
-- `types: []` avoids accidental global pollution and makes Bun/test/browser globals explicit.
+Use the modern type toolbox:
 
-**Conditional:** If the repository contains Bun-only scripts, server files, Bun-specific tests, or browser-extension build tooling, add Bun types in a separate config or package scope instead of globally across all browser TSX.
+```ts
+// satisfies — validate shape without widening the literal type
+const permissions = ["storage", "tabs"] as const satisfies readonly string[];
 
-```jsonc
-// tsconfig.bun.json
-{
-  "extends": "./tsconfig.json",
-  "compilerOptions": {
-    "lib": ["es2025"],
-    "types": ["bun"]
-  },
-  "include": ["scripts/**/*.ts", "server/**/*.ts"]
+// const type parameter — preserve literal tuple types through a generic
+function defineRoutes<const T extends readonly string[]>(routes: T): T { return routes; }
+
+// discriminated union — exhaustively narrow message shapes
+type Msg =
+  | { kind: "ping" }
+  | { kind: "save"; payload: Note }
+  | { kind: "delete"; id: string };
+
+function handle(msg: Msg) {
+  switch (msg.kind) {
+    case "ping": return "pong";
+    case "save": return msg.payload;     // narrowed
+    case "delete": return msg.id;        // narrowed
+    default: { const _x: never = msg; return _x; }
+  }
+}
+
+// branded type — prevent mixing opaque IDs
+type NoteId = string & { readonly __brand: "NoteId" };
+const asNoteId = (s: string) => s as NoteId;
+
+// using / await using — explicit resource management (TS 5.2+)
+async function readCursor(db: IDBPDatabase<MyDB>) {
+  await using tx = { [Symbol.asyncDispose]: async () => { /* cleanup */ } };
+  // tx disposed at scope exit
 }
 ```
 
-**Browser-extension boundary:** Bun-specific globals, Bun APIs, and Bun TypeScript relaxations belong in Bun-run scripts and tooling, not popup, content, options, or background UI code. Bun’s TS guidance enables options such as `types: ["bun"]`, `moduleResolution: "bundler"`, and `allowImportingTsExtensions`; do not spread those into browser-only extension code unless the repo already standardises on them. citeturn22view0turn23view3
+`noUncheckedIndexedAccess` means `arr[0]` is `T | undefined` — guard before use. Always use **type-only imports** for types so `verbatimModuleSyntax` keeps emit clean: `import { type Browser } from "wxt/browser"`.
 
-**Reject:**
+## SolidJS: fine-grained reactivity (the core mental model)
 
-- `jsx: "react-jsx"` in Solid `.tsx` projects
-- `moduleResolution: "node"` / `"classic"` in new Bun/bundled app code
-- `types: ["*"]` unless the repository explicitly requires broad global types
-- Setting `esModuleInterop` or `allowSyntheticDefaultImports` to `false`
-- `.ts` import suffixes or Bun-only loaders in browser runtime code just because Bun accepts them
-
-**Existing code:** If a repo is on older TypeScript config, change config in a small dedicated commit before touching many TSX files. Do not mix mass tsconfig migration with feature work.
-
-#### Keep type imports explicit
-
-**Default:** Use `import type` when importing types only. With `verbatimModuleSyntax`, this keeps emitted module syntax predictable.
-
-```ts
-import type { JSX } from "solid-js";
-```
-
-**Reject:** Do not rely on deprecated import-elision-era habits. Do not keep value-looking imports that are actually type-only.
-
-#### Bun transpiles, TypeScript type-checks
-
-**Default:** Treat Bun as the runtime/transpiler and TypeScript as the type-checker. Always run the repository type-check after meaningful TS/TSX changes.
-
-**Reject:** Do not assume “it runs under Bun” means “the types are correct”.
-
-#### Keep side-effect imports explicit and valid
-
-**Default:** With modern TypeScript, missing side-effect imports are surfaced more aggressively. Keep CSS and virtual-module imports aligned with the repository’s existing type declarations or bundler/client types.
-
-**Conditional:** If a CSS or virtual-module import errors in a typed project, add the smallest local declaration or repository-standard client types package. Do not globally weaken type-checking to silence it.
-
-### Runtime, Project, and Workspace Boundaries
-
-**Default:** Treat Bun as the tooling/runtime boundary where code actually runs under Bun. Browser-facing Solid UI and extension code must remain browser-safe.
-
-Use:
-
-- `process.env` or `Bun.env` in Bun runtime code
-- the repository’s existing browser environment mechanism in client code
-- standard ESM/TS for shared utilities that must work in the project’s existing build path
-
-**Conditional:** If a shared helper must branch on runtime, use `process.versions.bun` to detect Bun.
-
-**Reject:**
-
-- Importing Bun-only modules into browser components
-- Reading secrets directly from UI code
-- `typeof Bun !== "undefined"` in shared TS unless the project already includes Bun types for that file
-- Spreading Bun types globally across browser/extension code
-
-**Workspace default:** In Bun workspaces/monorepos, isolated installs mean every package must declare its own dependencies. Do not rely on dependencies that are only present elsewhere in the workspace.
-
-### State, Reactivity, and Data Flow
-
-#### Use signals for local scalar state
-
-**Default:** Use `createSignal` for local values such as booleans, selected IDs, counts, open/closed state, and form field values.
-
-#### Use stores for structured nested state
-
-**Default:** Use `createStore` for objects and arrays that need nested reactive reads and targeted updates. citeturn3search1turn3search5
+**SolidJS is not React.** A component function runs **exactly once** to set up a reactive graph; there is no re-render, no virtual DOM, no reconciliation. Only the specific DOM expressions that read a signal update when that signal changes. Everything else follows from this.
 
 ```tsx
-const [state, setState] = createStore({
-  filters: { query: "", onlyOpen: false },
-  items: [] as { id: string; title: string }[],
+import { createSignal } from "solid-js";
+
+function Counter(props: { start: number }) {
+  // This body runs ONCE. console.log fires a single time, ever.
+  const [count, setCount] = createSignal(props.start);
+  console.log("setup");
+
+  // Only the {count()} text node updates — not the function, not the button.
+  return <button onClick={() => setCount((c) => c + 1)}>Count {count()}</button>;
+}
+```
+
+`class`, not `className` (Solid uses standard DOM attribute names). Signals are accessor functions: read with `count()`, write with `setCount(v)`.
+
+### Never destructure props
+
+Props are a reactive proxy whose values are accessed through getters. Destructuring reads the getter **once at setup time** and permanently freezes the value — reactivity is lost. This is the single most common agent error.
+
+```tsx
+// ❌ WRONG — breaks reactivity, `name` never updates
+function Hi({ name }: { name: string }) {
+  return <h1>{name}</h1>;
+}
+
+// ✅ Access reactively
+function Hi(props: { name: string }) {
+  return <h1>{props.name}</h1>;
+}
+
+// ✅ Need defaults / to split? Use the helpers — they preserve getters
+import { mergeProps, splitProps } from "solid-js";
+function Button(props: { label?: string; variant?: string; onClick: () => void }) {
+  const merged = mergeProps({ label: "OK", variant: "primary" }, props);
+  const [local, rest] = splitProps(merged, ["label", "variant"]);
+  return <button class={local.variant} {...rest}>{local.label}</button>;
+}
+```
+
+### Derive with createMemo; don't sync with effects
+
+`createMemo` produces cached derived values that update fine-grainedly. Using `createEffect` to write a signal that mirrors other signals is a React-ism — it causes extra passes and stale reads.
+
+```tsx
+import { createMemo, createSignal } from "solid-js";
+
+const [items, setItems] = createSignal<Note[]>([]);
+const [query, setQuery] = createSignal("");
+
+// ✅ derived state
+const filtered = createMemo(() =>
+  items().filter((n) => n.title.includes(query()))
+);
+
+// ❌ anti-pattern: effect that sets derived state
+// createEffect(() => setFiltered(items().filter(...)));
+```
+
+### Effects, lifecycle, and timing
+
+`createEffect` runs **after** render for side effects (logging, manual DOM, network); it tracks any signal read inside it. `createRenderEffect` runs during render (before paint); `createComputed` runs eagerly and is rarely needed in app code. Use `onMount` for one-time setup, `onCleanup` for teardown.
+
+```tsx
+import { createEffect, onMount, onCleanup, on, untrack, batch } from "solid-js";
+
+createEffect(() => console.log("count is", count()));        // re-runs on count change
+
+// on() — explicit deps, defer skips the initial run
+createEffect(on(query, (q) => search(q), { defer: true }));
+
+onMount(() => {
+  const id = setInterval(tick, 1000);
+  onCleanup(() => clearInterval(id));   // also runs on HMR dispose
 });
 
-setState("filters", "query", "solid");
+// untrack — read without subscribing
+createEffect(() => { if (enabled()) log(untrack(count)); });
+
+// batch — coalesce multiple writes into one update pass
+batch(() => { setA(1); setB(2); });
 ```
 
-**Conditional:** Use `produce(...)` when the touched update is deep and imperative-style edits are clearer than many path arguments.
+### Stores for nested state
 
-**Reject:** Do not mutate store state directly:
-
-```ts
-state.filters.query = "solid";
-```
-
-**Existing code:** If a file already uses `createMutable`, preserve behaviour unless you are explicitly refactoring state management. Do not perform a file-wide mutable-to-store migration as part of unrelated work.
-
-#### Derive state with memos, not effects
-
-**Default:** If a value can be computed from other reactive values, use `createMemo` or compute it directly in JSX if it is trivial. citeturn0search19turn4search6
+`createStore` gives fine-grained reactivity **per nested property** — update one field and only readers of that field update. Use `produce` for mutable-style updates and `reconcile` to diff incoming data (e.g. from storage/DB) into the store without replacing references.
 
 ```tsx
-// src/components/Counter.tsx
-import { createMemo, createSignal, mergeProps, type JSX } from "solid-js";
+import { createStore, produce, reconcile } from "solid-js/store";
 
-type CounterProps = {
-  initial?: number;
-  disabled?: boolean;
-  onCommit?: (value: number) => void;
-};
+const [state, setState] = createStore({ user: { name: "Ada" }, notes: [] as Note[] });
 
-export function Counter(allProps: CounterProps): JSX.Element {
-  const props = mergeProps({ initial: 0, disabled: false }, allProps);
-  const [count, setCount] = createSignal(props.initial);
-  const isEven = createMemo(() => count() % 2 === 0);
+setState("user", "name", "Grace");                       // path update
+setState(produce((s) => { s.notes.push(newNote); }));    // mutable draft
+setState("notes", reconcile(await loadNotesFromDb()));   // diff, keep stable refs
+```
 
-  const increment: JSX.EventHandler<HTMLButtonElement, MouseEvent> = () => {
-    const next = count() + 1;
-    setCount(next);
-    props.onCommit?.(next);
-  };
+### Control flow — never .map() or ternaries the React way
 
-  return (
-    <button
-      type="button"
-      disabled={props.disabled}
-      onClick={increment}
-      class="rounded-md px-3 py-2 text-sm font-medium transition"
-      classList={{
-        "bg-sky-600 text-white": isEven(),
-        "bg-slate-200 text-slate-900": !isEven(),
-      }}
-    >
-      {count()}
-    </button>
-  );
+Because components don't re-render, raw `.map()` and `? :` recreate DOM and lose reactivity. Use Solid's control-flow components.
+
+```tsx
+import { For, Index, Show, Switch, Match, Suspense, ErrorBoundary } from "solid-js";
+
+// <For> — keyed by reference; best when the LIST changes (add/remove/reorder)
+<For each={notes()} fallback={<p>No notes</p>}>
+  {(note) => <li>{note.title}</li>}
+</For>
+
+// <Index> — keyed by index; best when the ITEMS' values change but length is stable
+<Index each={scores()}>
+  {(score, i) => <li>#{i + 1}: {score()}</li>}  {/* note: score is an accessor */}
+</Index>
+
+// <Show> — conditional; `when` also narrows types in the callback form
+<Show when={user()} fallback={<Login />}>
+  {(u) => <Profile user={u()} />}
+</Show>
+
+// <Switch>/<Match> — multi-branch
+<Switch fallback={<NotFound />}>
+  <Match when={route() === "home"}><Home /></Match>
+  <Match when={route() === "settings"}><Settings /></Match>
+</Switch>
+```
+
+**`<For>` vs `<Index>`:** `<For>` diffs by item reference (row identity is stable; reorders move DOM) — its callback receives a plain item and an index *signal*. `<Index>` diffs by position (DOM is stable; the item is an *accessor* `item()`) — ideal for inputs/fixed-length arrays where values mutate. Choosing wrong causes lost focus or unnecessary DOM churn.
+
+### Async, context, lazy, refs
+
+```tsx
+import { createResource, createContext, useContext, lazy, children } from "solid-js";
+
+// createResource + Suspense/ErrorBoundary for async data
+const [notes] = createResource(query, fetchNotes);
+// <ErrorBoundary fallback={<Err/>}><Suspense fallback={<Spin/>}>...</Suspense></ErrorBoundary>
+
+// Context
+const ThemeCtx = createContext<() => string>();
+const theme = useContext(ThemeCtx);
+
+// lazy() for code-split components (rarely needed in small extension UIs)
+const Heavy = lazy(() => import("@/components/Heavy"));
+
+// children() helper — resolve children once for inspection/manipulation
+function List(props: { children: any }) {
+  const resolved = children(() => props.children);
+  return <ul>{resolved()}</ul>;
 }
+
+// refs are plain assignments
+let el!: HTMLDivElement;
+<div ref={el} />;
 ```
 
-**Reject:** Do not mirror derived state with an effect like this:
+Signals can live **outside** components (module scope) for shared global state — perfectly idiomatic in Solid, unlike React. **Never** import `useState`/`useEffect`/`useMemo` — those are React; the Solid equivalents are `createSignal`/`createEffect`/`createMemo`. Solid mounts via `render`/`hydrate` from `solid-js/web`, never `react-dom`.
+
+## WXT: the extension framework
+
+WXT (the modern successor to Plasmo) turns `entrypoints/` files into a generated manifest and runs Vite for bundling + HMR. As of 0.20 — which WXT's own upgrade guide describes as "a release candidate for v1.0" — all WXT utilities are imported from the single virtual module **`#imports`**, the `browser` global is **polyfill-free** ("WXT's browser no longer uses the webextension-polyfill!"; types come from `@types/chrome` rather than `@types/webextension-polyfill`, which the guide notes are "more up-to-date with MV3 APIs, contain less bugs"), and `browser.runtime.onMessage` no longer supports returning a promise to reply.
+
+### wxt.config.ts — full wiring
 
 ```ts
-createEffect(() => setIsEven(count() % 2 === 0));
+// wxt.config.ts
+import { defineConfig } from "wxt";
+
+export default defineConfig({
+  modules: ["@wxt-dev/module-solid", "@wxt-dev/unocss"],
+  // Per-browser manifest; always author properties in MV3 form — WXT down-converts for MV2.
+  manifest: ({ browser }) => ({
+    name: "My Extension",
+    description: "Does a useful thing.",
+    permissions: ["storage", "tabs"],
+    host_permissions: ["https://*.example.com/*"],
+    ...(browser === "firefox"
+      ? { browser_specific_settings: { gecko: { id: "my-ext@example.com" } } }
+      : {}),
+  }),
+  // Exclude UnoCSS from the background (no DOM there)
+  unocss: { excludeEntrypoints: ["background"] },
+  vite: () => ({
+    // extra Vite config if needed; the Solid plugin is added by the module
+  }),
+});
 ```
 
-That adds unnecessary state and can introduce loops or ordering bugs.
+`@wxt-dev/module-solid` adds `vite-plugin-solid`, sets `build.target: "esnext"` (required by Solid's Proxy-based reactivity), and registers Solid auto-imports. Add modules in `wxt.config.ts`, not by hand-wiring Vite plugins.
 
-#### Use effects only for side effects and imperative bridges
+### Entrypoints
 
-**Default:** Use `createEffect` for work that touches the outside world: logging, syncing to a non-Solid library, non-reactive browser APIs, or imperative integration.
-
-**Conditional:** Use `onMount` for one-time imperative DOM work and `onCleanup` to dispose timers, subscriptions, and listeners.
-
-**Reject:** Do not use `createEffect` as a substitute for derived state. Do not update signals inside effects unless you are bridging to an imperative system and the write is clearly bounded.
-
-#### Use `batch` and `untrack` deliberately
-
-**Default:** Use `batch(...)` when you intentionally group several synchronous writes into a single downstream update. Use `untrack(...)` when you need a snapshot read that should not become a dependency.
-
-**Conditional:** `batch(...)` only applies to synchronous work up to the first `await`. If you cross an async boundary, use a new batch after the await if needed.
-
-**Reject:** Do not sprinkle `untrack` to “fix” unclear reactive code. Use it only when you can explain why a read must not subscribe.
-
-### Rendering and Events
-
-#### Call `render` with a function
-
-**Default:** Mount Solid apps like this:
+```ts
+// entrypoints/background.ts — MV3 service worker
+export default defineBackground(() => {
+  // ⚠️ ALL browser.* usage must be INSIDE main/this callback.
+  // Top-level browser.* runs in WXT's Node build context and throws.
+  browser.runtime.onInstalled.addListener(() => console.log("installed"));
+});
+```
 
 ```tsx
-// src/main.tsx
+// entrypoints/popup/main.tsx
 import { render } from "solid-js/web";
-import App from "./App";
+import "virtual:uno.css";
+import App from "@/components/App";
 
-const root = document.getElementById("root");
-if (!root) throw new Error('Missing mount element "#root"');
-
-render(() => <App />, root);
+render(() => <App />, document.getElementById("app")!);
 ```
 
-**Reject:** Do not call `render(<App />, root)`.
+`defineContentScript`, `defineUnlistedScript` follow the same shape. The background **cannot be async** at the top level and must not place runtime code outside the callback — WXT imports the file in Node during build to generate the manifest.
 
-#### Use the right control-flow primitive
+### The browser global — always promise-based
 
-**Default:**
-
-- Use a ternary or `&&` for very small inline conditions.
-- Use `<Show>` when you want a fallback or function child.
-- Use `<For>` when list order/length may change.
-- Use `<Index>` when length/order are stable but item values change often.
-
-**Conditional:** Use `<Show keyed>` only when you need to recreate the subtree even when the condition stays truthy but the value changes.
-
-**Reject:**
-
-- Do not wrap every condition in `<Show>` by habit.
-- Do not use `<For>` for stable fixed-position cells if `<Index>` matches the data shape better.
-- Do not use `.map()` in reactive JSX for dynamic lists.
-
-#### Use native event semantics, not React expectations
-
-**Default:**
-
-- `onInput` fires as the input value changes.
-- `onChange` uses native change semantics.
-- `on*` uses Solid’s delegated event system when supported.
-- `on:*` attaches a direct listener and is the right tool for custom events or listener options.
-
-**Conditional:** When you need `capture`, `once`, or `passive: false`, use `on:*` with a `handleEvent` object.
-
-**Reject:**
-
-- Do not assume React-style synthetic event semantics.
-- Do not rebind handlers reactively by passing signal values directly as event handlers.
-- Do not introduce deprecated `oncapture:` in new code.
-- Do not use React-style camelCase `style` object keys. In Solid, object `style` keys are lower-case, dash-separated CSS property names. citeturn3search21
-
-#### Wrap async UI with `Suspense` and `ErrorBoundary`
-
-**Default:** If component rendering depends on a resource, put the read under `<Suspense>` and a nearby `<ErrorBoundary>`.
-
-**Important boundary:** `ErrorBoundary` catches render/update errors in its subtree. It does **not** catch errors thrown from event handlers or from work scheduled outside Solid’s render/update flow. Use local `try`/`catch` or explicit promise error handling there.
-
-### Data Loading and Mutations
-
-#### Use `createResource` for component-scoped async reads in plain Solid
-
-**Default:** For plain Solid code that fetches async data and does not already use a router-native data API, use `createResource`.
-
-```tsx
-// src/components/RemoteUsers.tsx
-import { createResource, ErrorBoundary, For, Suspense } from "solid-js";
-
-type User = {
-  id: string;
-  name: string;
-};
-
-async function fetchUsers(): Promise<User[]> {
-  const response = await fetch("/api/users");
-
-  if (!response.ok) {
-    throw new Error(`Failed to load users: ${response.status}`);
-  }
-
-  return response.json() as Promise<User[]>;
-}
-
-export function RemoteUsers() {
-  const [users, { refetch }] = createResource(fetchUsers);
-
-  return (
-    <ErrorBoundary
-      fallback={(error, reset) => (
-        <div class="space-y-2">
-          <p class="text-red-600">{error.message}</p>
-          <button
-            type="button"
-            class="btn"
-            onClick={() => {
-              reset();
-              void refetch();
-            }}
-          >
-            Retry
-          </button>
-        </div>
-      )}
-    >
-      <Suspense fallback={<p class="text-slate-500">Loading…</p>}>
-        <ul class="space-y-2">
-          <For each={users()}>{(user) => <li>{user.name}</li>}</For>
-        </ul>
-      </Suspense>
-    </ErrorBoundary>
-  );
-}
-```
-
-**Conditional:** If the repository already uses `@solidjs/router`, SolidStart, or another existing data layer, follow that local pattern instead of introducing `createResource` alongside it.
-
-**Reject:** Do not add a third-party async state library unless the repository already depends on it or the task explicitly requires one.
-
-#### Keep mutations explicit
-
-**Default:** Model mutations as explicit `async` functions that validate inputs, call the backend/API, and then update signals/stores/resources in one obvious place.
-
-**Reject:** Do not hide writes inside memos or broad reactive effects.
-
-**Existing code:** If a touched area already uses manual `loading/error` signals, keep that pattern unless you are explicitly refactoring the async flow.
-
-### Browser Extension Architecture and Compatibility
-
-#### Separate code by extension context
-
-**Default:** Separate code by extension context because capabilities differ:
-
-- **background** for privileged event handling
-- **content** for page DOM interaction
-- **popup / action page** for quick user-triggered UI
-- **options page** for durable configuration
-- **shared** for types, message contracts, storage schemas, and pure utilities
-
-Suggested file locations:
-
-- `manifest.json`
-- `uno.config.ts`
-- `src/background/`
-- `src/content/`
-- `src/popup/`
-- `src/options/`
-- `src/shared/` for message contracts, storage keys, and pure utilities
-
-citeturn25view1turn30view1turn30view2
-
-#### Target MV3 for new extension work
-
-**Default:** For new Chromium + Firefox work, target **Manifest V3**. Chrome MV2 is effectively dead for production use. Use `action`, not `browser_action` / `page_action`. citeturn33view0turn31search4turn31search0turn31search15
-
-**Critical compatibility rule:** A current cross-browser MV3 manifest cannot assume one background model. Chromium uses `service_worker`; Firefox currently uses background scripts/pages in MV3. The smallest cross-browser default is either:
-
-- dual declaration in one manifest, or
-- repo-specific split manifests if the build already supports them. citeturn25view1turn25view0
-
-```json
-// manifest.json
-{
-  "manifest_version": 3,
-  "name": "My Extension",
-  "version": "0.1.0",
-  "action": {
-    "default_popup": "popup/index.html"
-  },
-  "options_ui": {
-    "page": "options/index.html"
-  },
-  "background": {
-    "scripts": ["background.js"],
-    "service_worker": "background.js",
-    "type": "module"
-  },
-  "permissions": ["storage", "activeTab", "scripting"],
-  "host_permissions": [],
-  "optional_host_permissions": ["https://*/*", "http://*/*"],
-  "browser_specific_settings": {
-    "gecko": {
-      "id": "your-extension@example.com"
-    }
-  }
-}
-```
-
-Use this shape only when Firefox is a real target. `browser_specific_settings.gecko.id` matters for Firefox MV3 signing / self-distribution, and a fixed Firefox ID also matters in some resource and native-messaging cases. If the repo already has a manifest-generation system, follow that instead of pasting raw JSON. citeturn25view1turn25view0turn8search1turn26search12turn14search2
-
-**Conditional:** If you must support older Chromium than 121, do **not** rely on the dual-declaration approach without checking the repository’s browser support matrix, because older Chrome refused MV3 manifests containing `background.scripts`. Current stable Chromium is past that boundary. citeturn25view1
-
-#### Respect content-script boundaries
-
-**Default:** Keep content scripts in their normal isolated environment. They do not see page JavaScript variables directly; Firefox applies Xray-like behaviour and Chromium uses an isolated world. If you truly need access to page-world JS state, treat it as a separate bridge problem, not as ordinary content-script code. In page-world code, do not expect privileged extension APIs. citeturn30view1turn30view2turn6search9turn6search10
-
-**Default:** Use:
-
-- static `content_scripts` for well-known always-on hosts,
-- `scripting.registerContentScripts()` when registration is managed at runtime and should persist,
-- `scripting.executeScript()` for one-off or user-invoked injection. citeturn30view1turn30view2turn26search20
-
-### Extension Messaging, Storage, Permissions, and Security
-
-#### Centralise typed message dispatch
-
-**Default:** Define message contracts in one shared typed module and centralise message dispatch. Keep payloads **JSON-safe** even though Firefox uses richer structured cloning, because Chrome messaging remains JSON-serialised by default. citeturn29view0turn28search11
-
-**Default:** For asynchronous `runtime.onMessage` handlers, use a **non-async listener** that kicks off async work and returns `true`. That is the most compatible default across current Chromium and Firefox, and it avoids Chrome’s gradual feature rollout edge cases plus Firefox’s “async listener consumes every message” trap. citeturn29view0turn28search1
+WXT provides a unified `browser` (auto-imported) that smooths Chrome/Firefox differences. **Never** import `webextension-polyfill` manually, and **never** use `chrome.*` callback style.
 
 ```ts
-// src/shared/messages.ts
-export type Request =
-  | { type: "PING" }
-  | { type: "GET_SETTINGS" }
-  | { type: "SET_SETTINGS"; value: { enabled: boolean } };
+// ✅ promise-based, cross-browser
+const tabs = await browser.tabs.query({ active: true, currentWindow: true });
 
-export type Response =
-  | { ok: true; value?: unknown }
-  | { ok: false; error: string };
+// ❌ callback style — wrong ecosystem habit
+// chrome.tabs.query({ active: true }, (tabs) => { ... });
+
+// Feature-detect APIs that don't exist everywhere (types assume all exist):
+if (browser.sidePanel) await browser.sidePanel.open({ windowId });
 ```
 
+One 0.20 gotcha: a message listener can no longer return a promise to reply. Use `sendResponse` + `return true`:
+
 ```ts
-// src/background/index.ts
-import type { Request, Response } from "../shared/messages";
-
-async function handleMessage(message: Request): Promise<Response> {
-  switch (message.type) {
-    case "PING":
-      return { ok: true, value: "pong" };
-
-    case "GET_SETTINGS": {
-      const { settings = { enabled: false } } =
-        await chrome.storage.local.get("settings");
-      return { ok: true, value: settings };
-    }
-
-    case "SET_SETTINGS":
-      await chrome.storage.local.set({ settings: message.value });
-      return { ok: true };
-
-    default: {
-      const _exhaustive: never = message;
-      return _exhaustive;
-    }
-  }
-}
-
-chrome.runtime.onMessage.addListener((message: Request, _sender, sendResponse) => {
-  void handleMessage(message)
-    .then(sendResponse)
-    .catch((error: unknown) => {
-      sendResponse({
-        ok: false,
-        error: error instanceof Error ? error.message : "Unknown error",
-      } satisfies Response);
-    });
-
-  return true;
+browser.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  doAsyncWork().then(sendResponse);
+  return true; // keep the channel open for the async reply
 });
 ```
 
-**Reject:** Many scattered listeners competing to answer the same message type. In both browsers, only one effective response wins. Centralise each context’s inbound dispatch table. citeturn29view0turn28search1
+For non-trivial messaging, prefer the typed wrapper `@webext-core/messaging` (WXT's recommended choice):
 
-#### Treat content-script input as untrusted
+```ts
+// lib/messaging.ts
+import { defineExtensionMessaging } from "@webext-core/messaging";
+interface ProtocolMap {
+  getHistory(data: { size: number }): HistoryItem[];
+}
+export const { sendMessage, onMessage } = defineExtensionMessaging<ProtocolMap>();
+```
 
-**Default:** Treat content-script messages as untrusted input. A compromised page can influence the renderer process hosting content scripts. Validate command type, sender, tab/frame assumptions, and data shape before performing privileged actions. Never send secrets or highly privileged objects to a content script unless they are already safe to leak to the page. citeturn30view0turn30view1
+### Content-script UI with SolidJS
 
-#### Persist extension state with extension storage
+WXT offers three mounts: `createShadowRootUi` (style-isolated, recommended), `createIntegratedUi` (no isolation, inherits page styles), `createIframeUi` (full isolation via iframe). Mount Solid with `render` from `solid-js/web` and return its dispose function.
 
-**Default:** Use `storage.local` for durable extension state. Background state must survive unloads: Chromium service workers terminate when idle, and Firefox event pages are non-persistent in MV3. Persist important state and restore on demand. Use `storage.sync` only for small user preferences that intentionally need browser-account synchronisation. citeturn7search0turn7search8turn26search4turn27search4turn27search1
+```tsx
+// entrypoints/example.content.tsx
+import { render } from "solid-js/web";
+import Widget from "@/components/Widget";
+import "./style.css";
 
-**Reject:** `localStorage` as the default store for shared extension state or background state. Use the extensions storage API instead. citeturn12search18turn27search0
+export default defineContentScript({
+  matches: ["<all_urls>"],
+  cssInjectionMode: "ui", // required so createShadowRootUi can inject the CSS
+  async main(ctx) {
+    const ui = await createShadowRootUi(ctx, {
+      name: "my-widget",
+      position: "inline",
+      anchor: "body",
+      isolateEvents: ["keydown", "keyup", "wheel"], // stop events leaking to the page
+      onMount: (container) => render(() => <Widget />, container),
+      onRemove: (dispose) => dispose?.(),
+    });
+    ui.mount();
+  },
+});
+```
 
-**Default:** If future work must survive background suspension, schedule with alarms or another event-driven API, not bare in-memory timers. citeturn12search18turn7search11
+### Dev / build / publish commands
 
-#### Request the smallest possible permission set
+`wxt` (dev with HMR), `wxt -b firefox` (target Firefox), `wxt build`, `wxt build -b firefox`, `wxt zip` (store-ready zip), `wxt submit` (automated store upload). Output lands in `.output/chrome-mv3/` etc. WXT auto-adds the `tabs`/`scripting` permissions in dev for reloading and the `sidepanel` permission when a sidepanel entrypoint exists; everything else you declare yourself.
 
-**Default:** Request the smallest possible permission set.
+## WebExtensions / Manifest V3 / cross-browser
 
-- Use **required permissions** only for core behaviour.
-- Prefer **`activeTab`** for user-invoked access to the current page.
-- Prefer **`optional_host_permissions`** for optional site access.
-- Treat `<all_urls>` as exceptional. citeturn8search2turn13search0turn13search10turn8search17turn34search8
+The MV3 background is a **non-persistent service worker** (Chrome) — per Chrome's service-worker lifecycle docs it terminates after **30 seconds of inactivity** (a single activity running longer than 5 minutes also terminates it; any event or extension API call resets the idle timer), so persist anything important to storage and never rely on in-memory globals surviving. Firefox implements MV3 with **event-page background scripts** rather than service workers; WXT generates the correct `background` shape per target (and historically defaults Firefox to MV2, Chrome to MV3 — control with `-b`/manifest config). MV3 unified `browserAction`/`pageAction` into a single **`action`** API. Declare permissions and `host_permissions` explicitly; note Firefox treats `host_permissions` as opt-in (the user grants them per-site at runtime). For request blocking/redirection use `declarativeNetRequest` (Chrome MV3) and feature-detect since Firefox MV3 still supports blocking `webRequest`:
 
-**Reject:** Remote hosted extension code, `eval`, or CSP-weakening patterns. MV3 forbids remotely hosted code and tightens extension CSP. Also avoid deprecated `extension.getURL()`; use `runtime.getURL()`. citeturn12search12turn12search17turn12search0turn14search3turn14search12
+```ts
+manifest: ({ browser }) => ({
+  permissions: browser === "chrome"
+    ? ["storage", "declarativeNetRequest"]
+    : ["storage", "webRequest", "webRequestBlocking"],
+});
+```
 
-**Conditional:** If the feature is network-request filtering, do not design new cross-browser MV3 code around `webRequestBlocking` alone. Chrome MV3 moved most blocking/modification use cases to `declarativeNetRequest`; Firefox still supports some blocking patterns. Surface that as an explicit cross-browser design split rather than silently copying old Chrome MV2-era code. citeturn34search6turn34search4turn34search3
+## Storage: IndexedDB for data, browser.storage.local for settings
 
-### UI, Styling, and Components with UnoCSS presetWind4
+Two storage tiers with a hard rule: **`browser.storage.local` is for settings and small flags only; IndexedDB is for bulk/structured/queryable app data.** Never use `localStorage` in an extension (synchronous, unavailable in service workers, wiped unpredictably).
 
-#### Configure UnoCSS in `uno.config.ts` and use `presetWind4()`
+| Need | Use |
+|---|---|
+| User settings, feature flags, small key/value, versioned config | `storage.defineItem` over `browser.storage.local` |
+| Bulk records, structured objects, indexed queries, large data | IndexedDB via `idb` |
+| Ephemeral per-session cache | `browser.storage.session` |
 
-**Default:** Keep UnoCSS config explicit and local to the repo in a dedicated root config file. When `presets` is specified, UnoCSS ignores the default preset, so add `presetWind4()` explicitly. citeturn15view3turn16search9
+### Settings via WXT's typed storage (`#imports`)
+
+```ts
+// lib/settings.ts
+import { storage } from "#imports";
+
+export const theme = storage.defineItem<"light" | "dark">("local:theme", {
+  fallback: "dark",
+});
+export const installDate = storage.defineItem<number>("local:installDate", {
+  init: () => Date.now(),
+});
+
+// usage
+await theme.setValue("light");
+const t = await theme.getValue();          // "light"
+const unwatch = theme.watch((v) => applyTheme(v));
+```
+
+Keys must be area-prefixed (`local:`, `session:`, `sync:`, `managed:`). `defineItem` supports `version` + `migrations` for evolving shapes. `storage.local` is async and size-limited — keep it small.
+
+### Bulk data via idb
+
+```ts
+// lib/db.ts
+import { openDB, type DBSchema, type IDBPDatabase } from "idb";
+
+interface Note { id: string; title: string; body: string; updated: number; }
+interface MyDB extends DBSchema {
+  notes: { key: string; value: Note; indexes: { "by-updated": number } };
+}
+
+let dbPromise: Promise<IDBPDatabase<MyDB>> | undefined;
+export function getDb() {
+  return (dbPromise ??= openDB<MyDB>("my-ext", 1, {
+    upgrade(db) {
+      const store = db.createObjectStore("notes", { keyPath: "id" });
+      store.createIndex("by-updated", "updated");
+    },
+  }));
+}
+
+export async function saveNote(note: Note) {
+  const db = await getDb();
+  await db.put("notes", note);
+}
+export async function recentNotes() {
+  const db = await getDb();
+  return db.getAllFromIndex("notes", "by-updated");
+}
+```
+
+`idb` is the current small standard wrapper; reach for **Dexie.js** only when you need richer querying/live-query ergonomics. IndexedDB storage limits are far larger than `storage.local` and are governed by the browser's per-origin quota.
+
+## UnoCSS (presetWind4)
+
+UnoCSS is the on-demand atomic CSS engine; **presetWind4** is the current Tailwind-4-compatible preset (successor to `presetUno`/`presetWind`/`presetWind3`). It targets Tailwind 4 utilities and, per the official Wind4 docs, "we use the oklch color model to support better color contrast and color perception. Therefore, it is not compatible with presetLegacyCompat." Its reset is integrated internally (no separate `@unocss/reset`/`normalize.css`), and its output adds three new layers — `base`, `theme`, and `properties` — using `@property` for smaller, faster utilities.
 
 ```ts
 // uno.config.ts
 import { defineConfig, presetWind4 } from "unocss";
 
 export default defineConfig({
-  presets: [presetWind4()],
+  presets: [presetWind4({ reset: true })],
   shortcuts: {
-    btn: "inline-flex items-center justify-center rounded-md px-3 py-2 text-sm font-medium disabled:pointer-events-none disabled:opacity-50",
+    "btn": "px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700",
+    "card": "p-4 rounded-lg shadow bg-white dark:bg-gray-800",
+  },
+  theme: {
+    colors: { brand: "#6d28d9" },
+  },
+  rules: [
+    ["text-balance", { "text-wrap": "balance" }],
+  ],
+});
+```
+
+Install and wire via the WXT module rather than the raw Vite plugin — `@wxt-dev/unocss` adds `unocss/vite` to the right build steps:
+
+```ts
+// wxt.config.ts (excerpt)
+export default defineConfig({
+  modules: ["@wxt-dev/unocss"],
+  unocss: { excludeEntrypoints: ["background"] },
+});
+```
+
+Then import the virtual stylesheet **once per UI entrypoint** — use `import "virtual:uno.css"` (not `import "uno.css"`):
+
+```tsx
+// entrypoints/popup/main.tsx
+import "virtual:uno.css";
+```
+
+A dev-mode warning about `uno.css` not being found is expected and safe to ignore — styles are applied correctly in the build. presetWind4 also supports attributify-style usage and variants; configure via `uno.config.ts`. Unlike raw Tailwind, there is no `tailwind.config.js`/PostCSS pipeline — UnoCSS scans source tokens and generates only used CSS.
+
+## Vitest: unit + component tests
+
+Use **Vitest** (not `bun test`) because it reuses WXT's Vite/`vite-plugin-solid` pipeline, runs in jsdom, integrates `@solidjs/testing-library`, and can mock the extension API. The `WxtVitest` plugin polyfills `browser` with `@webext-core/fake-browser` (in-memory, so `storage.defineItem` "just works" in tests), sets WXT globals, and configures aliases.
+
+```ts
+// vitest.config.ts
+import { defineConfig } from "vitest/config";
+import { WxtVitest } from "wxt/testing";
+
+export default defineConfig({
+  plugins: [WxtVitest()],
+  test: {
+    environment: "jsdom",
+    globals: true,
+    coverage: { provider: "v8", reporter: ["text", "html"] },
   },
 });
 ```
 
-If the project wants reset styles in a Wind4 setup, enable them through the preset:
+Component test — note `render` takes a **function** returning JSX (Solid has no re-render; drive updates via signals):
 
-```ts
-// uno.config.ts
-import { defineConfig, presetWind4, transformerDirectives } from "unocss";
+```tsx
+// components/Counter.test.tsx
+import { describe, it, expect } from "vitest";
+import { render, fireEvent } from "@solidjs/testing-library";
+import Counter from "./Counter";
 
-export default defineConfig({
-  presets: [
-    presetWind4({
-      preflights: { reset: true },
-    }),
-  ],
-  transformers: [transformerDirectives()],
-  safelist: [],
+describe("Counter", () => {
+  it("increments", async () => {
+    const { getByRole } = render(() => <Counter start={0} />);
+    const btn = getByRole("button");
+    await fireEvent.click(btn);
+    expect(btn).toHaveTextContent("Count 1");
+  });
 });
 ```
 
-Keep `transformerDirectives()` only if the repo actually uses `@apply`, `--at-apply`, `@screen`, or `theme()`. Do not introduce directive syntax without the transformer. citeturn18view0turn18view1
-
-**Reject:** Tailwind drift.
-
-- Do not add `tailwind.config.*` files into an Uno-only project.
-- Do not assume Tailwind plugins or Tailwind preflight behaviour.
-- Do not write variant-group or directive syntax unless the matching UnoCSS transformer is enabled.
-- Do not import older `@unocss/reset/tailwind.css` patterns into new `presetWind4` setups. `presetWind4` integrates reset handling internally. citeturn15view3turn16search0turn16search2turn17view2
-
-#### Keep Uno utility names statically discoverable
-
-**Default:** Keep utility strings fully static in scanned files. UnoCSS build-pipeline extraction includes TSX/JSX/HTML-like files by default, but **not** plain `.ts` / `.js` files. citeturn15view1turn15view4
-
-If classes live in TS utilities, either:
-
-- extend `content.pipeline.include`,
-- add `// @unocss-include` to the file,
-- move the class map into a scanned `.tsx` file, or
-- safelist the exact finite classes.
-
-**Reject:** Unconstrained string concatenation like:
-
-```tsx
-class={`bg-${tone}-500`}
-```
-
-or:
-
-```tsx
-class={`bg-${colour}-${level}`}
-```
-
-unless the exact output is safelisted or otherwise discoverable.
-
-**Better pattern:**
+Storage / browser-API test with the fake browser:
 
 ```ts
-// src/popup/ui/tokens.ts
-export const buttonTone = {
-  primary: "bg-blue-600 text-white hover:bg-blue-700",
-  neutral: "bg-zinc-200 text-zinc-900 hover:bg-zinc-300",
-  danger: "bg-red-600 text-white hover:bg-red-700",
-} as const;
+import { describe, it, expect, beforeEach } from "vitest";
+import { fakeBrowser } from "wxt/testing";
+import { theme } from "@/lib/settings";
+
+describe("theme setting", () => {
+  beforeEach(() => fakeBrowser.reset());      // reset in-memory state between tests
+  it("defaults to dark", async () => {
+    expect(await theme.getValue()).toBe("dark");
+  });
+});
 ```
 
-Then consume:
+## Playwright: end-to-end
 
-```tsx
-// src/popup/components/Button.tsx
-import { splitProps } from "solid-js";
-import { buttonTone } from "../ui/tokens";
+Playwright drives a real browser against the built extension. **Extension loading is Chromium-only** and requires a **persistent context** created via `chromium.launchPersistentContext` — extensions attach to the browser process at launch, not per-tab. Build first (`wxt build`) and point Playwright at `.output/chrome-mv3`. Use `channel: "chromium"` to allow headless extension loading; otherwise run headed.
 
-type Tone = keyof typeof buttonTone;
+```ts
+// playwright.config.ts
+import { defineConfig } from "@playwright/test";
 
-export function Button(props: {
-  tone?: Tone;
-  class?: string;
-  children: unknown;
-}) {
-  const [local, rest] = splitProps(props, ["tone", "class", "children"]);
+export default defineConfig({
+  testDir: "./e2e",
+  use: { trace: "on-first-retry" },
+});
+```
 
-  return (
-    <button
-      class={`rounded-md px-3 py-2 text-sm font-medium transition ${
-        buttonTone[local.tone ?? "primary"]
-      } ${local.class ?? ""}`}
-      {...rest}
-    >
-      {local.children}
-    </button>
-  );
+```ts
+// e2e/fixtures.ts
+import { test as base, chromium, type BrowserContext } from "@playwright/test";
+import path from "node:path";
+
+export const test = base.extend<{ context: BrowserContext; extensionId: string }>({
+  context: async ({}, use) => {
+    const pathToExtension = path.join(__dirname, "../.output/chrome-mv3");
+    const context = await chromium.launchPersistentContext("", {
+      channel: "chromium",
+      args: [
+        `--disable-extensions-except=${pathToExtension}`,
+        `--load-extension=${pathToExtension}`,
+      ],
+    });
+    await use(context);
+    await context.close();
+  },
+  extensionId: async ({ context }, use) => {
+    let [sw] = context.serviceWorkers();           // MV3 background = service worker
+    if (!sw) sw = await context.waitForEvent("serviceworker");
+    await use(sw.url().split("/")[2]);
+  },
+});
+export const expect = test.expect;
+```
+
+```ts
+// e2e/popup.spec.ts
+import { test, expect } from "./fixtures";
+
+test("popup renders and increments", async ({ page, extensionId }) => {
+  await page.goto(`chrome-extension://${extensionId}/popup.html`);
+  const btn = page.getByRole("button");
+  await btn.click();
+  await expect(btn).toContainText("Count 1");
+});
+```
+
+The MV3 service worker may suspend after idle; Playwright keeps the same worker handle alive across restarts, so `sw.evaluate(...)` resumes transparently. Content-script UIs render into a shadow root — locate them via the page after navigation.
+
+## Biome: lint + format
+
+Biome is the single Rust binary replacing ESLint + Prettier — no plugins, ~Prettier-compatible formatting, a total of **507 lint rules**, and type-aware rules (e.g. `noFloatingPromises`) since v2, without requiring the TypeScript compiler. There is no maintained `eslint-plugin-solid` equivalent in Biome — rely on Biome's recommended rules **plus Solid's compile-time warnings** (e.g. the reactivity warnings emitted by `vite-plugin-solid`).
+
+```jsonc
+// biome.json
+{
+  "$schema": "https://biomejs.dev/schemas/2.4.16/schema.json",
+  "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
+  "files": {
+    "includes": ["**", "!**/.output", "!**/.wxt", "!**/coverage", "!**/dist"]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100
+  },
+  "assist": { "enabled": true, "actions": { "source": { "recommended": true } } },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "suspicious": { "noExplicitAny": "error" },
+      "complexity": { "noForEach": "off" }
+    }
+  },
+  "javascript": {
+    "formatter": { "quoteStyle": "double", "semicolons": "always", "trailingCommas": "all" }
+  }
 }
 ```
 
-This is extractor-friendly and reviewable. citeturn15view1turn15view4turn3search2
+Commands: `biome check --write .` (format + lint + organize imports in one pass — the one to wire into the `check` script and pre-commit), `biome format --write .`, `biome lint .`, and `biome ci .` in CI (fails on any unformatted/lint issue). Install pinned: `bun add -D --exact @biomejs/biome`.
 
-#### Prefer shortcuts before style-only wrapper components
+## Toolchain flow
 
-**Default:** If repeated styling is just a utility bundle and not a behavioural abstraction, use an Uno shortcut first.
+`bun install` → `wxt prepare` (generates `.wxt/` types) → develop with `bun run dev` (WXT + Vite HMR) → `biome check --write .` → `vitest` (unit/component) → `wxt build` → `playwright test` against `.output/chrome-mv3` → `wxt zip` / `wxt submit`. Bun drives installs and scripts; WXT/Vite builds; Biome enforces style; Vitest covers logic and components; Playwright covers the assembled extension.
 
-**Conditional:** Extract a Solid component only when behaviour, accessibility, data flow, or composition needs are also being standardised.
+## Anti-patterns to avoid
 
-**Reject:** Do not create wrapper components whose only job is to rename a static class string.
-
-#### Use `presetWind4` keys, not Wind3 or Tailwind-shaped config keys
-
-**Default:** When touching theme config in a `presetWind4` project, use Wind4 keys.
-
-| Old shape | Wind4 shape |
-|---|---|
-| `fontFamily` | `font` |
-| `borderRadius` | `radius` |
-| `boxShadow` | `shadow` |
-| `breakpoints` | `breakpoint` |
-| `verticalBreakpoints` | `verticalBreakpoint` |
-
-**Reject:** Do not copy Wind3 or Tailwind config snippets into a Wind4 config without translating the keys.
-
-**Existing code:** If the repo migrated from Wind3, rename only the touched keys you actually work with. Do not broad-edit a large theme file without verifying generated CSS.
-
-#### Treat `@property` generation as the default in `presetWind4`
-
-**Default:** Leave `presetWind4` property preflights enabled. They are part of the preset’s current output model.
-
-**Conditional:** If the repository has a verified compatibility issue with generated `@property` rules or the wrapper around them, disable or customise `preflights.property` in `presetWind4`.
-
-**Risk:** Turning it off changes generated CSS structure and can affect styling assumptions around the `properties` layer.
-
-#### Use standard class/classList unless Attributify is already configured
-
-**Conditional:** If you need JSX valueless Attributify syntax, that is **not** part of this stack by default. Only use it if the repository already added `presetAttributify` and the JSX transformer needed for TSX.
-
-**Stable fallback:** Standard `class` / `classList`. citeturn16search8turn3search2
-
-### Example Solid + UnoCSS Component Pattern
-
-```tsx
-// src/popup/components/Toggle.tsx
-import { createMemo, splitProps } from "solid-js";
-
-type Props = {
-  enabled: boolean;
-  busy?: boolean;
-  onToggle: () => void;
-};
-
-export function Toggle(props: Props) {
-  const [local, rest] = splitProps(props, ["enabled", "busy", "onToggle"]);
-
-  const tone = createMemo(() =>
-    local.enabled ? "bg-emerald-600 text-white" : "bg-zinc-200 text-zinc-900",
-  );
-
-  return (
-    <button
-      type="button"
-      class={`inline-flex items-center rounded-md px-3 py-2 text-sm font-medium transition ${tone()}`}
-      classList={{ "pointer-events-none opacity-60": !!local.busy }}
-      onClick={local.onToggle}
-      {...rest}
-    >
-      {local.enabled ? "Enabled" : "Disabled"}
-    </button>
-  );
-}
-```
-
-This keeps derivation reactive, preserves prop reactivity, and keeps UnoCSS class names statically discoverable. citeturn4search3turn3search2turn0search19turn15view1
-
-### Bun Dependency and Configuration Security
-
-#### Respect Bun’s dependency-script security model
-
-**Default:** Bun does not run arbitrary dependency lifecycle scripts by default. If a dependency genuinely needs install-time scripts, whitelist it with `trustedDependencies`.
-
-**Reject:**
-
-- Do not blanket-re-enable arbitrary lifecycle scripts.
-- Do not copy npm-era “just let postinstall run” assumptions into Bun.
-
-**Existing code:** If a dependency install breaks under Bun, add the smallest explicit `trustedDependencies` entry required. Do not relax security globally.
-
-#### Be reproducible with installs
-
-**Default:** Use `bun.lock` and verify it with `bun install --frozen-lockfile` in CI or when you need a reproducibility check.
-
-**Reject:** Do not hand-edit `bun.lock`. Do not commit multiple package-manager lockfiles in a Bun-owned repository.
-
-## Testing, Tooling, and Verification
-
-Use repository scripts first. Because the stack does **not** specify a bundler, linter, extension framework, or browser-test framework, do not invent tool commands that are not already in `package.json`. Bun should wrap existing scripts where available. citeturn23view1turn23view3
-
-| Trigger | Run | Failure means |
-|---|---|---|
-| Fresh checkout or dependency changes | `bun install` | Install/config/dependency breakage |
-| Fresh install / CI / lockfile-sensitive change | `bun install --frozen-lockfile` | Dependency drift, lockfile mismatch, or manifest mismatch |
-| Any meaningful TS/TSX change | `bun run typecheck` if present, otherwise `bunx tsc --noEmit` | Type/config/module-resolution breakage |
-| Any meaningful code change | `bun run <existing-check-script>` for repository scripts such as `typecheck`, `build`, `test`, `lint`, or `check` | The repo’s declared verification no longer passes |
-| Runtime or unit logic change | `bun run test` if present; otherwise `bun test` if the repo already uses Bun tests | Behavioural regression |
-| Focused local iteration on Bun tests | `bun test <path>`, `bun test -t <pattern>`, `bun test --watch` | Narrowed failure in touched area |
-| Coverage verification in Bun-test repos | `bun test --coverage` | Untested or uncovered paths in touched logic |
-| Production-affecting build change | `bun run build` | Bundling/integration breakage |
-| One-off repo-local tool | `bunx <tool>` | Ensures the repo’s pinned version is used |
-| Added or changed message / storage / background logic | Manual extension smoke test in Chromium and Firefox: install unpacked/temp add-on, exercise popup/options/content-script flows, verify permission prompts, storage persistence, and background wake-up/resume | Cross-context integration is broken even if types compile |
-| Changed background lifecycle behaviour | Re-test with extension DevTools closed in Chromium | Open DevTools can keep the service worker alive and hide lifecycle bugs citeturn7search18 |
-| Changed UnoCSS config or classes | Rebuild and inspect affected UI surfaces for missing styles | Extraction, safelist, or preset config is wrong citeturn15view1turn15view4 |
-
-Additional rules:
-
-- **Default:** For Bun test suites, prefer explicit imports from `bun:test` over relying on globals in new code.
-- **Conditional:** If the repository already uses Bun test globals, keep that style locally instead of rewriting the whole test suite.
-- **Conditional:** If the task explicitly requires adding a new Solid component-test stack and the repository has none, the current Solid docs recommend Vitest with `@solidjs/testing-library`. Otherwise, do not introduce a new runner just for style compliance.
-- **Reject:** Do not silently swap the repository’s existing browser-test setup to Bun test or Vitest during unrelated feature work.
-
-### Minimum verification checklist for extension changes
-
-- popup renders and can talk to background,
-- options page loads and persists settings,
-- content script runs only on granted hosts,
-- user-invoked `activeTab` flows work,
-- background state survives restart / suspension appropriately,
-- Firefox-specific packaging fields still make sense for the manifest if Firefox is in scope. citeturn13search0turn7search8turn8search1
-
-## Migration and Anti-Patterns
-
-High-signal stale patterns first:
-
-| Reject | Use instead | Existing-code migration |
-|---|---|---|
-| React hooks (`useState`, `useEffect`, `useMemo`, `useCallback`) in Solid code | `createSignal`, `createEffect`, `createMemo`, plain functions | Replace only in touched components |
-| Top-level prop destructuring or cached `const x = props.x` | `props.x`, accessor wrappers, `splitProps` | Fix the touched reactive props path only |
-| Effect-driven derived state | `createMemo` or inline derivation | Collapse touched duplicated state locally |
-| Direct store mutation | `setStore(...)` or `produce(...)` | Wrap touched writes first |
-| `jsx: "react-jsx"` in Solid TSX | `jsx: "preserve"` + `jsxImportSource: "solid-js"` | Update config before broad TSX edits |
-| React JSX defaults from `tsc --init` / `bun init` | Solid JSX config (`jsx: "preserve"`, `jsxImportSource: "solid-js"`) | Correct config before touching more TSX |
-| `moduleResolution: "node"` / `"classic"` for new Bun/bundled app code | `moduleResolution: "bundler"` | Migrate config in one dedicated change |
-| Bun generic JSX config copied into Solid app config | Solid-first TSX config | Fix tsconfig, not each component individually |
-| Template-built Uno class names | Static maps, shortcuts, or `safelist` | Convert touched call sites only |
-| Dynamic, extractor-invisible utility strings | Static maps, `shortcuts`, `safelist`, or expanded include rules | Replace only the broken class-generation path |
-| Wind3/Tailwind theme keys in `presetWind4` | Wind4 theme keys | Rename touched keys and verify CSS output |
-| `tailwind.config.*` in an Uno-only project | `uno.config.ts` | Remove only when touching build config |
-| Deprecated `oncapture:` usage | `on:*` with handler-object options | Replace touched listeners surgically |
-| Bun globals in browser/shared UI modules | Bun-only modules or `process.versions.bun` guard | Move the touched helper behind a boundary |
-| Hand-editing `bun.lock` or mixing lockfiles | Bun-managed lockfile updates | Regenerate with Bun in a small dedicated commit |
-| Adding a router/meta-framework not present in the repo | Existing local routing pattern, or none | Surface as a proposal instead of silently adding it |
-| Experimental Solid APIs in new production code, such as `SuspenseList` | Stable 1.x primitives | Leave existing experiments isolated unless tasked to remove them |
-| Manifest V2 in new extension code | Manifest V3 | Do not keep MV2 alive for Chromium targets; plan smallest MV3 step |
-| `browser_action` / `page_action` in MV3 | `action` | Rename touched manifest/API usage first |
-| Firefox target with `service_worker`-only background | Dual-declared MV3 background or repo split manifests | Fix manifest boundary before adding more background features |
-| Shared extension state in `localStorage` or background memory only | `storage.local` and event-driven restoration | Start with touched keys and background entrypoints |
-| Bare timers for future background work | alarms / event-driven APIs | Replace the touched timer path first |
-| `extension.getURL()` | `runtime.getURL()` | Replace locally when touched |
-| Remote hosted code / `eval` | Packaged local code only | Remove the violating load path before new features |
-| Scattered `async` message listeners | One dispatcher using `return true` for async responses | Consolidate one context at a time |
-| Assuming `browser.*` is universally safe | Repo convention, or conditional adoption only with Chromium 148+ and no `devtools_page` | Avoid namespace rewrites unless the repo asks for them |
-| Chromium-only blocking `webRequest` design in new cross-browser MV3 work | `declarativeNetRequest` where it fits; explicit browser split where it does not | Surface broader migration instead of silently copying legacy listeners |
-
-Safe migration rules:
-
-- Change config separately from feature logic when possible.
-- Do not convert entire component trees from one state idiom to another during a nearby feature edit.
-- If a broader migration is genuinely required, stop after the first safe step and surface the remaining work explicitly.
-
-## Quick Reference
-
-### Preferred defaults
-
-- **Package manager / script runner / runtime:** Bun where the code actually runs under Bun
-- **Lockfile:** `bun.lock`
-- **Solid local scalar state:** `createSignal`
-- **Solid structured nested state:** `createStore`
-- **Derived reactive values:** `createMemo`
-- **Async component-scoped reads:** `createResource`
-- **DOM/imperative setup:** `onMount` + `onCleanup`
-- **Dynamic list rendering:** `<For>` or `<Index>`
-- **Styling system:** UnoCSS in `uno.config.ts` with `presetWind4()`
-- **Repeated utility bundles:** Uno `shortcuts`
-- **TSX config:** `jsx: "preserve"`, `jsxImportSource: "solid-js"`
-- **Module config for new Bun/bundled app code:** `module: "preserve"`, `moduleResolution: "bundler"`
-- **Extension manifest default:** MV3 with `action`
-- **Cross-browser extension background:** Dual declaration or split manifests when Firefox matters
-- **Extension storage:** `storage.local` for durable state
-- **Extension page access:** `activeTab` for user-invoked access; optional host permissions for opt-in site access
-
-### Use this, not that
-
-| Use this | Not that |
-|---|---|
-| `createSignal(...)` | `useState(...)` |
-| `createMemo(...)` | `createEffect(() => setSomething(...))` |
-| `createStore(...)` | nested object mutation |
-| `props.foo` / `splitProps(...)` | `const { foo } = props` |
-| `children(() => props.children)` | reading `props.children` repeatedly |
-| `<For>` / `<Index>` | reactive `.map()` in JSX |
-| `onInput` for live text updates | React-style `onChange` expectations |
-| `on:*` for custom/direct/options listeners | `oncapture:` or misusing delegated events |
-| static class maps / `safelist` | template-built Uno utility strings |
-| `uno.config.ts` + `presetWind4()` | `tailwind.config.*` in an Uno-only repo |
-| `bun run` / `bunx` | `npm run` / `npx` |
-| Bun-only module boundaries | `Bun` globals inside Solid browser components |
-| MV3 `action` | `browser_action` / `page_action` in new MV3 code |
-| Dual-declared cross-browser MV3 background when Firefox matters | `service_worker` only |
-| `activeTab` for user-invoked page access | Broad host permissions by default |
-| Typed JSON-safe messages + `return true` async listener | Ad-hoc `async` listeners everywhere |
-| `storage.local` for durable extension state | `localStorage` or background-only memory |
-| `runtime.getURL()` | `extension.getURL()` |
-| `preflights.reset: true` in `presetWind4` if reset is needed | Old reset-package imports by default |
-
-### File-location cheat sheet
-
-| File | Purpose |
-|---|---|
-| `package.json` | scripts, dependencies, workspaces, `trustedDependencies` |
-| `bun.lock` | authoritative lockfile |
-| `tsconfig.json` | app-level TypeScript + Solid JSX config |
-| `tsconfig.bun.json` | Bun-only scripts/server/tests when needed |
-| `uno.config.ts` | UnoCSS preset, shortcuts, safelist, extraction config |
-| `bunfig.toml` | Bun-specific behaviour only, when needed |
-| `src/main.tsx` | browser mount entry, when the repo is a plain Solid app |
-| `manifest.json` | extension manifest |
-| `src/background/` | extension privileged event handling |
-| `src/content/` | page DOM interaction |
-| `src/popup/` | extension popup / action UI |
-| `src/options/` | durable extension configuration UI |
-| `src/shared/` | message contracts, storage keys, schemas, pure utilities |
-
-### Verification commands
-
-```bash
-bun install
-bun install --frozen-lockfile
-bun run typecheck
-bunx tsc --noEmit
-bun run test
-bun test
-bun test --watch
-bun test --coverage
-bun run build
-```
-
-For extension changes, also load the extension in Chromium **and** Firefox after any manifest, background, permission, messaging, or storage change, and re-test background lifecycle with Chromium extension DevTools closed.
-
-### Top anti-drift warnings
-
-- Do not write React in Solid files.
-- Do not copy Bun’s generic JSX config into Solid TSX projects.
-- Do not build Uno utility names with string interpolation.
-- Do not use Wind3 or Tailwind config keys in `presetWind4`.
-- Do not rely on Bun globals in shared browser/UI modules.
-- Do not invent routers, test runners, form libraries, deployment stacks, extension frameworks, linters, or formatters not already present in the repository.
-- Do not default new extension work to Manifest V2.
-- Do not request broad host permissions unless the feature truly requires them.
-- Do not assume Chromium and Firefox MV3 background models are identical.
+- **Destructuring props** in Solid components — freezes values, kills reactivity. Use `props.x`, `splitProps`, `mergeProps`.
+- **`useState`/`useEffect`/`useMemo`/`react-dom`** — React APIs; use `createSignal`/`createEffect`/`createMemo` and `render` from `solid-js/web`.
+- **`.map()` / ternaries for lists & conditionals** — use `<For>`/`<Index>`/`<Show>`/`<Switch>`. Picking `<For>` when item values mutate (or `<Index>` when rows reorder) causes lost focus or DOM churn.
+- **`createEffect` to derive state** — use `createMemo`.
+- **`className`** — Solid uses `class`.
+- **`chrome.*` callbacks or manual `webextension-polyfill`** — use WXT's promise-based `browser`. Returning a promise from `onMessage` no longer works in WXT 0.20 — use `sendResponse` + `return true`.
+- **`browser.*` at entrypoint top level** — WXT imports the file in Node at build time; keep all API calls inside `main`/the callback.
+- **Hand-writing `manifest.json`** — author the manifest in `wxt.config.ts`; declare MV3-shaped properties and let WXT down-convert for Firefox/MV2.
+- **`localStorage`** — unavailable in service workers; use `storage.local` (settings) or IndexedDB (data).
+- **Dumping bulk data into `browser.storage.local`** — it's for settings; use IndexedDB/`idb` for structured/large data.
+- **`bun test` for Solid component tests** — use Vitest with `WxtVitest()`; `bun test` doesn't run the Solid JSX transform or fake-browser.
+- **`import "uno.css"`** — import `virtual:uno.css`; and use **presetWind4**, not `presetUno`/`presetWind3`.
+- **npm/pnpm/yarn/npx habits** — use `bun install`, `bun run`, `bunx`, and commit `bun.lock`.
+- **ESLint + Prettier** — Biome's `check --write` replaces both.
+- **Plasmo / CRXJS for new projects** — WXT is the maintained, fuller framework.
+- **Headless/non-persistent Playwright context for extension E2E** — extensions need `launchPersistentContext` with `--load-extension`, Chromium only.
