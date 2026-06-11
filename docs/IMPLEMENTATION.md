@@ -279,41 +279,48 @@ This plan **follows `.augment/rules/bun-solid-pro.md`** as the authoritative sou
 
 ### Tasks
 
-- [ ] Settings via WXT typed storage — `lib/settings.ts`:
-  - [ ] Import `storage` from `#imports`; define typed, area-prefixed items with explicit fallbacks: `theme` (`local:theme`), `keepRawData` (`local:keepRawData`, default `true`, PRD §9.8), `realIdentities` (`local:realIdentities`, default `false`, PRD §9.7), `storageBudget` settings.
-  - [ ] Use `version` + `migrations` for any versioned setting shape.
-  - [ ] Use `storage.local` only for small settings; **never** `localStorage`; never bulk data here.
-- [ ] Bulk/structured store via `idb` — `lib/db.ts`:
-  - [ ] `openDB` with a typed `DBSchema` and object stores for raw revision chunks, decoded operations, reconstruction snapshots, operation/timeline indexes, per-document cache metadata, LRU bookkeeping, and **resumable-retrieval checkpoints** (PRD §10.6).
-  - [ ] Add indexes (e.g. `by-updated`, `by-doc`) for querying; version the schema via the `idb` `upgrade` path.
-  - [ ] Implement cache operations: save/get raw chunks, save/get decoded+snapshots, per-document metadata (doc id, created, last-accessed, parser version, estimated size, reconstruction status, raw-retained flag).
-  - [ ] Implement LRU pruning that drops **raw chunks first**, preserving decoded/snapshots/timeline (PRD §9.8); poll `navigator.storage.estimate()` and stay under ~80% quota; call `navigator.storage.persist()`; handle `QuotaExceededError`.
-  - [ ] Apply cache **versioning** keyed on parser version so upgrades invalidate decoded data while retaining raw when safe; flag for re-fetch if raw was discarded.
-  - [ ] Provide an **in-memory implementation** of the same interface for tests (PRD §10.2/§10.6).
-- [ ] Typed messaging — `lib/messaging.ts`:
-  - [ ] Use `defineExtensionMessaging<ProtocolMap>()` from `@webext-core/messaging`; define a typed `ProtocolMap` for activation triggers, progress, and retrieval control (start/cancel/checkpoint).
-- [ ] Background retrieval — `entrypoints/background.ts`:
-  - [ ] Use `defineBackground(() => { ... })`; keep **all** `browser.*` usage inside the callback (never module top level).
-  - [ ] Implement credentialed, **chunked, resumable** retrieval of `revisions/load` (PRD §10.9): `fetch(url, { credentials: "include" })`, checkpoint progress to `idb` after each chunk so a terminated SW resumes rather than restarts.
-  - [ ] Detect and handle the multi-account `/u/{N}/` URL variant (Appendix A.5).
-  - [ ] Discover the revision range via the confirmed mechanism (binary-search-on-HTTP-500 as fallback; treat HTTP 500 as "range too high") (Appendix A.4).
-  - [ ] Implement adaptive chunk sizing + backoff and the error taxonomy (PRD §10.7): unsupported page, missing doc id, insufficient permission, endpoint unavailable, unsupported format, network failure, quota failure, reconstruction failure, cancellation.
-  - [ ] Never log/render raw response bodies or document fragments (PRD §13.7).
-- [ ] Content script — `entrypoints/docs.content.ts`:
-  - [ ] `defineContentScript({ matches: ["*://docs.google.com/document/*"] })`; detect document context, extract doc id safely, present an unobtrusive activation affordance, and **trigger** retrieval via typed messaging — it does **not** own the fetch (PRD §10.9).
-  - [ ] Do **not** auto-load revision history; require explicit user activation (PRD §9.2).
-  - [ ] Any in-page UI mounts via `createShadowRootUi` with `isolateEvents` (PRD §11.2) — no style leakage into Google Docs. For the affordance's visual design, load and use the **`frontend-design` skill** (see Guiding Rules) so it reads as intentional, not a default chrome button.
-- [ ] Replay-page Web Worker host — `lib/worker/parse.worker.ts`:
-  - [ ] Heavy decoding/reconstruction/timeline runs in a Web Worker owned by the replay page (PRD §10.9); read raw chunks and write decoded results through `idb`; post frames to the UI using Transferable buffers.
+> **Phase 4 status (Option A — build unblocked, gate retrieval).** All
+> transport-independent (4A) tasks below are delivered + verified; the live
+> credentialed retrieval (4B) is gated behind the single `// BLOCKED §24` site in
+> `entrypoints/background.ts` and stays unchecked. See
+> `docs/phase-4-acceptance.md` for the full delivered-vs-blocked map.
+
+- [x] Settings via WXT typed storage — `lib/settings.ts`:
+  - [x] Import `storage` from `#imports`; define typed, area-prefixed items with explicit fallbacks: `theme` (`local:theme`), `keepRawData` (`local:keepRawData`, default `true`, PRD §9.8), `realIdentities` (`local:realIdentities`, default `false`, PRD §9.7), `storageBudget` settings.
+  - [x] Use `version` + `migrations` for any versioned setting shape.
+  - [x] Use `storage.local` only for small settings; **never** `localStorage`; never bulk data here.
+- [x] Bulk/structured store via `idb` — `lib/db.ts` (+ `lib/store.ts` interface, `lib/db.memory.ts` twin):
+  - [x] `openDB` with a typed `DBSchema` and object stores for raw revision chunks, decoded operations, reconstruction snapshots, operation/timeline indexes, per-document cache metadata, LRU bookkeeping, and **resumable-retrieval checkpoints** (PRD §10.6).
+  - [x] Add indexes (`by-doc`, `by-last-accessed`) for querying; version the schema via the `idb` `upgrade` path.
+  - [x] Implement cache operations: save/get raw chunks, save/get decoded+snapshots, per-document metadata (doc id, created, last-accessed, parser version, estimated size, reconstruction status, raw-retained flag).
+  - [x] Implement LRU pruning that drops **raw chunks first**, preserving decoded/snapshots/timeline (PRD §9.8); poll `navigator.storage.estimate()` and stay under ~80% quota; call `navigator.storage.persist()`; handle `QuotaExceededError`.
+  - [x] Apply cache **versioning** keyed on parser version (`lib/decoder/version.ts`) so upgrades invalidate decoded data while retaining raw when safe; flag for re-fetch if raw was discarded.
+  - [x] Provide an **in-memory implementation** of the same interface for tests (PRD §10.2/§10.6).
+- [x] Typed messaging — `lib/messaging.ts`:
+  - [x] Use `defineExtensionMessaging<ProtocolMap>()` from `@webext-core/messaging`; define a typed `ProtocolMap` for activation triggers, progress, and retrieval control (start/cancel/checkpoint).
+- [x] Background retrieval — `entrypoints/background.ts` (single `// BLOCKED §24` site):
+  - [x] Use `defineBackground(() => { ... })`; keep **all** `browser.*` usage inside the callback (never module top level).
+  - [ ] **BLOCKED §24** — credentialed, **chunked, resumable** retrieval of `revisions/load` (`fetch(url, { credentials: "include" })`). The resumable orchestration + per-chunk checkpointing IS built + fake-tested (`lib/retrieval/orchestrator.ts`); only the live `fetch` adapter is gated (today: the pure `GatedChunkFetcher` stub).
+  - [x] Detect and handle the multi-account `/u/{N}/` URL variant (Appendix A.5) — `lib/docs-url` + `detectUserIndex`, plumbed through messaging.
+  - [ ] **BLOCKED §24** — discover the revision range via the confirmed mechanism (Appendix A.4); the orchestrator consumes `discoverUpperBound` only and never branches on the strategy, so this is a discovery-adapter swap.
+  - [x] Implement adaptive chunk sizing + backoff and the error taxonomy (PRD §10.7): unsupported page, missing doc id, insufficient permission, endpoint unavailable, unsupported format, network failure, quota failure, reconstruction failure, cancellation.
+  - [x] Never log/render raw response bodies or document fragments (PRD §13.7).
+- [x] Content script — `entrypoints/docs.content.tsx` (+ `lib/docs-url`):
+  - [x] `defineContentScript({ matches: ["*://docs.google.com/document/*"] })`; detect document context, extract doc id safely, present an unobtrusive activation affordance, and **trigger** retrieval via typed messaging — it does **not** own the fetch (PRD §10.9).
+  - [x] Do **not** auto-load revision history; require explicit user activation (PRD §9.2).
+  - [x] Any in-page UI mounts via `createShadowRootUi` with `isolateEvents` (PRD §11.2) — no style leakage into Google Docs. Minimal intentional Phase-4 affordance; full **`frontend-design`** polish is Phase 5.
+- [x] Replay-page Web Worker host — `entrypoints/replay/parse.worker.ts` (path reconciled from `lib/worker/parse.worker.ts`; pure logic in `lib/worker/pipeline.ts`):
+  - [x] Heavy decoding/reconstruction/timeline runs in the pure pipeline; the Worker shell owns its own idb realm, reads raw chunks, writes decoded results through `idb`, and posts frames. (Worker→page wiring via `new Worker(new URL(...))` lands with the Phase-5 replay page; the pure pipeline runs same-thread either way — see `docs/phase-4-acceptance.md`.)
 
 ### Validation / acceptance criteria
 
-- [ ] Settings round-trip under Vitest with `fakeBrowser` (default + updated values) (Phase 6).
-- [ ] `idb` store passes migration and cache-invalidation tests; LRU pruning drops raw chunks before derived data.
-- [ ] No `browser.*` call exists at any entrypoint module top level (grep verification + build succeeds).
-- [ ] Retrieval resumes correctly after a simulated SW termination (checkpoint replay).
-- [ ] No `webextension-polyfill` import and no `chrome.*` callback anywhere (grep verification).
-- [ ] A network audit during processing shows **zero** non-`docs.google.com` requests (PRD §17).
+- [x] Settings round-trip under Vitest with `fakeBrowser` (default + updated values).
+- [x] `idb` store passes migration and cache-invalidation tests; LRU pruning drops raw chunks before derived data; in-memory twin passes the same contract suite.
+- [x] No `browser.*` call exists at any entrypoint module top level (grep verification + build succeeds).
+- [x] Retrieval resumes correctly after a simulated SW termination (checkpoint replay) — orchestrator + fake fetcher/checkpoint store.
+- [x] No `webextension-polyfill` import and no `chrome.*` callback anywhere (grep verification).
+- [x] A network audit during processing shows **zero** non-`docs.google.com` requests (PRD §17) — trivially true while the adapter is the gated stub; re-audit post-§24.
+- [ ] **BLOCKED §24** — live credentialed `revisions/load` from an MV3 SW **and** a Firefox event page; real SW-termination resumability against the live endpoint; discovery wired to the confirmed §24 method.
 
 ---
 

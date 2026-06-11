@@ -26,6 +26,11 @@ export default defineConfig({
       "lib/domain/**",
       "lib/protocol/**",
       "lib/fixtures/**",
+      // Phase 4 pure tiers also run under Bun (`test:logic`) and import
+      // `bun:test`, which Vitest cannot resolve — keep them out of Vitest.
+      "lib/retrieval/**",
+      "lib/worker/**",
+      "lib/docs-url/**",
     ],
     coverage: { provider: "v8", reporter: ["text", "html"] },
   },
