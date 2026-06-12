@@ -115,19 +115,25 @@ describe("requestReview", () => {
 });
 
 describe("resolveModels", () => {
-  it("keeps configured models that exist, in priority order", async () => {
-    const t = fakeTransport(() => ({ content: VALID }), ["a", "c"]);
-    const resolved = await resolveModels(t, ["a", "b"], "z", silentLogger);
-    expect(resolved).toEqual(["a"]);
+  it("returns the full tiered list unchanged when all models are listed", async () => {
+    const t = fakeTransport(() => ({ content: VALID }), ["a", "b"]);
+    const resolved = await resolveModels(t, ["a", "b"], silentLogger);
+    expect(resolved).toEqual(["a", "b"]);
   });
 
-  it("degrades to the fallback default when none resolve", async () => {
+  it("keeps unlisted models in the list (verification is observability-only)", async () => {
+    const t = fakeTransport(() => ({ content: VALID }), ["a"]);
+    const resolved = await resolveModels(t, ["a", "b"], silentLogger);
+    expect(resolved).toEqual(["a", "b"]);
+  });
+
+  it("never substitutes a different model when none are listed", async () => {
     const t = fakeTransport(() => ({ content: VALID }), ["x"]);
-    const resolved = await resolveModels(t, ["a", "b"], "z", silentLogger);
-    expect(resolved).toEqual(["z"]);
+    const resolved = await resolveModels(t, ["a", "b"], silentLogger);
+    expect(resolved).toEqual(["a", "b"]);
   });
 
-  it("degrades to the fallback default when the models endpoint fails", async () => {
+  it("proceeds with the configured list when the models endpoint fails", async () => {
     const t: ChatTransport = {
       async listModelIds(): Promise<string[]> {
         throw new Error("network down");
@@ -136,7 +142,7 @@ describe("resolveModels", () => {
         return { content: VALID };
       },
     };
-    const resolved = await resolveModels(t, ["a"], "z", silentLogger);
-    expect(resolved).toEqual(["z"]);
+    const resolved = await resolveModels(t, ["a", "b"], silentLogger);
+    expect(resolved).toEqual(["a", "b"]);
   });
 });

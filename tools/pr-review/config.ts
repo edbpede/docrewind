@@ -34,7 +34,6 @@ export const DEFAULT_EXCLUDED_GLOBS: readonly string[] = [
 
 const DEFAULT_PRIMARY_MODEL = "deepseek/deepseek-v4-pro-cheaper:thinking";
 const DEFAULT_FALLBACK_MODELS = "xiaomi/mimo-v2.5-pro:thinking,minimax/minimax-m3:thinking";
-const DEFAULT_FALLBACK_DEFAULT = "deepseek/deepseek-v3.2:thinking";
 
 /** Raw, parsed-but-not-yet-validated env+arg bundle. */
 export interface RawConfigInput {
@@ -51,7 +50,6 @@ export interface ReviewConfig {
   readonly prNumber: number;
   readonly model: string;
   readonly fallbackModels: readonly string[];
-  readonly fallbackDefaultModel: string;
   readonly minConfidence: number;
   readonly maxComments: number;
   readonly dryRun: boolean;
@@ -156,7 +154,6 @@ export function loadConfig(input: RawConfigInput): ReviewConfig {
     prNumber: parsed.data.prNumber,
     model: env.REVIEW_MODEL?.trim() || DEFAULT_PRIMARY_MODEL,
     fallbackModels: parseCsv(env.REVIEW_FALLBACK_MODELS ?? DEFAULT_FALLBACK_MODELS),
-    fallbackDefaultModel: env.REVIEW_MODEL_FALLBACK_DEFAULT?.trim() || DEFAULT_FALLBACK_DEFAULT,
     minConfidence: parsed.data.minConfidence,
     maxComments: parsed.data.maxComments,
     dryRun: args.dryRun ? true : parseBool(env.REVIEW_DRY_RUN, false),

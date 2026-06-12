@@ -201,12 +201,7 @@ export async function review(
   });
 
   const transport = createOpenAiTransport(config.nanogptApiKey);
-  const models = await resolveModels(
-    transport,
-    [config.model, ...config.fallbackModels],
-    config.fallbackDefaultModel,
-    logger,
-  );
+  const models = await resolveModels(transport, [config.model, ...config.fallbackModels], logger);
   const { review: result, model } = await requestReview(models, messages, { transport, logger });
   logger.info("model produced review", { model, comments: result.comments.length });
 
