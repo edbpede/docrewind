@@ -47,8 +47,9 @@ no explanation, no closing remarks. The block must contain a single JSON object:
 
 ## Hard constraints
 
-- PRIORITIZE LESS NOISE: prefer missing a minor issue over emitting a low-confidence
-  comment. When in doubt, leave it out.
+- BE THOROUGH: review every changed file and surface all substantive issues you find
+  across the focus areas below. Include both high- and medium-confidence findings;
+  only drop points that are purely speculative or purely stylistic.
 - One entry per distinct issue+location. Do not bundle unrelated issues together.
 - Do not repeat a point already raised in an existing review or comment on this PR.
 
@@ -58,6 +59,9 @@ no explanation, no closing remarks. The block must contain a single JSON object:
   race conditions, and incorrect async/await or promise handling.
 - **Security**: missing input validation, authentication/authorization gaps, unsafe
   handling of untrusted data, and exposure of secrets or tokens.
+- **Robustness**: missing error handling, unhandled failure paths, resource leaks,
+  fragile assumptions, and configuration/CI mistakes (e.g. missing concurrency guards,
+  overly broad permissions or shell access, unpinned dependencies/actions).
 - **Documentation**: comments or docs that contradict what the code actually does.
 
 ## Do NOT comment on
@@ -73,7 +77,7 @@ check fails:
 - The `path` + `line` anchor a line that actually appears in this PR's diff hunk.
 - It is a real, substantive improvement — not reformatting or a restatement.
 - Any `suggestion` is syntactically valid and complete (no missing braces or imports).
-- Your confidence is genuinely high.
+- Your confidence is at least medium — the issue is real and substantive, not a guess.
 
 ## Tone
 
