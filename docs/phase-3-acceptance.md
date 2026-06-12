@@ -85,8 +85,11 @@ text-equality MUST (§15.3) is now PROVEN on a sanitized live capture through th
 production pipeline. The credentialed `revisions/load` read was verified from the
 built extension's MV3 service-worker context.
 
-**Remaining live items (scoped as follow-ups, not blockers):** a Firefox event-page
-fetch + first-run UX (Firefox not installed in the capture env — the `firefox-mv3`
-build is verified), a real multi-account `/u/1/` read (no second account), a
-rich/suggesting-doc op capture (suggestions + embedded objects), and a large-doc
-deterministic SW-termination kill. Phase 4 network retrieval is **unblocked**.
+**Remaining live items — updated by the 2026-06-12 Firefox follow-up.** Now CLOSED
+live in Firefox (Firefox 151 + `firefox-devtools` MCP): the rich/suggesting-doc op
+capture (Q7 — `iss`/`msfd` suggestions + in-band `ae`/`te`/`ue` entity ops; decoder
+unchanged + sanitized fixture/test added), the multi-account `/u/1/` read (Q8), and
+the Firefox first-party credentialed read + affordance mount (Q10/Q12). STILL OPEN
+(documented MCP-tooling limits, not blockers): the Firefox **extension-background**
+credentialed fetch and a **deterministic SW/event-page-termination kill** on a large
+doc. Phase 4 network retrieval is **unblocked**.
