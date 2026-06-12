@@ -1,0 +1,478 @@
+name: ai-review
+
+on:
+  # Auto-review on PR events (drafts skipped in the job `if`), plus the `ai-review`
+  # label as a manual trigger that also works on draft PRs.
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
+  # On-demand: comment "/review" or "/oc" (e.g. "/review please") on an issue or PR.
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write # create the inline review + comments
+  issues: write # fallback summary / notice comment + ai-review/ai-reviewed labels
+
+# One review at a time per PR; a newer push lets the in-flight run finish first.
+concurrency:
+  group: ai-review-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  review:
+    # Three entry paths:
+    #   (a) a non-labeled PR event on a NON-draft PR (auto-review),
+    #   (b) a `labeled` event adding the `ai-review` label (works on drafts),
+    #   (c) a "/review" or "/oc" comment on an issue or PR.
+    if: |
+      (github.event_name == 'pull_request' && github.event.action != 'labeled'
+         && github.event.pull_request.draft == false) ||
+      (github.event_name == 'pull_request' && github.event.action == 'labeled'
+         && github.event.label.name == 'ai-review') ||
+      (github.event_name != 'pull_request' &&
+         (startsWith(github.event.comment.body, '/review') ||
+          startsWith(github.event.comment.body, '/oc')))
+    runs-on: ubuntu-latest
+    # Backstop so a stuck job is reclaimed; the curl step has its own shorter timeout
+    # so a hung model call fails into the notice path instead of cancelling the job.
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve PR context
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          case "$GITHUB_EVENT_NAME" in
+            pull_request) N='${{ github.event.pull_request.number }}' ;;
+            issue_comment) N='${{ github.event.issue.number }}' ;;
+            pull_request_review_comment) N='${{ github.event.pull_request.number }}' ;;
+            *) echo "Unsupported event: $GITHUB_EVENT_NAME" >&2; exit 1 ;;
+          esac
+          read -r SHA BASE < <(gh pr view "$N" --json headRefOid,baseRefName \
+            --jq '[.headRefOid, .baseRefName] | @tsv')
+          {
+            echo "number=$N"
+            echo "head_sha=$SHA"
+            echo "base_ref=$BASE"
+          } >> "$GITHUB_OUTPUT"
+          echo "Resolved PR #$N head=$SHA base=$BASE"
+
+      - name: Check out the PR head + base
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          BASE_REF: ${{ steps.pr.outputs.base_ref }}
+        run: |
+          set -euo pipefail
+          gh pr checkout "$PR_NUMBER"
+          git fetch --no-tags origin "$BASE_REF"
+
+      - name: Build review context (diff + changed files)
+        id: ctx
+        env:
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          BASE_REF: ${{ steps.pr.outputs.base_ref }}
+        run: |
+          set -euo pipefail
+          # Character budget (NOTE: chars, not tokens — ~300k chars ≈ ~75k tokens at
+          # ~4 char/token, well under the 500k-TOKEN context window. Units differ; do
+          # NOT raise this toward 500k thinking it maps 1:1 to the token window).
+          BUDGET=300000
+          RANGE="origin/${BASE_REF}...HEAD"
+
+          DIFF="$(git diff "$RANGE")"
+          SYS="$RUNNER_TEMP/system.txt"
+          USR="$RUNNER_TEMP/user.txt"
+
+          # System prompt = review-prompt.md, with AGENTS.md appended when present.
+          cp .github/ai-review/review-prompt.md "$SYS"
+          if [ -f AGENTS.md ]; then
+            {
+              printf '\n\n---\nRepository reviewer guidelines (AGENTS.md):\n\n'
+              cat AGENTS.md
+            } >> "$SYS"
+          fi
+
+          # User message = the diff, then changed-file contents within the char budget.
+          {
+            printf 'PR #%s diff (%s):\n\n' "$PR_NUMBER" "$RANGE"
+            printf '%s\n' "$DIFF"
+          } > "$USR"
+          used=${#DIFF}
+
+          # Binary paths (numstat shows "-\t-") are skipped; we never include deleted
+          # files (--diff-filter=ACMR). Whole-file boundary only — never half a file.
+          declare -A is_bin=()
+          while IFS=$'\t' read -r add del path; do
+            if [ "$add" = "-" ] && [ "$del" = "-" ]; then is_bin["$path"]=1; fi
+          done < <(git diff --numstat "$RANGE")
+
+          printf '\n\nChanged files:\n' >> "$USR"
+          truncated=0
+          while IFS= read -r f; do
+            [ -n "${is_bin[$f]:-}" ] && continue
+            [ -f "$f" ] || continue
+            sz=$(wc -c < "$f")
+            if [ $((used + sz)) -gt "$BUDGET" ]; then
+              # Over budget: stop at this whole-file boundary (diff-only beyond here).
+              truncated=1
+              break
+            fi
+            {
+              printf '\n===== FILE: %s =====\n' "$f"
+              cat "$f"
+            } >> "$USR"
+            used=$((used + sz))
+          done < <(git diff --name-only --diff-filter=ACMR "$RANGE" | sort)
+
+          if [ "$truncated" = "1" ]; then
+            printf '\n[Context budget reached — remaining changed-file contents omitted; the full diff above is authoritative.]\n' >> "$USR"
+          fi
+
+          {
+            echo "diff_chars=${#DIFF}"
+            echo "context_chars=$(wc -c < "$USR" | tr -d ' ')"
+            echo "truncated=$truncated"
+          } >> "$GITHUB_OUTPUT"
+          echo "Context built: diff=${#DIFF} chars, total=$(wc -c < "$USR") chars, truncated=$truncated"
+
+      - name: Call NanoGPT (structured review, json_object retry)
+        id: review
+        continue-on-error: true
+        timeout-minutes: 12
+        env:
+          NANOGPT_API_KEY: ${{ secrets.NANOGPT_API_KEY }}
+        run: |
+          # IMPORTANT: never `set -x` here — it would echo the auth header. The API key
+          # only ever lives in the curl --config file (umask 077), never in argv.
+          set -uo pipefail
+
+          ENDPOINT="https://nano-gpt.com/api/v1/chat/completions"
+          MODEL="minimax/minimax-m3:thinking"
+          SYS="$RUNNER_TEMP/system.txt"
+          USR="$RUNNER_TEMP/user.txt"
+          PRIMARY="$RUNNER_TEMP/primary-response.json"
+          FALLBACK="$RUNNER_TEMP/fallback-response.json"
+          CHOSEN="$RUNNER_TEMP/nanogpt-response.json"
+          META="$RUNNER_TEMP/request-metadata.json"
+
+          # Auth header lives only in this file, created with a private umask.
+          umask 077
+          CFG="$RUNNER_TEMP/curl.cfg"
+          printf 'header = "Authorization: Bearer %s"\n' "$NANOGPT_API_KEY" > "$CFG"
+
+          # Assemble the request body with jq (handles all string escaping for us).
+          build_body() {
+            # $1 = response_format mode: "schema" | "object"
+            local mode="$1" rf
+            if [ "$mode" = "schema" ]; then
+              rf="$(jq -n --slurpfile s .github/ai-review/schema.json \
+                '{type:"json_schema", json_schema:{name:"pr_review", strict:true, schema:$s[0]}}')"
+            else
+              rf='{"type":"json_object"}'
+            fi
+            jq -n \
+              --arg model "$MODEL" \
+              --rawfile sys "$SYS" \
+              --rawfile usr "$USR" \
+              --argjson rf "$rf" \
+              '{
+                 model: $model,
+                 reasoning: { effort: "high", exclude: true },
+                 reasoning_effort: "high",
+                 response_format: $rf,
+                 messages: [
+                   { role: "system", content: $sys },
+                   { role: "user",   content: $usr }
+                 ]
+               }'
+          }
+
+          # Inspect a response file: prints a JSON line {"kind":"clean|salvage|none","leak":<num|null>}.
+          #   clean   = message.content parses as a JSON object with {summary, comments[]}
+          #   salvage = only a brace-scanned balanced object with a comments[] array is recoverable
+          #   none    = nothing usable
+          inspect() {
+            node -e '
+              const fs = require("fs");
+              let resp;
+              try { resp = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); }
+              catch (_) { process.stdout.write(JSON.stringify({kind:"none",leak:null})); process.exit(0); }
+              const content = resp && resp.choices && resp.choices[0] && resp.choices[0].message
+                ? (resp.choices[0].message.content || "") : "";
+              function scan(t){
+                const out=[];
+                for(let i=0;i<t.length;i++){
+                  if(t[i]!=="{")continue;
+                  let d=0,s=false,e=false;
+                  for(let k=i;k<t.length;k++){
+                    const ch=t[k];
+                    if(s){ if(e)e=false; else if(ch==="\\")e=true; else if(ch==="\"")s=false; }
+                    else if(ch==="\"")s=true;
+                    else if(ch==="{")d++;
+                    else if(ch==="}"){ if(--d===0){ try{ const o=JSON.parse(t.slice(i,k+1)); if(o&&typeof o==="object"&&Array.isArray(o.comments))out.push(o);}catch(_){ } break; } }
+                  }
+                }
+                return out;
+              }
+              let kind="none", parsed=null;
+              try{ const o=JSON.parse(content.trim()); if(o&&typeof o==="object"&&typeof o.summary==="string"&&Array.isArray(o.comments)){ kind="clean"; parsed=o; } }catch(_){ }
+              if(kind==="none"){ const objs=scan(content); if(objs.length){ kind="salvage"; parsed=objs[objs.length-1]; } }
+              let leak=null;
+              if(parsed){ const ser=JSON.stringify(parsed).length||1; leak=Math.round((content.length/ser)*1000)/1000; }
+              process.stdout.write(JSON.stringify({kind, leak}));
+            ' "$1"
+          }
+
+          # --- Primary attempt: json_schema (strict) ---
+          build_body schema > "$RUNNER_TEMP/request-schema.json"
+          http_primary=$(curl -sS --max-time 600 -w '%{http_code}' -o "$PRIMARY" \
+            --config "$CFG" \
+            -H 'Content-Type: application/json' \
+            --data @"$RUNNER_TEMP/request-schema.json" \
+            "$ENDPOINT") || http_primary=000
+          echo "primary HTTP $http_primary"
+
+          ins_primary='{"kind":"none","leak":null}'
+          [ -s "$PRIMARY" ] && ins_primary=$(inspect "$PRIMARY")
+          kind_primary=$(printf '%s' "$ins_primary" | jq -r '.kind')
+
+          parse_path="failed"
+          http_fallback=""
+          leak=$(printf '%s' "$ins_primary" | jq -r '.leak')
+
+          if [ "$http_primary" = "200" ] && { [ "$kind_primary" = "clean" ] || [ "$kind_primary" = "salvage" ]; }; then
+            parse_path="schema_first"
+            cp "$PRIMARY" "$CHOSEN"
+          else
+            # --- Retry once with json_object (parse/shape failure OR HTTP error) ---
+            echo "primary unusable (http=$http_primary kind=$kind_primary) — retrying with json_object"
+            build_body object > "$RUNNER_TEMP/request-object.json"
+            http_fallback=$(curl -sS --max-time 600 -w '%{http_code}' -o "$FALLBACK" \
+              --config "$CFG" \
+              -H 'Content-Type: application/json' \
+              --data @"$RUNNER_TEMP/request-object.json" \
+              "$ENDPOINT") || http_fallback=000
+            echo "fallback HTTP $http_fallback"
+
+            ins_fb='{"kind":"none","leak":null}'
+            [ -s "$FALLBACK" ] && ins_fb=$(inspect "$FALLBACK")
+            kind_fb=$(printf '%s' "$ins_fb" | jq -r '.kind')
+
+            if [ "$http_fallback" = "200" ] && { [ "$kind_fb" = "clean" ] || [ "$kind_fb" = "salvage" ]; }; then
+              parse_path="json_object_fallback"
+              leak=$(printf '%s' "$ins_fb" | jq -r '.leak')
+              cp "$FALLBACK" "$CHOSEN"
+            else
+              parse_path="failed"
+              # Keep whichever body we have for diagnostics (prefer a non-empty one).
+              if [ -s "$FALLBACK" ]; then cp "$FALLBACK" "$CHOSEN"; else cp "$PRIMARY" "$CHOSEN" 2>/dev/null || echo '{}' > "$CHOSEN"; fi
+            fi
+          fi
+
+          # finish_reason + usage come from the chosen response (best-effort).
+          finish_reason=$(jq -r '.choices[0].finish_reason // empty' "$CHOSEN" 2>/dev/null || true)
+          usage=$(jq -c '.usage // null' "$CHOSEN" 2>/dev/null || echo null)
+
+          # request-metadata.json — diagnostics only. No API key, no curl transcript.
+          jq -n \
+            --arg model "$MODEL" \
+            --arg base "${{ steps.pr.outputs.base_ref }}" \
+            --argjson diff_chars "${{ steps.ctx.outputs.diff_chars }}" \
+            --argjson context_chars "${{ steps.ctx.outputs.context_chars }}" \
+            --argjson truncated "${{ steps.ctx.outputs.truncated }}" \
+            --arg http_primary "$http_primary" \
+            --arg http_fallback "$http_fallback" \
+            --arg parse_path "$parse_path" \
+            --arg finish_reason "$finish_reason" \
+            --argjson usage "$usage" \
+            --arg leak "$leak" \
+            '{
+               model: $model,
+               base_ref: $base,
+               diff_chars: $diff_chars,
+               context_chars: $context_chars,
+               context_truncated: ($truncated == 1),
+               http_primary: $http_primary,
+               http_fallback: (if $http_fallback == "" then null else $http_fallback end),
+               finish_reason: (if $finish_reason == "" then null else $finish_reason end),
+               usage: $usage,
+               parse_path: $parse_path,
+               leak_ratio: (if $leak == "null" then null else ($leak | tonumber) end)
+             }' > "$META"
+
+          echo "parse_path=$parse_path" >> "$GITHUB_OUTPUT"
+          echo "=== request-metadata.json ==="
+          cat "$META"
+
+          # Fail (→ notice path) only when we never got ANY response body at all.
+          if [ "$http_primary" = "000" ] && { [ -z "$http_fallback" ] || [ "$http_fallback" = "000" ]; }; then
+            echo "No response received from NanoGPT (transport failure)." >&2
+            exit 1
+          fi
+          exit 0
+
+      - name: Upload response + metadata (diagnostic)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-review-response
+          path: |
+            ${{ runner.temp }}/nanogpt-response.json
+            ${{ runner.temp }}/request-metadata.json
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Post inline review
+        if: always() && steps.review.outcome == 'success'
+        uses: actions/github-script@v7
+        env:
+          RESP_FILE: ${{ runner.temp }}/nanogpt-response.json
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+          PARSE_PATH: ${{ steps.review.outputs.parse_path }}
+        with:
+          script: |
+            const fs = require("fs");
+            const { owner, repo } = context.repo;
+            const pull_number = Number(process.env.PR_NUMBER);
+            const commit_id = process.env.HEAD_SHA;
+
+            // The chosen NanoGPT response; the review JSON is in message.content.
+            let content = "";
+            try {
+              const resp = JSON.parse(fs.readFileSync(process.env.RESP_FILE, "utf8"));
+              content = resp?.choices?.[0]?.message?.content ?? "";
+            } catch (e) {
+              core.warning(`Could not read/parse the NanoGPT response file: ${e.message}`);
+            }
+
+            // Parse the review: JSON.parse first, then a balanced-brace scan as a
+            // reasoning-leak salvage. Mirrors the step-5 retry discriminator.
+            function braceScan(text) {
+              const out = [];
+              for (let i = 0; i < text.length; i++) {
+                if (text[i] !== "{") continue;
+                let depth = 0, inStr = false, esc = false;
+                for (let k = i; k < text.length; k++) {
+                  const ch = text[k];
+                  if (inStr) {
+                    if (esc) esc = false;
+                    else if (ch === "\\") esc = true;
+                    else if (ch === '"') inStr = false;
+                  } else if (ch === '"') inStr = true;
+                  else if (ch === "{") depth++;
+                  else if (ch === "}") {
+                    if (--depth === 0) {
+                      try {
+                        const o = JSON.parse(text.slice(i, k + 1));
+                        if (o && typeof o === "object" && Array.isArray(o.comments)) out.push(o);
+                      } catch (_) {}
+                      break;
+                    }
+                  }
+                }
+              }
+              return out;
+            }
+            function findReview(text) {
+              try {
+                const o = JSON.parse(String(text).trim());
+                if (o && typeof o === "object" && Array.isArray(o.comments)) return o;
+              } catch (_) {}
+              const objs = braceScan(String(text));
+              return objs.length ? objs[objs.length - 1] : null;
+            }
+
+            const data = findReview(content);
+            if (!data) {
+              core.warning(`No parseable review JSON (parse_path=${process.env.PARSE_PATH}).`);
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: pull_number,
+                body: "Automated AI review ran but its output could not be parsed into structured comments. See the `ai-review-response` workflow artifact.",
+              });
+              return;
+            }
+
+            const footer =
+              "\n\n---\n*Automated review complete. React with 👍 or 👎 on individual comments to give feedback.*";
+            const items = Array.isArray(data.comments) ? data.comments : [];
+            const comments = items.map((c) => {
+              let body = String(c.body || "");
+              if (c.suggestion) body += "\n\n```suggestion\n" + c.suggestion + "\n```";
+              const o = { path: c.path, line: Number(c.line), side: c.side || "RIGHT", body };
+              if (c.start_line) { o.start_line = Number(c.start_line); o.start_side = c.start_side || o.side; }
+              return o;
+            });
+            const summary = String(data.summary || "Review completed.") + (comments.length ? footer : "");
+
+            try {
+              await github.rest.pulls.createReview({
+                owner, repo, pull_number, commit_id, event: "COMMENT", body: summary, comments,
+              });
+              core.info(`Posted one batched review with ${comments.length} inline comment(s).`);
+            } catch (err) {
+              core.warning(`Batched review failed (${err.message}); posting comments individually.`);
+              let posted = 0;
+              for (const c of comments) {
+                try {
+                  await github.rest.pulls.createReviewComment({
+                    owner, repo, pull_number, commit_id,
+                    path: c.path, line: c.line, side: c.side, body: c.body,
+                    ...(c.start_line ? { start_line: c.start_line, start_side: c.start_side } : {}),
+                  });
+                  posted++;
+                } catch (e2) {
+                  core.warning(`Skipped ${c.path}:${c.line} — ${e2.message}`);
+                }
+              }
+              await github.rest.issues.createComment({ owner, repo, issue_number: pull_number, body: summary });
+              core.info(`Posted ${posted}/${comments.length} inline comment(s) individually.`);
+            }
+
+      - name: Notify on failure
+        if: steps.review.outcome == 'failure'
+        uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: Number(process.env.PR_NUMBER),
+              body: "Automated AI review failed before producing output; see the workflow logs and the `ai-review-response` artifact.",
+            });
+
+      - name: Clean up review label
+        # After a label-triggered run, remove `ai-review` and mark it reviewed.
+        if: github.event_name == 'pull_request' && github.event.action == 'labeled'
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const common = {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: Number("${{ steps.pr.outputs.number }}"),
+            };
+            try {
+              await github.rest.issues.removeLabel({ ...common, name: "ai-review" });
+            } catch (e) {
+              core.info(`Could not remove 'ai-review' label: ${e.message}`);
+            }
+            try {
+              await github.rest.issues.addLabels({ ...common, labels: ["ai-reviewed"] });
+            } catch (e) {
+              core.info(`Could not add 'ai-reviewed' label: ${e.message}`);
+            }

@@ -1,0 +1,23 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["summary", "comments"],
+  "properties": {
+    "summary": { "type": "string" },
+    "comments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "line", "side", "body", "suggestion"],
+        "properties": {
+          "path": { "type": "string" },
+          "line": { "type": "integer" },
+          "side": { "type": "string", "enum": ["RIGHT", "LEFT"] },
+          "body": { "type": "string" },
+          "suggestion": { "type": ["string", "null"] }
+        }
+      }
+    }
+  }
+}
