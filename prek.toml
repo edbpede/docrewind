@@ -50,6 +50,10 @@ hooks = [
   # TypeScript type-check only (noEmit). Runs on commit.
   { id = "tsc-compile", name = "TypeScript type-check", language = "system",
     entry = "bun run compile", files = '\.(ts|tsx)$', pass_filenames = false },
+  # PR-review CLI type-check — tools/ is excluded from the root tsc (it uses a
+  # dedicated Bun/Node tsconfig with no SolidJS/@types/chrome), so check it here.
+  { id = "tsc-compile-pr-review", name = "TypeScript type-check (pr-review)", language = "system",
+    entry = "bun run compile:pr-review", files = '^tools/pr-review/.*\.ts$', pass_filenames = false },
   # Pure-core purity guard — fails if #imports/browser.*/wxt leak into the six
   # pure dirs (decoder/reconstruction/timeline/domain/protocol/fixtures). Durable into Phase 4.
   { id = "check-pure-core", name = "Pure-core purity guard", language = "system",
@@ -60,4 +64,8 @@ hooks = [
   # Pure-logic Bun tests (decoder/reconstruction/timeline/domain). Pre-push.
   { id = "bun-logic-tests", name = "Bun pure-logic tests", language = "system",
     entry = "bun run test:logic", stages = ["pre-push"], pass_filenames = false },
+  # PR-review CLI tests (bun:test, no network). The bun-logic-tests hook is an
+  # explicit lib/* list and does not cover tools/, so wire its own run. Pre-push.
+  { id = "bun-pr-review-tests", name = "Bun PR-review tests", language = "system",
+    entry = "bun run test:pr-review", stages = ["pre-push"], pass_filenames = false },
 ]

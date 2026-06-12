@@ -31,6 +31,10 @@ export default defineConfig({
       "lib/retrieval/**",
       "lib/worker/**",
       "lib/docs-url/**",
+      // The PR-review CLI (tools/pr-review) is a Bun program whose tests import
+      // `bun:test`, which Vitest cannot resolve. It has its own `test:pr-review`
+      // runner; keep it out of Vitest so `test:run` (pre-push) doesn't error.
+      "tools/**",
     ],
     coverage: { provider: "v8", reporter: ["text", "html"] },
   },

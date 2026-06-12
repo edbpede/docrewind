@@ -20,5 +20,10 @@
     "noEmit": true,
     "skipLibCheck": true,
     "paths": { "@/*": ["./*"] }
-  }
+  },
+  // The WXT base sets `include: ["../**/*"]`, which would otherwise pull the
+  // PR-review CLI (tools/pr-review) into the whole-project `tsc`. That CLI is a
+  // plain Bun program (no SolidJS JSX, no @types/chrome) with its own
+  // tsconfig + `compile:pr-review` check, so exclude it here.
+  "exclude": ["tools"]
 }
