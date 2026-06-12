@@ -27,8 +27,9 @@ API-only, no checkout of PR code:
 5. Compose a system/developer/user prompt; all PR text is fenced as untrusted data
    (prompt-injection hardening).
 6. Call NanoGPT (OpenAI-compatible) with `response_format` json_schema + `reasoning:
-   { exclude: true }`; verify models at startup and fall back across a priority list
-   to a known-good default. **Zod is the real validation gate.**
+   { exclude: true }`; the configured tiered model list is authoritative (primary then
+   ordered fallbacks, tried in order at request time), with a startup `/models` check
+   for observability only. **Zod is the real validation gate.**
 7. Post-process: confidence gate, anchor validation, dedupe (hidden fingerprint
    marker), severity sort, cap, safe truncation, suggestion-block policy.
 8. Post one grouped review (or print a sanitized payload in dry-run).

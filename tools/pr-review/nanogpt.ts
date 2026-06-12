@@ -140,38 +140,34 @@ function tryParseReview(content: unknown): Review | null {
 }
 
 /**
- * Resolve the usable model priority list: keep configured models that GET /models
- * confirms exist (preserving priority order); if none resolve or the endpoint
- * fails, degrade to the known-good fallback default and proceed (§10).
+ * Verify the configured model priority list against GET /models for observability,
+ * then return the FULL tiered list unchanged. The tiered list is authoritative:
+ * verification only logs which models are unconfirmed (e.g. a future rename) — it
+ * never drops a model or substitutes a different one. A model that is genuinely
+ * uncallable is handled at request time by per-model runtime fallback (§10). If
+ * the /models endpoint itself fails, we log and proceed with the full list.
  */
 export async function resolveModels(
   transport: ChatTransport,
   priority: readonly string[],
-  fallbackDefault: string,
   logger: Logger,
 ): Promise<string[]> {
-  let available: Set<string>;
+  const models = [...priority];
   try {
-    available = new Set(await transport.listModelIds());
+    const available = new Set(await transport.listModelIds());
+    const unconfirmed = models.filter((model) => !available.has(model));
+    if (unconfirmed.length > 0) {
+      logger.warn("some configured models are not listed by /models; trying them anyway", {
+        unconfirmed,
+      });
+    }
+    logger.info("model priority", { models });
   } catch (error) {
-    logger.warn("models endpoint failed; using fallback default", {
-      fallbackDefault,
+    logger.warn("models endpoint failed; proceeding with configured list", {
       error: String(error),
     });
-    return [fallbackDefault];
   }
-
-  const resolved = priority.filter((model) => available.has(model));
-  if (resolved.length === 0) {
-    const fallbackExists = available.has(fallbackDefault);
-    logger.warn("no configured models resolved; using fallback default", {
-      fallbackDefault,
-      fallbackExists,
-    });
-    return [fallbackDefault];
-  }
-  logger.info("resolved models", { models: resolved });
-  return resolved;
+  return models;
 }
 
 /**
