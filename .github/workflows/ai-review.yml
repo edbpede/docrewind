@@ -1,0 +1,165 @@
+name: ai-review
+
+# Multi-agent PR review via sun-praise/opencode-actions/multi-review (SHA-pinned v4.0.0),
+# with NanoGPT as the gateway through the action's OpenAI-compatible `litellm/` shim.
+# Three sequential tiers provide workflow-level, per-model fallback: a tier runs only when
+# the previous tier's action exited non-zero (in practice: every reviewer failed, e.g. the
+# model 503s on NanoGPT). See .omc/plans/migrate-to-opencode-actions-multireview.md.
+#
+# Manual trigger: add the `ai-review` label to a PR (works on drafts). A `/review` comment
+# trigger is intentionally NOT wired: multi-review resolves the PR only from
+# GITHUB_REF =~ refs/pull/N/merge (action.yml:242), which `issue_comment` events do not
+# provide, and GITHUB_REF is a reserved, non-overridable env var — so a comment trigger
+# would feed the action an empty diff and only ever post a failure notice.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+# One review at a time per PR; a newer push lets the in-flight run finish (no cancel) and
+# overlapping pushes queue full runs rather than killing a review mid-flight.
+concurrency:
+  group: ai-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  review:
+    # Two entry paths, both restricted to same-repo PRs so fork PRs — which GitHub denies
+    # repo secrets, leaving NANOGPT_API_KEY empty — are skipped instead of cascading through
+    # three auth-failing tiers:
+    #   (a) a non-`labeled` PR event on a NON-draft PR (auto-review),
+    #   (b) a `labeled` event adding the `ai-review` label (manual; also works on drafts).
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      (
+        (github.event.action != 'labeled' && github.event.pull_request.draft == false) ||
+        (github.event.action == 'labeled' && github.event.label.name == 'ai-review')
+      )
+    runs-on: ubuntu-latest
+    # Backstop only; each tier is bounded by its own timeout-seconds (+ coordinator). Sized to
+    # let a full three-tier cascade finish without the job being reclaimed mid-run.
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Tier 1 — primary model. continue-on-error so an all-reviewers-failed exit (non-zero)
+      # falls through to tier 2 instead of failing the job.
+      - name: Tier 1 review (minimax)
+        id: tier1
+        continue-on-error: true
+        uses: sun-praise/opencode-actions/multi-review@010a0a4539f43eaeb31a19edcb044739646a4738 # v4.0.0
+        with:
+          model: litellm/minimax/minimax-m3:thinking
+          litellm-url: https://nano-gpt.com/api
+          litellm-api-key: ${{ secrets.NANOGPT_API_KEY }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          default-team: "quality:1,security:1,performance:1"
+          language: en
+          reasoning-effort: high
+          enable-thinking: "true"
+          timeout-seconds: "900"
+          coordinator-timeout-seconds: "300"
+          cleanup-error-comments: "true"
+          fail-on-severity: none
+          diff-max-size-kb: "256"
+          coordinator-prompt: |
+            You are the coordinator. Synthesize the reviewers' findings into ONE comment that a
+            downstream parser reads literally. Output rules are STRICT:
+            - The VERY FIRST line must be EXACTLY one of: CAN MERGE, CONDITIONAL MERGE, or CANNOT MERGE.
+              Nothing may precede it — no preamble, no greeting, no markdown, no reasoning, no code fence.
+            - After that first line, use ONLY these section headings, each on its own line, in this
+              order, omitting any heading that has no items:
+                ### Blocking Issues
+                ### Warnings
+                ### Suggestions
+            - Under each heading, list concrete findings as markdown bullets ("- ..."), citing file
+              paths and line numbers where applicable.
+            - Emit no thinking, analysis, or summary before the first line. Respond in English.
+
+      # Tier 2 — fires only when tier 1 exited non-zero (every reviewer failed / model unreachable).
+      - name: Tier 2 review (deepseek)
+        id: tier2
+        if: steps.tier1.outcome == 'failure'
+        continue-on-error: true
+        uses: sun-praise/opencode-actions/multi-review@010a0a4539f43eaeb31a19edcb044739646a4738 # v4.0.0
+        with:
+          model: litellm/deepseek/deepseek-v4-pro-cheaper:thinking
+          litellm-url: https://nano-gpt.com/api
+          litellm-api-key: ${{ secrets.NANOGPT_API_KEY }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          default-team: "quality:1,security:1,performance:1"
+          language: en
+          reasoning-effort: high
+          enable-thinking: "true"
+          timeout-seconds: "900"
+          coordinator-timeout-seconds: "300"
+          cleanup-error-comments: "true"
+          fail-on-severity: none
+          diff-max-size-kb: "256"
+          coordinator-prompt: |
+            You are the coordinator. Synthesize the reviewers' findings into ONE comment that a
+            downstream parser reads literally. Output rules are STRICT:
+            - The VERY FIRST line must be EXACTLY one of: CAN MERGE, CONDITIONAL MERGE, or CANNOT MERGE.
+              Nothing may precede it — no preamble, no greeting, no markdown, no reasoning, no code fence.
+            - After that first line, use ONLY these section headings, each on its own line, in this
+              order, omitting any heading that has no items:
+                ### Blocking Issues
+                ### Warnings
+                ### Suggestions
+            - Under each heading, list concrete findings as markdown bullets ("- ..."), citing file
+              paths and line numbers where applicable.
+            - Emit no thinking, analysis, or summary before the first line. Respond in English.
+
+      # Tier 3 — fires only when both prior tiers failed. No continue-on-error: this tier's
+      # failure fails the job, and the terminal notice step below posts a human-readable comment.
+      - name: Tier 3 review (kimi)
+        id: tier3
+        if: steps.tier1.outcome == 'failure' && steps.tier2.outcome == 'failure'
+        uses: sun-praise/opencode-actions/multi-review@010a0a4539f43eaeb31a19edcb044739646a4738 # v4.0.0
+        with:
+          model: litellm/moonshotai/kimi-k2.6:thinking
+          litellm-url: https://nano-gpt.com/api
+          litellm-api-key: ${{ secrets.NANOGPT_API_KEY }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          default-team: "quality:1,security:1,performance:1"
+          language: en
+          reasoning-effort: high
+          enable-thinking: "true"
+          timeout-seconds: "900"
+          coordinator-timeout-seconds: "300"
+          cleanup-error-comments: "true"
+          fail-on-severity: none
+          diff-max-size-kb: "256"
+          coordinator-prompt: |
+            You are the coordinator. Synthesize the reviewers' findings into ONE comment that a
+            downstream parser reads literally. Output rules are STRICT:
+            - The VERY FIRST line must be EXACTLY one of: CAN MERGE, CONDITIONAL MERGE, or CANNOT MERGE.
+              Nothing may precede it — no preamble, no greeting, no markdown, no reasoning, no code fence.
+            - After that first line, use ONLY these section headings, each on its own line, in this
+              order, omitting any heading that has no items:
+                ### Blocking Issues
+                ### Warnings
+                ### Suggestions
+            - Under each heading, list concrete findings as markdown bullets ("- ..."), citing file
+              paths and line numbers where applicable.
+            - Emit no thinking, analysis, or summary before the first line. Respond in English.
+
+      # Full outage (every tier errored — the PR-9 class). cleanup-error-comments deletes each
+      # tier's own error comment, so without this the PR is left with a silent red check.
+      # `always()` is required because tier 3 failing puts the job in a failing state, which would
+      # otherwise skip a plain `if:` condition.
+      - name: Terminal failure notice
+        if: ${{ always() && steps.tier3.outcome == 'failure' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr comment "$PR_NUMBER" --body "AI review unavailable — all NanoGPT model tiers (minimax → deepseek → kimi) errored. This is typically a transient gateway outage; re-run the workflow (or push a new commit) once NanoGPT service recovers."
