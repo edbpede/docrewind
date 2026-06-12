@@ -103,6 +103,30 @@ describe("processReview", () => {
     expect(result.drops.some((d) => d.reason === "duplicate")).toBe(true);
   });
 
+  it("strips think blocks from every posted model-authored comment field", () => {
+    const result = processReview(
+      review([
+        makeComment({
+          path: "a.ts",
+          line: 2,
+          body: "Visible body. <think>hidden body reasoning</think>",
+          why_it_matters: "Visible why. <think>hidden why reasoning</think>",
+          suggested_fix: "Visible fix. <think>hidden fix reasoning</think>",
+        }),
+      ]),
+      options(),
+    );
+
+    const body = result.comments[0]?.body ?? "";
+    expect(body).toContain("Visible body.");
+    expect(body).toContain("Visible why.");
+    expect(body).toContain("Visible fix.");
+    expect(body).not.toContain("<think>");
+    expect(body).not.toContain("hidden body reasoning");
+    expect(body).not.toContain("hidden why reasoning");
+    expect(body).not.toContain("hidden fix reasoning");
+  });
+
   it("converts suggestion blocks to plain fences when disabled", () => {
     const result = processReview(
       review([

@@ -15,6 +15,7 @@
 
 import { Octokit } from "@octokit/rest";
 import type { Logger } from "./logger";
+import { postedReviewBody, sanitizePostedText } from "./policy";
 import type { PostComment } from "./validate";
 
 /** PR metadata needed to anchor and gate the review. */
@@ -53,26 +54,24 @@ export interface ReviewPayload {
   }>;
 }
 
-const SUMMARY_ONLY_BODY = "Review completed. No high-confidence issues found.";
-
 /** Build the grouped-review request body; summary-only when no comments survive. */
 export function buildReviewPayload(
   headSha: string,
   comments: readonly PostComment[],
   summary: string,
 ): ReviewPayload {
-  const trimmedSummary = summary.trim();
+  const body = postedReviewBody(summary);
   if (comments.length === 0) {
     return {
       commit_id: headSha,
-      body: trimmedSummary || SUMMARY_ONLY_BODY,
+      body,
       event: "COMMENT",
       comments: [],
     };
   }
   return {
     commit_id: headSha,
-    body: trimmedSummary,
+    body,
     event: "COMMENT",
     comments: comments.map((c) =>
       c.start_line !== undefined && c.start_side !== undefined
@@ -82,9 +81,9 @@ export function buildReviewPayload(
             side: c.side,
             start_line: c.start_line,
             start_side: c.start_side,
-            body: c.body,
+            body: sanitizePostedText(c.body),
           }
-        : { path: c.path, line: c.line, side: c.side, body: c.body },
+        : { path: c.path, line: c.line, side: c.side, body: sanitizePostedText(c.body) },
     ),
   };
 }

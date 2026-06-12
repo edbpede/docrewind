@@ -29,19 +29,14 @@ import {
   requestReview,
   resolveModels,
 } from "./nanogpt";
+import { SECURITY_PREFIXES } from "./policy";
 import { composePrompt } from "./prompt";
 import { processReview } from "./validate";
 
 /** Char budget for the diff sent to the model before large-PR reduction (§10). */
 export const DIFF_CHAR_BUDGET = 120_000;
 
-/** Path prefixes whose changes are ALWAYS included regardless of size (§10). */
-export const SECURITY_PREFIXES: readonly string[] = [
-  "entrypoints/",
-  "lib/protocol",
-  "lib/retrieval",
-  "lib/db.ts",
-];
+export { SECURITY_PREFIXES };
 
 /** Convert a glob (`**`, `*`, `?`) to an anchored full-path RegExp. */
 export function globToRegExp(glob: string): RegExp {

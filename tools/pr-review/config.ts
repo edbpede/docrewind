@@ -10,6 +10,11 @@
 // config can be echoed in debug logs without leaking the API key or token.
 
 import { z } from "zod";
+import {
+  DEFAULT_ALLOWED_ASSOCIATIONS,
+  DEFAULT_REVIEW_ON_DRAFT,
+  DEFAULT_TRIGGER_COMMAND,
+} from "./policy";
 
 /** Built-in globs excluded from review (generated / vendored / binary). */
 export const DEFAULT_EXCLUDED_GLOBS: readonly string[] = [
@@ -158,13 +163,15 @@ export function loadConfig(input: RawConfigInput): ReviewConfig {
     maxComments: parsed.data.maxComments,
     dryRun: args.dryRun ? true : parseBool(env.REVIEW_DRY_RUN, false),
     debug: parseBool(env.REVIEW_DEBUG, false),
-    reviewOnDraft: parseBool(env.REVIEW_ON_DRAFT, false),
+    reviewOnDraft: parseBool(env.REVIEW_ON_DRAFT, DEFAULT_REVIEW_ON_DRAFT),
     allowSuggestions: parseBool(env.REVIEW_ALLOW_SUGGESTIONS, false),
     excludedPaths: [...DEFAULT_EXCLUDED_GLOBS, ...excluded],
     includedPaths: parseCsv(env.REVIEW_INCLUDED_PATHS),
     customGuidelines: env.REVIEW_CUSTOM_GUIDELINES?.trim() ?? "",
-    triggerCommand: env.REVIEW_TRIGGER_COMMAND?.trim() || "/review",
-    allowedAssociations: parseCsv(env.REVIEW_ALLOWED_ASSOCIATIONS ?? "OWNER,MEMBER,COLLABORATOR"),
+    triggerCommand: env.REVIEW_TRIGGER_COMMAND?.trim() || DEFAULT_TRIGGER_COMMAND,
+    allowedAssociations: parseCsv(
+      env.REVIEW_ALLOWED_ASSOCIATIONS ?? DEFAULT_ALLOWED_ASSOCIATIONS.join(","),
+    ),
   };
 }
 

@@ -16,6 +16,7 @@
 // obeyed, and we strip our own delimiter tokens out of PR content first so a PR
 // cannot forge a fence boundary.
 
+import { renderDocrewindReviewGuidance } from "./policy";
 import { CATEGORIES, SEVERITIES, SIDES } from "./schema";
 
 export type ChatRole = "system" | "developer" | "user";
@@ -71,13 +72,7 @@ function developerPolicy(input: PromptInput): string {
   return `Review focus — flag only high-impact defects:
 - Likely bugs, security issues, data loss, race conditions, auth/permission errors, broken API assumptions, edge cases, regression risks, incorrect error handling, real-impact performance problems, and material doc-vs-code mismatches.
 - docrewind-specific defects (treat these as first-class):
-  * Pure-core purity: lib/decoder|reconstruction|timeline|domain|protocol|fixtures must not import "#imports", "browser.", or "wxt"; lib/retrieval|worker|docs-url additionally must not use fetch(, new Worker, or globalThis.
-  * Protocol isolation: Google Docs transport assumptions belong only in lib/protocol/* with fail-safe schema detection.
-  * Privacy invariants: zero non-Google network requests in shipped code; no telemetry/analytics; never render or log raw document/response bodies.
-  * SolidJS idioms: no prop destructuring; prefer <For>/<Index>/<Show> over .map()/ternaries; createMemo over mirror-writing createEffect; "class" not "className".
-  * Storage tiering: idb for bulk, storage.defineItem for settings, never localStorage.
-  * Background service worker: credentialed fetch to docs.google.com; abort timeouts; MV3-termination-resilient checkpoints.
-  * Licensing: per-file SPDX "AGPL-3.0-or-later" header.
+${renderDocrewindReviewGuidance()}
 
 Do NOT comment on: generic "add tests", formatting/style nits, vague readability advice, unchanged code (unless directly affected), or anything you cannot anchor to a changed line. Be concise and constructive. Do not include chain-of-thought in any field; give a one-line rationale only.
 

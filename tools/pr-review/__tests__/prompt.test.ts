@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { describe, expect, it } from "bun:test";
+import { DOCREWIND_REVIEW_GUIDANCE } from "../policy";
 import { composePrompt, type PromptInput } from "../prompt";
 
 const base: PromptInput = {
@@ -44,6 +45,13 @@ describe("composePrompt", () => {
     expect(off).toContain("Do NOT emit GitHub");
     const on = composePrompt({ ...base, allowSuggestions: true })[1]?.content ?? "";
     expect(on).toContain("are permitted");
+  });
+
+  it("renders the shared docrewind-specific policy guidance", () => {
+    const dev = composePrompt(base)[1]?.content ?? "";
+    for (const guidance of DOCREWIND_REVIEW_GUIDANCE) {
+      expect(dev).toContain(guidance);
+    }
   });
 
   it("appends custom guidelines when provided", () => {

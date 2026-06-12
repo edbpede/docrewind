@@ -57,7 +57,15 @@ defaults). Required: `NANOGPT_API_KEY`, `GITHUB_TOKEN`, plus `GITHUB_REPOSITORY`
 and a PR number (`PR_NUMBER` or `--pr <n>`). Tuning knobs include `REVIEW_MODEL`,
 `REVIEW_FALLBACK_MODELS`, `REVIEW_MIN_CONFIDENCE` (0.75), `REVIEW_MAX_COMMENTS` (5),
 `REVIEW_ON_DRAFT`, `REVIEW_ALLOW_SUGGESTIONS`, `REVIEW_EXCLUDED_PATHS`,
-`REVIEW_INCLUDED_PATHS`, and `REVIEW_CUSTOM_GUIDELINES`.
+`REVIEW_INCLUDED_PATHS`, `REVIEW_CUSTOM_GUIDELINES`, `REVIEW_TRIGGER_COMMAND`
+(`/review`), and `REVIEW_ALLOWED_ASSOCIATIONS` (`OWNER,MEMBER,COLLABORATOR`).
+
+Security-relevant policy defaults live in `tools/pr-review/policy.ts`: draft
+review default, on-demand trigger command, allowed author associations,
+security-sensitive always-include prefixes, repo-specific prompt guidance, and
+posted-text sanitization. The GitHub Actions gate must mirror the trigger command
+and associations literally because job-level `if:` expressions cannot import
+TypeScript; a workflow test prevents drift.
 
 ## Triggers (workflow)
 
@@ -68,8 +76,10 @@ and a PR number (`PR_NUMBER` or `--pr <n>`). Tuning knobs include `REVIEW_MODEL`
   (`OWNER,MEMBER,COLLABORATOR`).
 - **`workflow_dispatch`** with `pr_number` + `dry_run` for manual/dry runs.
 
-Fork safety is structural: no checkout/execution of PR code, the workflow YAML is
-read from the base branch, and prompt injection is mitigated in the CLI.
+Fork safety is structural: no checkout/execution of PR code, checkout credentials
+are not persisted, dependency installation uses `--ignore-scripts` in the
+privileged job, the workflow YAML is read from the base branch, and prompt
+injection is mitigated in the CLI.
 
 ## Development
 
@@ -92,4 +102,4 @@ the step with `continue-on-error`, so a non-zero exit never blocks the PR.
 - The model path has no tools/shell/write capability; reviews are COMMENT-only and
   can never approve or merge.
 - Chain-of-thought is suppressed (`reasoning: { exclude: true }`) and defensively
-  stripped before anything is posted.
+  stripped from every model-authored field before anything is posted.

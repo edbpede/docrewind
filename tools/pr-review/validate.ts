@@ -17,6 +17,7 @@
 
 import { dropDuplicates, withMarker } from "./dedupe";
 import { type AnchorIndex, isValidAnchor, sameHunk } from "./diff";
+import { sanitizePostedText } from "./policy";
 import { type Review, type ReviewComment, type Side, severityRank } from "./schema";
 
 /** A comment ready to send to GitHub's create-review API. */
@@ -48,11 +49,6 @@ export interface ValidateOptions {
   readonly priorFingerprints: ReadonlySet<string>;
 }
 
-/** Remove any chain-of-thought leakage before a body is posted. */
-function stripThink(body: string): string {
-  return body.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
-}
-
 /** Convert ```suggestion fences to plain code when suggestions are disabled. */
 function applySuggestionPolicy(body: string, allow: boolean): string {
   if (allow) {
@@ -76,15 +72,19 @@ function safeTruncate(body: string, max: number): string {
 
 /** Fold the model's structured fields into one Markdown comment body. */
 function buildBody(comment: ReviewComment, allowSuggestions: boolean): string {
-  const parts = [stripThink(comment.body)];
-  if (comment.why_it_matters.trim()) {
-    parts.push(`**Why it matters:** ${comment.why_it_matters.trim()}`);
+  const body = sanitizePostedText(comment.body);
+  const whyItMatters = sanitizePostedText(comment.why_it_matters);
+  const suggestedFix = comment.suggested_fix ? sanitizePostedText(comment.suggested_fix) : "";
+
+  const parts = body ? [body] : [];
+  if (whyItMatters) {
+    parts.push(`**Why it matters:** ${whyItMatters}`);
   }
-  if (comment.suggested_fix?.trim()) {
-    parts.push(`**Suggested:**\n${comment.suggested_fix.trim()}`);
+  if (suggestedFix) {
+    parts.push(`**Suggested:**\n${suggestedFix}`);
   }
   const folded = applySuggestionPolicy(parts.join("\n\n"), allowSuggestions);
-  return safeTruncate(folded, 1400);
+  return safeTruncate(sanitizePostedText(folded), 1400);
 }
 
 /**

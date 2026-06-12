@@ -10,6 +10,7 @@ import {
   matchesAnyGlob,
   selectWithinBudget,
 } from "../main";
+import { SECURITY_PREFIXES } from "../policy";
 
 function file(path: string, patchLen = 10): ChangedFile {
   return {
@@ -45,11 +46,11 @@ describe("globToRegExp / matchesAnyGlob", () => {
 });
 
 describe("isSecuritySensitive", () => {
-  it("flags the always-include areas", () => {
-    expect(isSecuritySensitive("entrypoints/background.ts")).toBe(true);
-    expect(isSecuritySensitive("lib/protocol/parse.ts")).toBe(true);
-    expect(isSecuritySensitive("lib/retrieval/run.ts")).toBe(true);
-    expect(isSecuritySensitive("lib/db.ts")).toBe(true);
+  it("flags every shared policy always-include area", () => {
+    for (const prefix of SECURITY_PREFIXES) {
+      const path = prefix.endsWith(".ts") ? prefix : `${prefix.replace(/\/$/, "")}/example.ts`;
+      expect(isSecuritySensitive(path)).toBe(true);
+    }
     expect(isSecuritySensitive("lib/timeline/x.ts")).toBe(false);
   });
 });
