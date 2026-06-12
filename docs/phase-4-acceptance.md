@@ -49,7 +49,7 @@
       mapping, and **idempotent re-entry after a simulated SW kill** (drop the
       orchestrator, reconstruct from the checkpoint store, assert it CONTINUES).
 - [x] **Content script** — `entrypoints/docs.content.tsx` + `lib/docs-url/`:
-      doc detection + id/`/u/{N}/` extraction; an unobtrusive activation
+      doc detection + id/`/document/u/{N}/d/` extraction; an unobtrusive activation
       affordance mounted in a **shadow root** with `isolateEvents`; **no
       auto-load** (explicit click only); triggers retrieval via typed messaging;
       does **not** own the fetch. Solid idioms only (`props.x`, `class`, no
@@ -80,10 +80,15 @@
       verified: `fetch(url, { credentials: "include" })` returns 200/JSON from the
       built extension's SW context. *(Firefox event-page fetch deferred — Firefox not
       installed; mechanism is identical host-permission cookie attachment.)*
-- [x] SW-termination resumability — the orchestrator checkpoints per chunk and
+- [~] SW-termination resumability — the orchestrator checkpoints per chunk and
       resumes by re-invoking `runRetrieval` against the same store (fake-tested
-      idempotent re-entry). *(A deterministic large-doc mid-fetch kill is a release
-      smoke test; the throwaway capture doc is too small to interrupt.)*
+      idempotent re-entry). *(A deterministic large-doc mid-fetch kill is STILL a
+      release smoke test — NOT verified live. The 2026-06-12 Firefox follow-up could
+      not close it: no large throwaway doc, and the `firefox-devtools` MCP exposes no
+      primitive to deterministically terminate a Firefox MV3 background/event-page
+      context nor to inspect the extension IndexedDB (`checkpoints`/`rawChunks`).
+      Best run on Chromium MV3 via `chrome://serviceworker-internals`. See
+      protocol-capture.md Q9.)*
 - [x] Discovery wired to the confirmed §24 method — `"revision":N` bootstrap
       metadata (primary) + binary-search on the in-range(200)/over(**400**) boundary
       (fallback). Out-of-range is HTTP 400 in 2026, not the 2014-era 500 (Q5).
@@ -151,7 +156,13 @@ service-worker context (200/JSON); the decoder gained a tuple-envelope adapter f
 the real wire format; and end-of-timeline text-equality is proven on a sanitized
 live capture.
 
-**Remaining live items (scoped as follow-ups, not blockers):** a Firefox event-page
-fetch + first-run UX (Firefox not installed in the capture env — `firefox-mv3`
-build is verified), a real multi-account `/u/1/` read, a rich/suggesting-doc op
-capture, and a large-doc deterministic SW-termination kill.
+**Remaining live items — updated by the 2026-06-12 Firefox follow-up.** CLOSED live
+in Firefox: the multi-account `/u/1/` read (Q8), the rich/suggesting-doc op capture
+(Q7 — `iss`/`msfd` suggestions + in-band `ae`/`te`/`ue` entity ops; decoder
+unchanged, fixture + test added), and the Firefox first-party credentialed read +
+affordance mount (Q10/Q12). STILL OPEN (documented MCP-tooling limits, not blockers):
+the credentialed fetch from the Firefox **extension background context** specifically
+(no JS-eval / unreachable shadow-root trigger; MV3 optional-host-permission), and a
+**deterministic SW/event-page-termination kill** on a large doc (best on Chromium
+MV3). One Firefox UX finding: `presetWind4`/content-script CSS is CSP-blocked on
+Google Docs in Firefox → the affordance renders unstyled (Phase-5 fix).

@@ -53,7 +53,7 @@
 - **Do not hard-code transport framing, headers, op-codes, or the discovery
   mechanism as live-current** (the `)]}'` prefix, `X-Same-Domain`/XSRF tokens,
   binary-search-on-HTTP-500, operation codes) **until the Phase 3.1 live capture
-  confirms them** (PRD §24). Detect the multi-account `/u/{N}/` URL variant
+  confirms them** (PRD §24). Detect the multi-account `/document/u/{N}/d/` URL variant
   (Appendix A.5) or requests silently fail.
 
 ## 4. Permissions (PRD §12)

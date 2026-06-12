@@ -11,7 +11,7 @@ describe("extractDocId", () => {
   });
 
   test("extracts the id from a multi-account /u/{N}/ URL", () => {
-    expect(extractDocId(`https://docs.google.com/u/1/document/d/${ID}/edit`)).toBe(asDocId(ID));
+    expect(extractDocId(`https://docs.google.com/document/u/1/d/${ID}/edit`)).toBe(asDocId(ID));
   });
 
   test("returns null for a non-document Docs URL", () => {
@@ -45,7 +45,7 @@ describe("parseDocsUrl", () => {
   });
 
   test("returns docId + the /u/{N}/ index for a multi-account URL", () => {
-    expect(parseDocsUrl(`https://docs.google.com/u/2/document/d/${ID}/edit`)).toEqual({
+    expect(parseDocsUrl(`https://docs.google.com/document/u/2/d/${ID}/edit`)).toEqual({
       docId: asDocId(ID),
       userIndex: 2,
     });

@@ -42,10 +42,19 @@ export interface TransportConstants {
   // CONFIRMED (A.4, §24 Q5): the current revision count is published in the editor
   // bootstrap as `"revision":N`; out-of-range `end` ⇒ HTTP 400 is the fallback signal.
   readonly discoveryMechanism: string | Unconfirmed;
-  // CONFIRMED (A.2/A.8, §24 Q7): text/structure ops the decoder recognizes. The
-  // live capture also surfaced `as` (ApplyStyle), intentionally isolated via the
-  // decoder's open-world UnknownOp path (it carries no body text).
+  // CONFIRMED (A.2/A.8, §24 Q7): text/suggestion ops the decoder recognizes. The
+  // simple-doc capture surfaced `as` (ApplyStyle); the 2026-06-12 rich/suggesting
+  // -doc capture (Firefox) additionally surfaced embedded-object entity ops
+  // (`ae`/`te`/`ue`) and suggestion style/entity ops (`astss`/`sue`). ALL of those
+  // are intentionally isolated via the decoder's open-world UnknownOp path (see
+  // `liveOpaqueOpCodes`) — embedded objects ride in-band as ae+te+ue but carry no
+  // body text, so omitting them leaves the reconstructed character stream aligned.
   readonly knownOpCodes: readonly string[] | Unconfirmed;
+  // CONFIRMED live (§24 Q7) but NOT structurally decoded — recorded so the
+  // open-world UnknownOp path is documented rather than silent. `as` = ApplyStyle;
+  // `ae`/`te`/`ue` = add/place/update embedded-object entity; `astss` = apply
+  // style to a suggestion range; `sue` = suggested entity update.
+  readonly liveOpaqueOpCodes: readonly string[] | Unconfirmed;
 }
 
 /**
@@ -58,5 +67,7 @@ export const DEFAULT_TRANSPORT: TransportConstants = {
   requiredReadHeaders: [], // CONFIRMED 2026-06-12 — none required (§24 Q3)
   readTokenRequired: false, // CONFIRMED 2026-06-12 — cookie-only read (§24 Q4)
   discoveryMechanism: "revision-count-metadata", // CONFIRMED 2026-06-12 (§24 Q5)
-  knownOpCodes: ["is", "ds", "mlti", "iss", "dss", "msfd", "usfd"], // CONFIRMED (A.2); `as` isolated
+  knownOpCodes: ["is", "ds", "mlti", "iss", "dss", "msfd", "usfd"], // CONFIRMED (A.2/§24 Q7); decoded
+  // CONFIRMED live 2026-06-12 (§24 Q7) — present on the wire, isolated as UnknownOp.
+  liveOpaqueOpCodes: ["as", "ae", "te", "ue", "astss", "sue"],
 };

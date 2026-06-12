@@ -16,7 +16,7 @@ import { fail, type Result, type RetrievalError, retrievalError } from "./errors
 export interface ChunkRequest {
   readonly docId: DocId;
   readonly span: RevisionSpan;
-  /** Multi-account `/u/{N}/` slot, or null for a single-account session (A.5). */
+  /** Multi-account `/document/u/{N}/d/` slot, or null for a single-account session (A.5). */
   readonly userIndex: number | null;
 }
 

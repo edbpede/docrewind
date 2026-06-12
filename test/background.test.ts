@@ -73,6 +73,28 @@ describe("background retrieval wiring", () => {
     expect(Number(checkpoint?.upperBound)).toBe(2);
   });
 
+  it("uses the live document/u/{N}/d path order for multi-account retrieval", async () => {
+    const calls: Array<{ url: string; credentials: string | undefined }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string, init?: { credentials?: string }) => {
+        calls.push({ url: input, credentials: init?.credentials });
+        if (input.includes("/revisions/load")) return Promise.resolve(res(200, FRAMED_CHUNK));
+        if (input.includes("/edit")) return Promise.resolve(res(200, 'x="y","revision":1,z'));
+        return Promise.resolve(res(404, ""));
+      }),
+    );
+
+    runBackground();
+    const ack = await sendMessage("startRetrieval", { docId: asDocId("docMulti"), userIndex: 1 });
+
+    expect(ack.ok).toBe(true);
+    expect(calls.some((c) => c.url.includes("/document/u/1/d/docMulti/edit"))).toBe(true);
+    const loadCall = calls.find((c) => c.url.includes("/revisions/load"));
+    expect(loadCall?.url).toContain("/document/u/1/d/docMulti/revisions/load");
+    expect(loadCall?.credentials).toBe("include");
+  });
+
   it("maps an auth failure on the read to insufficient-permission", async () => {
     vi.stubGlobal(
       "fetch",
