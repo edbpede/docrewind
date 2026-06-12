@@ -53,11 +53,11 @@ export default defineBackground(() => {
   const FETCH_TIMEOUT_MS = 30_000;
   const pause = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-  // The editor bootstrap URL, multi-account `/u/{N}/`-aware (A.5). Discovery
+  // The editor bootstrap URL, multi-account `/document/u/{N}/d/`-aware (A.5). Discovery
   // reads the published `"revision":N` count from this page.
   const buildEditUrl = (docId: DocId, userIndex: number | null): string => {
     const userSegment = userIndex !== null ? `/u/${userIndex}` : "";
-    return `${DOCS_ORIGIN}${userSegment}/document/d/${docId}/edit`;
+    return `${DOCS_ORIGIN}/document${userSegment}/d/${docId}/edit`;
   };
 
   // Map an HTTP status to the typed error taxonomy. Recoverable categories let

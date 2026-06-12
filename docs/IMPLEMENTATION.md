@@ -303,7 +303,7 @@ This plan **follows `.augment/rules/bun-solid-pro.md`** as the authoritative sou
 - [x] Background retrieval — `entrypoints/background.ts` (the former §24 gate site, now the LIVE adapter):
   - [x] Use `defineBackground(() => { ... })`; keep **all** `browser.*`/`fetch` usage inside the callback (never module top level).
   - [x] **§24 RESOLVED 2026-06-12** — credentialed, **chunked, resumable** retrieval of `revisions/load` (`fetch(url, { credentials: "include" })`) wired via the live `ChunkFetcher`. The credentialed read returns 200/JSON from the MV3 service-worker context (verified); the resumable orchestration + per-chunk checkpointing is unchanged.
-  - [x] Detect and handle the multi-account `/u/{N}/` URL variant (Appendix A.5) — `lib/docs-url` + `detectUserIndex`, plumbed through messaging; the live adapter builds `/u/{N}/` URLs (live `/u/1/` verification deferred — Q8).
+  - [x] Detect and handle the multi-account `/document/u/{N}/d/` URL variant (Appendix A.5) — `lib/docs-url` + `detectUserIndex`, plumbed through messaging; the live adapter builds `/document/u/{N}/d/` URLs (live `/document/u/1/d/` verified in Q8).
   - [x] **§24 RESOLVED 2026-06-12** — discover the revision range via the confirmed mechanism (`"revision":N` bootstrap metadata, binary-search-on-400 fallback); the orchestrator consumes `discoverUpperBound` only and never branches on the strategy.
   - [x] Implement adaptive chunk sizing + backoff and the error taxonomy (PRD §10.7): unsupported page, missing doc id, insufficient permission, endpoint unavailable, unsupported format, network failure, quota failure, reconstruction failure, cancellation.
   - [x] Never log/render raw response bodies or document fragments (PRD §13.7).

@@ -49,7 +49,7 @@
       mapping, and **idempotent re-entry after a simulated SW kill** (drop the
       orchestrator, reconstruct from the checkpoint store, assert it CONTINUES).
 - [x] **Content script** — `entrypoints/docs.content.tsx` + `lib/docs-url/`:
-      doc detection + id/`/u/{N}/` extraction; an unobtrusive activation
+      doc detection + id/`/document/u/{N}/d/` extraction; an unobtrusive activation
       affordance mounted in a **shadow root** with `isolateEvents`; **no
       auto-load** (explicit click only); triggers retrieval via typed messaging;
       does **not** own the fetch. Solid idioms only (`props.x`, `class`, no

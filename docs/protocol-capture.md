@@ -144,17 +144,17 @@ op vocabulary is recorded in `lib/protocol/types.ts` (`knownOpCodes` +
 `liveOpaqueOpCodes`). ⚠️ No protobuf, no new envelope, no new op encoding the
 open-world funnel mishandles → stop-condition NOT fired.
 
-### 8. Multi-account `/u/{N}/` URL handling on a real multi-login session
+### 8. Multi-account `/document/u/{N}/d/` URL handling on a real multi-login session
 **Status:** ✅ LIVE-CONFIRMED 2026-06-12 (Firefox, two signed-in Google accounts).
 With a second account present (`/u/1/`), a throwaway doc opened under the `/u/1/`
-session: the editor bootstrap (`…/u/1/d/{id}/edit`) returned **HTTP 200** signed in
-as the second account (no bounce), and a credentialed `…/u/1/d/{id}/revisions/load?
+session: the editor bootstrap (`…/document/u/1/d/{id}/edit`) returned **HTTP 200** signed in
+as the second account (no bounce), and a credentialed `…/document/u/1/d/{id}/revisions/load?
 start=1&end=5` returned **HTTP 200 `application/json`** (the `)]}'`-guarded
 changelog, not an HTML sign-in page). The pure helpers were re-verified against the
-live URL: `detectUserIndex("…/u/1/d/…")` ⇒ `1`, and `buildRevisionsLoadUrl({…,
-userIndex:1})` ⇒ `…/u/1/document/d/…/revisions/load?…`. `lib/protocol/endpoints.ts`
+live URL: `detectUserIndex("…/document/u/1/d/…")` ⇒ `1`, and `buildRevisionsLoadUrl({…,
+userIndex:1})` ⇒ `…/document/u/1/d/…/revisions/load?…`. `lib/protocol/endpoints.ts`
 (`detectUserIndex` + `buildRevisionsLoadUrl`) and the live discovery (`buildEditUrl`
-captures `userIndex` per request) handle the `/u/{N}/` variant — now live-confirmed,
+captures `userIndex` per request) handle the `/document/u/{N}/d/` variant — now live-confirmed,
 not merely confirmed-historical (A.5). *(The `/u/1/` doc was a non-throwaway doc the
 maintainer pointed at; only its HTTP status + content-type were inspected — its
 changelog body was deleted unread, never committed.)*

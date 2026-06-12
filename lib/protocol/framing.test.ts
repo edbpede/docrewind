@@ -59,13 +59,19 @@ describe("detectSchema (fail-safe gate)", () => {
   });
 });
 
-describe("detectUserIndex (/u/{N}/ variant, A.5)", () => {
+describe("detectUserIndex (/document/u/{N}/d/ variant, A.5)", () => {
   test("extracts the multi-account slot", () => {
-    expect(detectUserIndex("https://docs.google.com/u/1/document/d/abc/edit")).toBe(1);
-    expect(detectUserIndex("https://docs.google.com/u/0/document/d/abc/edit")).toBe(0);
+    expect(detectUserIndex("https://docs.google.com/document/u/1/d/abc/edit")).toBe(1);
+    expect(detectUserIndex("https://docs.google.com/document/u/0/d/abc/edit")).toBe(0);
   });
 
   test("returns null for a single-account path", () => {
     expect(detectUserIndex("https://docs.google.com/document/d/abc/edit")).toBeNull();
+  });
+
+  test("ignores /u/{N}/ outside the document path", () => {
+    expect(
+      detectUserIndex("https://docs.google.com/document/d/abc/edit?next=/document/u/1/d/spoof"),
+    ).toBeNull();
   });
 });

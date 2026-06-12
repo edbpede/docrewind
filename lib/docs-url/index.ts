@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
 // Docs-URL parsing (plan §1.6 / A.5). PURE: extracts the branded `DocId` from a
-// `/document/d/{id}/` path and the multi-account `/u/{N}/` slot from a Google
+// `/document/d/{id}/` or `/document/u/{N}/d/{id}/` path and the multi-account slot from a Google
 // Docs URL. Matches against the pathname only so a `/d/` or `/u/N/` embedded in a
 // query or fragment can't spoof detection. No browser / fetch / Worker here.
 
@@ -14,8 +14,8 @@ export interface DocsUrlInfo {
   readonly userIndex: number | null;
 }
 
-// The `/document/d/{id}` segment; `{id}` is then validated by `asDocId`.
-const DOC_ID_PATH = /\/document\/d\/([^/]+)/;
+// The `/document/d/{id}` or `/document/u/{N}/d/{id}` segment; `{id}` is then validated by `asDocId`.
+const DOC_ID_PATH = /\/document\/(?:u\/\d+\/)?d\/([^/]+)/;
 
 function pathOf(url: string): string {
   try {
@@ -34,7 +34,7 @@ function pathOf(url: string): string {
 
 /**
  * Extract the branded {@link DocId} from a Docs URL, or `null` when the URL is
- * not a `/document/d/{id}/` page or the id fails validation.
+ * not a Docs document page or the id fails validation.
  */
 export function extractDocId(url: string): DocId | null {
   const match = DOC_ID_PATH.exec(pathOf(url));

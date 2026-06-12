@@ -140,7 +140,7 @@ MVP may include local-only exports of summary/timeline metadata, generated entir
 - Detect and report common failures: insufficient permission, unavailable revision data, network interruption, unsupported response format, document too large.
 - Retrieve the fine-grained changelog from the internal `revisions/load` endpoint (Appendix A.1) via a first-party credentialed request from the `docs.google.com` context; the public Drive/Docs APIs do not expose keystroke-level history and are not a usable source (Appendix A.6).
 - Discover the available revision range via the binary-search bound-finding technique (treating HTTP 500 as "range too high"), seeded where possible by the document-info blob in the editor page (Appendix A.4).
-- Handle the multi-account URL variant (`/u/{N}/d/...`) — the documented historical cause of third-party-tool breakage (Appendix A.5).
+- Handle the multi-account URL variant (`/document/u/{N}/d/...`) — the documented historical cause of third-party-tool breakage (Appendix A.5).
 
 ### 9.4 Revision Decoding and Reconstruction
 - Transform retrieved payloads into an internal typed representation.
@@ -263,7 +263,7 @@ Diagnostics are opt-in and local by default, and are **anonymized by constructio
 
 ### 10.9 Background and Heavy-Work Architecture (cross-browser)
 - The background context is **ephemeral on both browsers**: an MV3 service worker on Chromium, an MV3 event page on Firefox (the Firefox event page retains DOM/WebAPI access; the Chromium service worker does not, and per its lifecycle terminates after roughly 30 seconds of inactivity, with a hard cap around 5 minutes for a single running activity). It holds no authoritative in-memory state; all durable state lives in IndexedDB. All `browser.*` calls sit inside the entrypoint's main callback, never at module top level (WXT imports the file at build time).
-- **Retrieval** runs in the background context, gated on the `*://docs.google.com/*` host permission, using WXT's promise-based `browser`. A credentialed first-party request attaches the user's Docs session cookies in both browsers — a same-site request, not a third-party-cookie scenario, so SameSite, CHIPS, and Firefox Total Cookie Protection do not block it. Because the service worker can be terminated mid-task, retrieval is **chunked and resumable**, checkpointing progress to IndexedDB (via `idb`) so a restarted worker continues rather than restarts. The content script only detects the document and triggers (typed `@webext-core/messaging`); it does not own the fetch. (`declarativeNetRequest` is not needed for authenticated GETs; the multi-account `/u/{N}/` URL prefix must be detected or requests silently fail — Appendix A.5.)
+- **Retrieval** runs in the background context, gated on the `*://docs.google.com/*` host permission, using WXT's promise-based `browser`. A credentialed first-party request attaches the user's Docs session cookies in both browsers — a same-site request, not a third-party-cookie scenario, so SameSite, CHIPS, and Firefox Total Cookie Protection do not block it. Because the service worker can be terminated mid-task, retrieval is **chunked and resumable**, checkpointing progress to IndexedDB (via `idb`) so a restarted worker continues rather than restarts. The content script only detects the document and triggers (typed `@webext-core/messaging`); it does not own the fetch. (`declarativeNetRequest` is not needed for authenticated GETs; the multi-account `/document/u/{N}/d/` URL variant must be detected or requests silently fail — Appendix A.5.)
 - **Heavy work** (decoding, reconstruction, timeline derivation) runs in a **Web Worker owned by the long-lived replay page**, never in the ephemeral background. The Worker reads raw chunks and writes decoded results through `idb`, and posts reconstructed states/deltas to the SolidJS UI via messages (using Transferable buffers for zero-copy) to hold main-thread blocking under the §18 budget.
 - Pipeline: content script triggers → background fetches chunks (resumable) → parse Worker decodes against the operation grammar and reconstructs the character array, persisting through `idb` → posts frames to the replay UI, leaving the main thread free for timeline playback.
 - All Google Docs protocol assumptions are isolated in a dedicated module (§19, Appendix A).
@@ -457,7 +457,7 @@ Official-API note: research confirms Google's Drive/Docs APIs expose only coarse
 - Clear privacy policy and threat model (§13, §14).
 - Conservative product language around insights (§7, §9.7).
 - Browser-specific test coverage (§11.5, §9.10).
-- Adaptive chunk sizing and backoff; treat HTTP 500 as "range too high" (also the range-discovery signal); handle the `/u/{N}/d/` multi-account URL variant (Appendix A.4, A.5, A.9).
+- Adaptive chunk sizing and backoff; treat HTTP 500 as "range too high" (also the range-discovery signal); handle the `/document/u/{N}/d/` multi-account URL variant (Appendix A.4, A.5, A.9).
 - Schema-version detection so a Google-side format change degrades gracefully instead of silently corrupting playback.
 - Hard stop-and-re-evaluate triggers (mirrored in §24): the endpoint returns protobuf instead of JSON, a new mandatory page-derived token appears, or Google publishes guidance restricting the editor endpoints.
 
@@ -473,7 +473,7 @@ Two research rounds returned a **Conditional-Go**. Round 1 established feasibili
 5. The precise current-revision-count discovery mechanism (binary-search-on-HTTP-500 vs. a metadata field / changelog / tile endpoint) and its location.
 6. Sane chunk sizes and any soft rate limits on the endpoint.
 7. How images/tables/footnotes/equations/drawings/lists actually appear (inline ops vs out-of-band) in a live capture; confirm suggestions are the inline `iss`/`dss`/`msfd`/`usfd` ops.
-8. Multi-account `/u/{N}/` URL handling on a real multi-login session.
+8. Multi-account `/document/u/{N}/d/` URL handling on a real multi-login session.
 9. Chromium service-worker termination behavior during long chunked fetches (resumability test).
 10. Credentialed first-party fetch success from an MV3 service worker and a Firefox event page.
 11. ~~Actual CWS and AMO review outcomes~~ — **RECLASSIFIED (2026-06-12) to a release gate**, not a transport blocker: real store-review outcomes require submitting the extension. Current posture is policy-compliant (MV3, `storage`-only, `*://docs.google.com/*`-only, no remote code); the review outcome is pending submission (release phase).
@@ -512,7 +512,7 @@ Attribution/timing: each revision carries `user_id`, `session_id`, `revision_id`
 
 **A.4 Revision-range discovery.** There is no "all revisions" call and `start=1&end=-1` is rejected; a real upper bound is required. The documented method (2014) finds the maximum revision number by binary search (HTTP 500 ⇒ range too high, HTTP 200 ⇒ in range). Draftback issue history indicates a "Changelog and RevisionCount" endpoint also exists; a direct revision-count metadata field/endpoint likely exists today but its exact name/location is unconfirmed. Somers' examples used ~10 revisions per call; sane chunk sizes and any soft limits are unpublished. *[**CONFIRMED 2026-06-12:** the current count is published in the editor bootstrap as `"revision":N` (the metadata path used by discovery); out-of-range `end` now returns **HTTP 400** (not the 2014-era 500), in-range returns 200 — the binary-search fallback keys on that 400 boundary. Chunk sizing was not stress-tested (anti-abuse); `DEFAULT_CHUNK_SIZE=100` + adaptive shrink-on-failure is retained. See protocol-capture.md Q5/Q6.]*
 
-**A.5 Known breakage modes.** Multi-account sessions rewrite the path to `https://docs.google.com/u/{N}/document/d/...`; hardcoded single-account paths break (the documented 2017 third-party-tool failure). The protocol module must handle the `/u/{N}/` variant. *[Confirmed-historical 2017.]*
+**A.5 Known breakage modes.** Multi-account sessions rewrite the path to `https://docs.google.com/document/u/{N}/d/...`; hardcoded single-account paths break (the documented 2017 third-party-tool failure). The protocol module must handle the `/document/u/{N}/d/` variant. *[Confirmed-historical 2017.]*
 
 **A.6 No sanctioned alternative.** The Drive `revisions` resource and the Docs API expose only coarse, merged "named" revisions; the list may be incomplete for frequently edited Docs, and Docs revision content cannot be downloaded via the API. The Drive Activity API gives change events, not the operation stream. The internal endpoint is the only source for replay. *[Confirmed-current against Google docs, ~May 2026.]*
 
