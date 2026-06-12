@@ -1,0 +1,28 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// Dedicated TypeScript config for the PR-review CLI. It deliberately does NOT
+// extend the WXT/SolidJS root tsconfig: the CLI is a plain Bun/Node program with
+// no JSX, no `solid-js` jsxImportSource, and no `@types/chrome` ambient globals.
+// Keeping a separate config isolates the extension's runtime types from the bot
+// and makes the audit boundary between shipped code and CI tooling explicit
+// (plan §4/§17). Strictness is preserved verbatim from the root config.
+{
+  "compilerOptions": {
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "target": "esnext",
+    "lib": ["esnext"],
+    "types": ["@types/bun", "@types/node"],
+    "noEmit": true,
+    "skipLibCheck": true
+  },
+  "include": ["**/*.ts"]
+}
