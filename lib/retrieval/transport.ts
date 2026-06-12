@@ -5,8 +5,9 @@
 // is PURE: it defines the interface and a `GatedChunkFetcher` that performs NO
 // network I/O and no extension-API access, returning the gated
 // `endpoint-unavailable` error. The single LIVE network adapter is constructed in
-// `entrypoints/background.ts` (the one `// BLOCKED §24` activation site) and
-// swapped in once the §24 capture lands — a localized change, no edit here.
+// `entrypoints/background.ts` (the live activation site). The §24 capture landed
+// (2026-06-12) and that adapter is now live; this pure stub stays as a test fixture
+// and a safe fallback — no network I/O ever reaches this module.
 
 import type { DocId, RawPayload, RevisionSpan } from "../domain/model";
 import { fail, type Result, type RetrievalError, retrievalError } from "./errors";
@@ -29,15 +30,15 @@ export interface ChunkFetcher {
 }
 
 /**
- * The §24-gated stub. Performs NO network I/O and commits NO transport
- * assumptions; every request resolves to a typed `endpoint-unavailable` error so
- * the UI surfaces an honest "unavailable" state rather than a silent success.
+ * A pure, no-I/O `ChunkFetcher` that always resolves to the typed
+ * `endpoint-unavailable` error. Used by the orchestrator tests and as a safe
+ * fallback; the live network adapter lives in `entrypoints/background.ts`.
  */
 export function createGatedChunkFetcher(): ChunkFetcher {
   return {
     async fetchChunk(): Promise<Result<RawPayload, RetrievalError>> {
-      // BLOCKED §24: no live retrieval until the protocol capture confirms the
-      // transport. The real adapter is injected in entrypoints/background.ts.
+      // No network I/O here by design — the live adapter is injected in
+      // entrypoints/background.ts (post-§24). This stub keeps the seam pure.
       return fail(retrievalError("endpoint-unavailable"));
     },
   };

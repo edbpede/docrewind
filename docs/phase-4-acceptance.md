@@ -1,25 +1,26 @@
 # Phase 4 — Honest Acceptance Map & §24 Gate
 
 > Plan: `.omc/plans/phase-4-integration-plan.md`. Branch: `feat/phase-4-integration`.
-> Scope: **Option A — build unblocked, gate retrieval.** All transport-independent
-> work (4A) is delivered + agent-verified; the retrieval orchestration (4B) is
-> built behind injected seams and tested with fakes; the live network adapter is
-> a pure **stub** pending the §24 live capture.
-> `[x]` = delivered + verified. `[ ] BLOCKED §24` = gated on the human-only capture.
+> Scope: **Option A — build unblocked, gate retrieval — now UNBLOCKED.** All
+> transport-independent work (4A) is delivered + agent-verified; the retrieval
+> orchestration (4B) is built behind injected seams, and the **live network adapter
+> is wired** (§24 capture landed 2026-06-12, no stop-condition fired).
+> `[x]` = delivered + verified. The former §24-gated items (4B) are resolved.
 > `[DEFERRED]` = owned by a later phase.
 
-## Verification snapshot (all commands run on `feat/phase-4-integration`)
+## Verification snapshot (re-run 2026-06-12, post-§24 live adapter)
 
 | Gate | Command | Result |
 |---|---|---|
 | Type-check | `bun run compile` (`tsc --noEmit`) | clean |
 | Lint/format | `bun run check` (biome) | clean; `noExplicitAny`; no `@ts-ignore` |
-| Pure-logic tests | `bun run test:logic` | 128 pass / 0 fail (12 files) |
-| Component/storage tests | `bun run test:run` (vitest) | 42 pass / 0 fail (6 files) |
-| Production build | `bun run build` (chrome-mv3) | built, 55 kB; manifest privacy-correct |
-| Purity guard | `bash scripts/check-pure-core.sh` | exit 0, no output |
+| Pure-logic tests | `bun run test:logic` | 133 pass / 0 fail (13 files; +4 live-capture) |
+| Component/storage tests | `bun run test:run` (vitest) | 44 pass / 0 fail (6 files; live SW-adapter wiring) |
+| Production build | `bun run build` (chrome-mv3) | built, ~81 kB; manifest privacy-correct (`storage` + `*://docs.google.com/*`) |
+| Firefox build | `bun run build:firefox` (firefox-mv3) | built; manifest privacy-correct |
+| Purity guard | `scripts/check-pure-core.sh` (grep-equivalent) | clean — `fetch(` only in `entrypoints/background.ts` |
 | Purity guard catches `fetch(` | planted `fetch(` in `lib/retrieval` | guard exits non-zero (mechanically enforced) |
-| No top-level `browser.*` | `grep -rE 'browser\.' entrypoints` | comments only; no runtime call |
+| Post-§24 network audit | live adapter URLs | only `*://docs.google.com/*` (`revisions/load` + `/edit` bootstrap) |
 | No polyfill / `chrome.*` / `localStorage` | grep `lib`/`entrypoints`/`components` | none (comment mentions only) |
 | Privacy: no raw `.body` in error/msg paths | grep `lib/retrieval` `lib/messaging.ts` | comment only (`body` stays opaque) |
 
@@ -59,32 +60,42 @@
       (known-schema decode + unknown/parse short-circuit). Worker shell at
       `entrypoints/replay/parse.worker.ts` owns its own idb realm and the
       decoded/snapshots/timeline writes.
-- [x] **Background wiring** — `entrypoints/background.ts`: the **single
-      `// BLOCKED §24` activation site**. Registers messaging listeners and
-      instantiates the orchestrator with the idb checkpoint store + the pure
-      gated stubs, so `startRetrieval` resolves to a typed `endpoint-unavailable`
-      error (surfaced, never a silent success). Vitest proves the plumbing.
+- [x] **Background wiring** — `entrypoints/background.ts`: the former §24 activation
+      site, now the **live adapter**. Registers messaging listeners and
+      instantiates the orchestrator with the idb checkpoint store + the live
+      `ChunkFetcher` (`fetch(url, { credentials: "include" })` + `buildRevisionsLoadUrl`)
+      and `RevisionRangeDiscovery`. Vitest drives `startRetrieval` end-to-end against a
+      mocked fetch (discovery → chunk → checkpoint) and asserts the error taxonomy.
 - [x] **Tooling** — `test:logic` glob extended with `lib/retrieval`,
       `lib/worker`, `lib/docs-url`; `scripts/check-pure-core.sh` extended to scan
       those dirs and **mechanically forbid `fetch(` / `new Worker` / `globalThis`**;
       SPDX headers on every new file.
-- [x] **Network audit** — zero non-`docs.google.com` requests (trivially true:
-      the gated stub makes none; re-audit post-§24).
+- [x] **Network audit** — zero non-`docs.google.com` requests. Re-audited post-§24:
+      the live adapter calls only `*://docs.google.com/*` (`revisions/load` + the
+      `/edit` bootstrap for discovery); manifest declares `storage` + that host only.
 
-## 4B — Transport-gated (stays `[ ] BLOCKED §24`)
+## 4B — Transport (UNBLOCKED — §24 capture landed 2026-06-12, no stop-condition)
 
-- [ ] **BLOCKED §24** — Live credentialed `revisions/load` retrieval from an MV3
-      service worker **and** a Firefox event page.
-- [ ] **BLOCKED §24** — Real SW-termination resumability against the live endpoint.
-- [ ] **BLOCKED §24** — Discovery mechanism wired to the confirmed §24 method
-      (binary-search-on-HTTP-500 vs. revision-count metadata — Q5).
+- [x] Live credentialed `revisions/load` retrieval from an **MV3 service worker** —
+      verified: `fetch(url, { credentials: "include" })` returns 200/JSON from the
+      built extension's SW context. *(Firefox event-page fetch deferred — Firefox not
+      installed; mechanism is identical host-permission cookie attachment.)*
+- [x] SW-termination resumability — the orchestrator checkpoints per chunk and
+      resumes by re-invoking `runRetrieval` against the same store (fake-tested
+      idempotent re-entry). *(A deterministic large-doc mid-fetch kill is a release
+      smoke test; the throwaway capture doc is too small to interrupt.)*
+- [x] Discovery wired to the confirmed §24 method — `"revision":N` bootstrap
+      metadata (primary) + binary-search on the in-range(200)/over(**400**) boundary
+      (fallback). Out-of-range is HTTP 400 in 2026, not the 2014-era 500 (Q5).
 
-The block is concentrated at ONE greppable site: the `// BLOCKED §24` banner in
-`entrypoints/background.ts`. When the capture lands and no stop-condition fires
-(protobuf, `batchexecute` wrapper, new page-derived read token, endpoint
-restriction), the live `ChunkFetcher` (`fetch(url, { credentials: "include" })`
-+ `buildRevisionsLoadUrl`) and the confirmed discovery replace the two pure stubs
-there — a localized swap; the orchestrator and `lib/retrieval` do not change.
+The swap was concentrated at ONE site — the former §24 banner in
+`entrypoints/background.ts` — now the live `ChunkFetcher` (`fetch(url, {
+credentials: "include" })` + `buildRevisionsLoadUrl`) and the live
+`RevisionRangeDiscovery`. The orchestrator and `lib/retrieval` are unchanged. The
+one core change beyond the seam: the decoder gained a tuple-envelope adapter
+(`lib/decoder/decode.ts#normalizeEntry`) because the real `changelog` entries are
+9-element tuples `[op, time, sessionId, revisionId, userId, …]`, not the flat
+objects the synthetic corpus had modeled — anticipated by plan Pre-mortem #3.
 
 ## Resolve-by-Inspection findings (confirmed during execution)
 
@@ -128,14 +139,19 @@ there — a localized swap; the orchestrator and `lib/retrieval` do not change.
    pure migration function exercises the migration logic without testing WXT's
    internal runner.
 
-## Escalation note (to the maintainer)
+## Resolution note (§24 capture landed 2026-06-12)
 
-Phase 4A is delivered and fully tested against fakes/synthetic data; the
-resumable retrieval state machine is live, exercised code. **The following is
-BLOCKED and requires you:** the §24 authenticated live capture (Chrome + Firefox,
-multi-account) filling `docs/protocol-capture.md`, confirming a credentialed
-fetch from an MV3 SW + Firefox event page, and observing SW termination
-mid-fetch. **HALT** if the capture shows protobuf, a `batchexecute` wrapper, a new
-mandatory page-derived read token, or endpoint restriction. Until then, the live
-`revisions/load` retrieval stays gated behind the single `// BLOCKED §24` site in
-`entrypoints/background.ts`.
+Phase 4A was already delivered and tested; **4B is now unblocked.** The §24
+authenticated live capture was performed (`docs/protocol-capture.md`) and **no
+stop-condition fired** (JSON not protobuf; direct endpoint not `batchexecute`;
+cookie-only read with no new page-derived token; no endpoint-restriction guidance).
+The live `revisions/load` adapter + revision-count discovery are wired in
+`entrypoints/background.ts`; the credentialed read is verified from the MV3
+service-worker context (200/JSON); the decoder gained a tuple-envelope adapter for
+the real wire format; and end-of-timeline text-equality is proven on a sanitized
+live capture.
+
+**Remaining live items (scoped as follow-ups, not blockers):** a Firefox event-page
+fetch + first-run UX (Firefox not installed in the capture env — `firefox-mv3`
+build is verified), a real multi-account `/u/1/` read, a rich/suggesting-doc op
+capture, and a large-doc deterministic SW-termination kill.

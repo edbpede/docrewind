@@ -36,8 +36,20 @@ existing() {
 
 fail=0
 
+# Read newline-separated input into an array, portable to macOS bash 3.2 (no
+# `mapfile`/`readarray`, which are bash 4+). Skips blank lines.
+read_lines() {
+  local __arr_name="$1" __line
+  eval "$__arr_name=()"
+  while IFS= read -r __line; do
+    [ -n "$__line" ] || continue
+    eval "$__arr_name+=(\"\$__line\")"
+  done
+  return 0
+}
+
 # --- Base guard: every pure dir (base + extra) -------------------------------
-mapfile -t base_scan < <(existing "${BASE_DIRS[@]}" "${EXTRA_DIRS[@]}")
+read_lines base_scan < <(existing "${BASE_DIRS[@]}" "${EXTRA_DIRS[@]}")
 if [ ${#base_scan[@]} -gt 0 ]; then
   if matches=$(grep -rnE --include='*.ts' "$BASE_PATTERN" "${base_scan[@]}"); then
     echo "ERROR: forbidden browser/WXT import found in the pure core:" >&2
@@ -48,7 +60,7 @@ if [ ${#base_scan[@]} -gt 0 ]; then
 fi
 
 # --- Extra guard: Phase 4 pure dirs only -------------------------------------
-mapfile -t extra_scan < <(existing "${EXTRA_DIRS[@]}")
+read_lines extra_scan < <(existing "${EXTRA_DIRS[@]}")
 if [ ${#extra_scan[@]} -gt 0 ]; then
   if matches=$(grep -rnE --include='*.ts' "$EXTRA_PATTERN" "${extra_scan[@]}"); then
     echo "ERROR: live fetch/Worker/globalThis found in the pure orchestration dirs:" >&2
