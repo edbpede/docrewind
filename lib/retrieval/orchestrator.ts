@@ -27,7 +27,14 @@ import {
   nextChunkSpan,
   shrinkChunkSize,
 } from "./chunking";
-import { fail, ok, type Result, type RetrievalError, retrievalError } from "./errors";
+import {
+  fail,
+  isRetrievalError,
+  ok,
+  type Result,
+  type RetrievalError,
+  retrievalError,
+} from "./errors";
 import type { ChunkFetcher } from "./transport";
 
 /** Signals cooperative cancellation; checked between and within chunks. */
@@ -88,8 +95,12 @@ export async function runRetrieval(
   let upperBound: RevisionId;
   try {
     upperBound = await deps.discovery.discoverUpperBound(docId);
-  } catch {
-    return fail(retrievalError("endpoint-unavailable"));
+  } catch (caught) {
+    // Discovery may throw a classified RetrievalError to surface a specific
+    // category (e.g. an auth failure must reach the UI as `insufficient-
+    // permission`, not be flattened to a recoverable `endpoint-unavailable`).
+    // Any other throw is an opaque transport problem ⇒ endpoint-unavailable.
+    return fail(isRetrievalError(caught) ? caught : retrievalError("endpoint-unavailable"));
   }
 
   // Resume from a checkpoint if one exists. The resume cursor is the first

@@ -47,6 +47,10 @@ export default defineBackground(() => {
 
   // ── LIVE §24 transport adapters ──────────────────────────────────────────
   const DOCS_ORIGIN = "https://docs.google.com";
+  // Cap any single credentialed GET so a hung response can't pin a retrieval
+  // run open indefinitely. `AbortSignal.timeout` is available in MV3 service
+  // workers; the SW lifecycle is a backstop, but an explicit bound is cheaper.
+  const FETCH_TIMEOUT_MS = 30_000;
   const pause = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
   // The editor bootstrap URL, multi-account `/u/{N}/`-aware (A.5). Discovery
@@ -81,7 +85,10 @@ export default defineBackground(() => {
       });
       let response: Response;
       try {
-        response = await fetch(url, { credentials: "include" });
+        response = await fetch(url, {
+          credentials: "include",
+          signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+        });
       } catch {
         return fail(retrievalError("network-failure"));
       }
@@ -120,8 +127,18 @@ export default defineBackground(() => {
       end: asRevisionId(end),
       userIndex,
     });
-    const response = await fetch(url, { credentials: "include" });
+    const response = await fetch(url, {
+      credentials: "include",
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
     if (response.ok) return "in";
+    // Auth failures must surface as such — they are NOT an out-of-range signal.
+    // The 2026 out-of-range marker is specifically HTTP 400 (§24 Q5), so a
+    // 401/403 here is a permission problem and must propagate to discovery as a
+    // distinct error rather than being read as "over".
+    if (response.status === 401 || response.status === 403) {
+      throw retrievalError("insufficient-permission");
+    }
     if (response.status >= 400 && response.status < 500) return "over";
     throw new Error(`revisions/load probe failed (${response.status})`);
   };
@@ -137,7 +154,10 @@ export default defineBackground(() => {
     async discoverUpperBound(docId: DocId): Promise<RevisionId> {
       // Primary: bootstrap metadata.
       try {
-        const response = await fetch(buildEditUrl(docId, userIndex), { credentials: "include" });
+        const response = await fetch(buildEditUrl(docId, userIndex), {
+          credentials: "include",
+          signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+        });
         if (response.ok) {
           const html = await response.text();
           const match = html.match(/"revision":(\d+)/);

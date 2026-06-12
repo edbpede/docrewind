@@ -42,8 +42,10 @@ read_lines() {
   local __arr_name="$1" __line
   eval "$__arr_name=()"
   while IFS= read -r __line; do
-    [ -n "$__line" ] && eval "$__arr_name+=(\"\$__line\")"
+    [ -n "$__line" ] || continue
+    eval "$__arr_name+=(\"\$__line\")"
   done
+  return 0
 }
 
 # --- Base guard: every pure dir (base + extra) -------------------------------

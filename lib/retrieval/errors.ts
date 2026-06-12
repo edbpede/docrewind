@@ -107,6 +107,27 @@ export function retrievalError(category: RetrievalErrorCategory): RetrievalError
   }
 }
 
+/**
+ * Narrow an unknown thrown value to a {@link RetrievalError}. Lets a thrown
+ * classified error cross a `catch` boundary without being flattened — the only
+ * property that distinguishes it is a `category` from the closed set.
+ */
+export function isRetrievalError(value: unknown): value is RetrievalError {
+  if (typeof value !== "object" || value === null) return false;
+  const category = (value as { category?: unknown }).category;
+  return (
+    category === "unsupported-page" ||
+    category === "missing-doc-id" ||
+    category === "insufficient-permission" ||
+    category === "endpoint-unavailable" ||
+    category === "unsupported-format" ||
+    category === "network-failure" ||
+    category === "quota-failure" ||
+    category === "reconstruction-failure" ||
+    category === "cancellation"
+  );
+}
+
 // --- Result helper ----------------------------------------------------------
 // A tiny Result type so the orchestrator can return a typed success/failure
 // without throwing across the async chunk loop.
