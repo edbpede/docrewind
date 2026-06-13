@@ -1,0 +1,79 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Stage 2 — PR Review (post). Triggered by the completion of Stage 1 via
+# workflow_run, so it runs in the TRUSTED base context with secrets + a write
+# token (plan §11, C1/C2/C3). It checks out ONLY the base default-branch scripts
+# (never a fork-derived ref), treats the downloaded artifact purely as data,
+# re-derives the authoritative identity from the trusted workflow_run.head_sha,
+# runs Goose+NanoGPT with no side effects, then validates and posts one COMMENT
+# review deterministically.
+name: PR Review (post)
+
+on:
+  workflow_run:
+    workflows: ["PR Review (collect)"]
+    types: [completed]
+
+permissions:
+  contents: read
+  pull-requests: write
+  actions: read # C2: REQUIRED for cross-run artifact download by run-id.
+
+jobs:
+  review:
+    # Only proceed if the collect run succeeded.
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      # C1: check out ONLY trusted base/default-branch code (the scripts). No
+      # `ref:` -> defaults to the repo's default branch. NEVER a fork-derived ref.
+      # workflow_run already runs THIS file from the default branch; the
+      # checked-out code stays on the default branch too.
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          name: pr-review-context
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+      - uses: oven-sh/setup-bun@v2 # SECURITY: pin to a full commit SHA before enabling on a public repo
+        with:
+          bun-version: "1.3.14"
+      - name: Install deps + Goose (OUTSIDE the timed fallback budget; cacheable)
+        run: |
+          bun install --frozen-lockfile
+          # SECURITY: pin the Goose release tag to an immutable version before enabling.
+          curl -fsSL "https://github.com/block/goose/releases/download/stable/download_cli.sh" | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Resolve + verify identity (C3)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          # Trusted SHA from the workflow_run event — NOT from the artifact.
+          TRUSTED_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        # Re-derive the PR number from the trusted SHA, cross-check the artifact's
+        # claims, and FAIL CLOSED on mismatch (writes identity.json or exits != 0).
+        run: bun run scripts/pr-review/verify-identity.ts
+      - name: Run Goose review (tiered fallback)
+        env:
+          GOOSE_PROVIDER: openai
+          OPENAI_HOST: https://nano-gpt.com # ROOT host only — path lives in OPENAI_BASE_PATH.
+          OPENAI_BASE_PATH: api/v1/chat/completions
+          # The NanoGPT secret is mapped to OPENAI_API_KEY ONLY here, at point of use.
+          OPENAI_API_KEY: ${{ secrets.NANOGPT_API_KEY }}
+          OPENAI_TIMEOUT: "240" # align Goose's client timeout with PER_ATTEMPT_TIMEOUT.
+          GOOSE_MODE: auto
+          GOOSE_CLI_SHOW_THINKING: "false" # keep reasoning out of CI logs.
+          GOOSE_CLI_MIN_PRIORITY: "0.5"
+          GOOSE_DISABLE_SESSION_NAMING: "true"
+        run: bun run scripts/pr-review/run-goose-review.ts
+      - name: Validate + anchor
+        run: bun run scripts/pr-review/validate-review-output.ts
+      - name: Post review
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bun run scripts/pr-review/post-github-review.ts
+        # Never fail the PR on a posting hiccup — the reviewer is advisory.
+        continue-on-error: true
