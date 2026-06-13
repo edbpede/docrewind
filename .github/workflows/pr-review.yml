@@ -1,0 +1,57 @@
+# AI PR Review — low-noise inline reviewer (Goose + NanoGPT, Option B).
+#
+# SECURITY: runs on pull_request_target so it can post on forked PRs with the
+# base-repo token + secrets. It therefore must NEVER execute untrusted PR code.
+# The PR head is NEVER checked out: this job checks out the BASE repo (trusted)
+# and treats the PR purely as DATA, fetched via the `gh pr diff` API call. The
+# scripts and recipe that run come from the base tree, so a fork cannot swap them
+# to exfiltrate secrets. Do not add any run-step that invokes a package manager
+# or build tool, and do not check out `pull_request.head` —
+# scripts/check-pr-review-workflow.sh fails CI on either. The review is
+# COMMENT-only and can never gate a merge.
+name: AI PR Review
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read # read the diff
+  pull-requests: write # post the review
+
+concurrency: # one review per PR; cancel superseded runs (rerun dedup)
+  group: ai-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout BASE repo (trusted; PR head is never checked out or executed)
+        uses: actions/checkout@v4
+        # No `ref:` — for pull_request_target this checks out the base commit, i.e.
+        # the trusted scripts/recipe. The untrusted PR is read as data via gh below.
+
+      - name: Install Goose CLI
+        run: |
+          curl -fsSL https://github.com/block/goose/releases/download/stable/download_cli.sh \
+            | CONFIGURE=false GOOSE_BIN_DIR="$HOME/.local/bin" bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Gather diff (diff-only; PR title/body are NOT fed to the model)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+        run: gh pr diff "$PR" --repo "$GITHUB_REPOSITORY" > diff.patch
+
+      - name: Run review (Goose + NanoGPT, tiered fallback, single COMMENT)
+        env:
+          GOOSE_PROVIDER: openai
+          OPENAI_API_KEY: ${{ secrets.NANOGPT_API_KEY }}
+          OPENAI_HOST: https://nano-gpt.com/api
+          GOOSE_MAX_TURNS: "1"
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/review.sh

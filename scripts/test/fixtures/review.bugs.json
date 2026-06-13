@@ -1,0 +1,67 @@
+{
+  "summary": "Found a couple of high-confidence correctness issues on changed lines.",
+  "should_post_review": true,
+  "review_event": "COMMENT",
+  "model_used": "",
+  "fallback_attempts": 0,
+  "comments": [
+    {
+      "path": "src/a.ts",
+      "line": 2,
+      "side": "RIGHT",
+      "body": "Keep: valid RIGHT anchor at a.ts:2.",
+      "severity": "high",
+      "category": "correctness",
+      "confidence": "high"
+    },
+    {
+      "path": "src/b.ts",
+      "line": 3,
+      "side": "RIGHT",
+      "body": "Keep: valid RIGHT anchor at b.ts:3.",
+      "severity": "critical",
+      "category": "security",
+      "confidence": "high"
+    },
+    {
+      "path": "src/a.ts",
+      "line": 999,
+      "side": "RIGHT",
+      "body": "Drop: line 999 is not in any hunk.",
+      "severity": "high",
+      "category": "correctness",
+      "confidence": "high"
+    },
+    {
+      "path": "src/a.ts",
+      "line": 4,
+      "side": "RIGHT",
+      "body": "Drop: confidence is not high.",
+      "severity": "low",
+      "category": "maintainability",
+      "confidence": "medium"
+    },
+    {
+      "path": "src/a.ts",
+      "start_line": 1,
+      "start_side": "RIGHT",
+      "line": 3,
+      "side": "RIGHT",
+      "body": "Keep: valid range a.ts:1-3 on RIGHT.",
+      "severity": "high",
+      "category": "edge-case",
+      "confidence": "high"
+    },
+    {
+      "path": "src/a.ts",
+      "start_line": 8,
+      "start_side": "RIGHT",
+      "line": 11,
+      "side": "RIGHT",
+      "body": "Drop: start_line 8 is not in any hunk.",
+      "severity": "high",
+      "category": "correctness",
+      "confidence": "high"
+    }
+  ]
+}
