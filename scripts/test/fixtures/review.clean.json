@@ -1,0 +1,8 @@
+{
+  "summary": "No high-confidence issues found on the changed lines.",
+  "should_post_review": true,
+  "review_event": "COMMENT",
+  "model_used": "",
+  "fallback_attempts": 0,
+  "comments": []
+}

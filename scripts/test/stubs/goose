@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Stub `goose` for review.sh tests. Ignores all CLI args; behaviour is env-driven.
+#   STUB_FAIL_MODELS : space-separated GOOSE_MODEL values that should exit non-zero
+#   STUB_HOST_FAIL=1 : failing models emit a host/route 4xx signature on stderr
+#   STUB_GOOSE_OUT   : path to a file whose contents are written to stdout on success
+model="${GOOSE_MODEL:-unknown}"
+case " ${STUB_FAIL_MODELS:-} " in
+  *" $model "*)
+    if [ "${STUB_HOST_FAIL:-0}" = "1" ]; then
+      echo "error sending request for url (https://nano-gpt.com/api/v1/chat/completions): 404 no route" >&2
+    else
+      echo "stub goose: simulated transient failure for $model" >&2
+    fi
+    exit 1
+    ;;
+esac
+out="${STUB_GOOSE_OUT:-}"
+if [ -n "$out" ] && [ -f "$out" ]; then
+  cat "$out"
+  exit 0
+fi
+echo "stub goose: STUB_GOOSE_OUT unset or missing" >&2
+exit 1
