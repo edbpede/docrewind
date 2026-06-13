@@ -1,7 +1,0 @@
-<thinking>
-Let me reason about this diff before answering. The added code looks mostly
-fine, but I want to flag one thing. Note I am emitting some braces { like this }
-and a nested pair {a:{b}} in my reasoning to stress the JSON extractor.
-</thinking>
-Here is my structured review:
-{"summary":"One high-confidence issue on a changed line.","should_post_review":true,"review_event":"COMMENT","model_used":"","fallback_attempts":0,"comments":[{"path":"src/b.ts","line":1,"side":"RIGHT","body":"Example finding.","severity":"high","category":"correctness","confidence":"high"}]}
