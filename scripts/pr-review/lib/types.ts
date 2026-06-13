@@ -8,6 +8,9 @@
 
 export type Side = "LEFT" | "RIGHT";
 
+/** Empty-review behaviour: post the no-suggestions note, or stay silent. */
+export type EmptyReviewModeLike = "note" | "silent";
+
 export type Severity = "low" | "medium" | "high" | "critical";
 
 export type Category =

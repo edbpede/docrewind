@@ -13,6 +13,8 @@ import { execFileSync } from "node:child_process";
 export interface GhOptions {
   /** Extra env (e.g. GH_TOKEN). Merged over process.env. */
   env?: Record<string, string | undefined>;
+  /** Stdin to feed the process (e.g. a JSON body for `gh api --input -`). */
+  input?: string;
 }
 
 /** Run `gh <args...>` and return stdout as a string. Throws on non-zero exit. */
@@ -21,6 +23,7 @@ export function gh(args: readonly string[], opts: GhOptions = {}): string {
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
     env: { ...process.env, ...opts.env },
+    ...(opts.input !== undefined ? { input: opts.input } : {}),
   });
 }
 

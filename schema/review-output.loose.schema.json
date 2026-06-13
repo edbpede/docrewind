@@ -58,7 +58,10 @@
           },
           "side": {
             "type": "string",
-            "enum": ["LEFT", "RIGHT"]
+            "enum": [
+              "LEFT",
+              "RIGHT"
+            ]
           },
           "start_line": {
             "type": "integer",
@@ -66,7 +69,10 @@
           },
           "start_side": {
             "type": "string",
-            "enum": ["LEFT", "RIGHT"]
+            "enum": [
+              "LEFT",
+              "RIGHT"
+            ]
           },
           "body": {
             "type": "string",
@@ -75,7 +81,12 @@
           },
           "severity": {
             "type": "string",
-            "enum": ["low", "medium", "high", "critical"]
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ]
           },
           "category": {
             "type": "string",
@@ -113,7 +124,10 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["path", "reason"],
+        "required": [
+          "path",
+          "reason"
+        ],
         "properties": {
           "path": {
             "type": "string"

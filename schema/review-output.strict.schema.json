@@ -63,15 +63,27 @@
           },
           "side": {
             "type": "string",
-            "enum": ["LEFT", "RIGHT"]
+            "enum": [
+              "LEFT",
+              "RIGHT"
+            ]
           },
           "start_line": {
-            "type": ["integer", "null"],
+            "type": [
+              "integer",
+              "null"
+            ],
             "minimum": 1
           },
           "start_side": {
-            "type": ["string", "null"],
-            "enum": ["LEFT", "RIGHT"]
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "LEFT",
+              "RIGHT"
+            ]
           },
           "body": {
             "type": "string",
@@ -80,7 +92,12 @@
           },
           "severity": {
             "type": "string",
-            "enum": ["low", "medium", "high", "critical"]
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ]
           },
           "category": {
             "type": "string",
@@ -106,7 +123,10 @@
             "description": "Why this is high-confidence; not shown to users."
           },
           "dedupe_key": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "ADVISORY ONLY. The authoritative dedupe key is computed deterministically in lib/dedupe.ts from path + anchored line + normalized body fingerprint; the model's value is ignored (it is unstable across the model-fallback ladder)."
           }
         }
@@ -118,13 +138,20 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["path", "line", "reason"],
+        "required": [
+          "path",
+          "line",
+          "reason"
+        ],
         "properties": {
           "path": {
             "type": "string"
           },
           "line": {
-            "type": ["integer", "null"]
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "reason": {
             "type": "string",
@@ -134,11 +161,17 @@
       }
     },
     "model_used": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "description": "Filled by the model; overwritten by the wrapper (authoritative)."
     },
     "fallback_attempts": {
-      "type": ["integer", "null"],
+      "type": [
+        "integer",
+        "null"
+      ],
       "minimum": 0,
       "description": "Advisory; the wrapper records truth separately."
     }

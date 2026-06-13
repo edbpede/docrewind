@@ -27,6 +27,8 @@ const schemaDir = join(repoRoot, "schema");
 const BASE_PATH = join(schemaDir, "review-output.base.schema.json");
 const LOOSE_PATH = join(schemaDir, "review-output.loose.schema.json");
 const STRICT_PATH = join(schemaDir, "review-output.strict.schema.json");
+const promptDir = join(repoRoot, "prompt");
+const RECIPE_PATH = join(repoRoot, ".goose", "recipes", "pr-review.yaml");
 
 /** A minimal JSON-schema node shape — only the keywords this builder touches. */
 type JsonSchemaNode = {
@@ -76,6 +78,77 @@ function toStrict(node: JsonSchemaNode): void {
   if (node.items) toStrict(node.items);
 }
 
+/** Indent every line by two spaces for a YAML block scalar; keep blanks empty. */
+function blockScalar(text: string): string {
+  return text
+    .replace(/\s+$/, "")
+    .split("\n")
+    .map((line) => (line.length === 0 ? "" : `  ${line}`))
+    .join("\n");
+}
+
+/**
+ * Generate the Goose recipe from the prompt fragments + the loose schema, so the
+ * recipe is never hand-edited and CI can git-diff-gate it (plan §5/§8, M3). The
+ * `instructions` (system) come from 00-system + 70-injection-boundary; the
+ * `prompt` (user) concatenates the task fragments and ends with the untrusted PR
+ * context/diff placeholders Goose fills from the file params. `response.json_schema`
+ * is the loose variant inlined as YAML flow (JSON is valid YAML).
+ */
+function buildRecipe(loose: JsonSchemaNode): string {
+  const frag = (name: string): string => readFileSync(join(promptDir, name), "utf8").trimEnd();
+
+  const instructions = `${frag("00-system.md")}\n\n${frag("70-injection-boundary.md")}`;
+  const prompt = [
+    frag("20-review-task.md"),
+    frag("30-review-philosophy.md"),
+    frag("40-inline-comment-rules.md"),
+    frag("50-output-contract.md"),
+    frag("60-self-check.md"),
+    frag("10-pr-context.md.jinja"),
+  ].join("\n\n");
+
+  // Embed the loose schema without the JSON-Schema meta keys Goose does not need.
+  const embedded = clone(loose) as Record<string, unknown>;
+  delete embedded.$schema;
+  delete embedded.$id;
+  delete embedded.title;
+  delete embedded.description;
+  const schemaFlow = JSON.stringify(embedded);
+
+  return [
+    "# GENERATED FILE — do not edit by hand.",
+    "# Source: prompt/*.md fragments + schema/review-output.base.schema.json.",
+    "# Regenerate with `bun run schemas:build`; CI git-diff-gates this file.",
+    'version: "1.0.0"',
+    'title: "DocRewind PR reviewer"',
+    'description: "Low-noise inline PR reviewer. Emits a single COMMENT review as structured JSON; deterministic code validates, anchors, and posts."',
+    "settings:",
+    "  goose_provider: openai",
+    '  goose_model: "deepseek/deepseek-v4-pro-cheaper:thinking"',
+    "  temperature: 0.1",
+    "parameters:",
+    "  - key: pr_context_file",
+    "    input_type: file",
+    "    requirement: required",
+    '    description: "Path to pr-context.json (PR meta, anchorable file set, existing comments)."',
+    "  - key: diff_file",
+    "    input_type: file",
+    "    requirement: required",
+    '    description: "Path to pr.diff (the reconstructed unified diff)."',
+    "# Extensions disabled: the model gets no shell, no GitHub, no file mutation —",
+    "# only the internal final_output tool that delivers response.json_schema.",
+    "extensions: []",
+    "instructions: |",
+    blockScalar(instructions),
+    "prompt: |",
+    blockScalar(prompt),
+    "response:",
+    `  json_schema: ${schemaFlow}`,
+    "",
+  ].join("\n");
+}
+
 function build(): void {
   const base = JSON.parse(readFileSync(BASE_PATH, "utf8")) as JsonSchemaNode;
 
@@ -92,7 +165,8 @@ function build(): void {
 
   writeFileSync(LOOSE_PATH, serialize(loose));
   writeFileSync(STRICT_PATH, serialize(strict));
+  writeFileSync(RECIPE_PATH, buildRecipe(loose));
 }
 
 build();
-console.log("[build-schemas] wrote loose + strict variants to schema/");
+console.log("[build-schemas] wrote loose + strict variants + Goose recipe");
