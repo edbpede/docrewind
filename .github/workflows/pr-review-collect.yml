@@ -49,10 +49,21 @@ jobs:
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: bun run scripts/pr-review/collect-pr-context.ts
+        # The collector is run from the TRUSTED base ref (never the PR head — see
+        # the C1 guard in workflows.test.ts). On the bootstrap PR that first adds
+        # the reviewer, scripts/pr-review does not yet exist on base, so there is
+        # nothing to run: skip cleanly. Once this PR merges to the default branch,
+        # base carries the scripts and collect activates for every later PR.
+        run: |
+          if [ ! -f scripts/pr-review/collect-pr-context.ts ]; then
+            echo "::notice title=PR reviewer not yet on base::scripts/pr-review is absent from the base ref (${{ github.event.pull_request.base.sha }}); the reviewer activates once this PR is merged to the default branch. Skipping collect."
+            exit 0
+          fi
+          bun run scripts/pr-review/collect-pr-context.ts
       - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
           name: pr-review-context
+          if-no-files-found: ignore # bootstrap PR produces no context — not an error
           path: |
             pr-context.json
             pr.diff
