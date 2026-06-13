@@ -24,6 +24,10 @@ export interface ReplayData {
   readonly replayIndex: ReplayIndex;
 }
 
+export type ReplayLoadResult =
+  | { readonly kind: "ok"; readonly data: ReplayData }
+  | { readonly kind: "missing-publication" };
+
 /** Plain structured-cloneable derived data ready for store publication. */
 export interface ReplayDerivedData {
   readonly revisions: readonly DecodedRevision[];
@@ -36,6 +40,13 @@ export interface ReplayPublishOptions {
   readonly shouldPublish?: () => boolean;
   readonly now?: () => number;
 }
+
+export type DecodeOutcome =
+  | { readonly kind: "published"; readonly revisionCount: number }
+  | { readonly kind: "empty" }
+  | { readonly kind: "unsupported" }
+  | { readonly kind: "failed" }
+  | { readonly kind: "stale" };
 
 /**
  * Rebuild a `ReplayIndex` from persisted decoded revisions + snapshots. The
@@ -54,24 +65,23 @@ export function rebuildReplayIndex(
   return { revisions: decoded, cadence: SNAPSHOT_CADENCE, snapshots: map };
 }
 
-function emptyReplayData(): ReplayData {
-  return { revisions: [], timeline: [], replayIndex: rebuildReplayIndex([], []) };
-}
-
 /** Read one matching atomic replay publication and rebuild its replay index. */
 export async function loadReplayData(
   store: RevisionStore,
   docId: DocId,
   expectedPublicationId: string,
-): Promise<ReplayData> {
+): Promise<ReplayLoadResult> {
   const publication = await store.getReplayPublication(docId, expectedPublicationId);
   if (publication === null) {
-    return emptyReplayData();
+    return { kind: "missing-publication" };
   }
   return {
-    revisions: publication.revisions,
-    timeline: publication.timeline,
-    replayIndex: rebuildReplayIndex(publication.revisions, publication.snapshots),
+    kind: "ok",
+    data: {
+      revisions: publication.revisions,
+      timeline: publication.timeline,
+      replayIndex: rebuildReplayIndex(publication.revisions, publication.snapshots),
+    },
   };
 }
 
@@ -112,19 +122,29 @@ export async function runPipelineSameThread(
   store: RevisionStore,
   docId: DocId,
   options: ReplayPublishOptions,
-): Promise<boolean> {
-  const chunks = await store.getRawChunks(docId);
-  const result = runPipelineOverBodies(chunks.map((chunk) => chunk.body));
-  if (result.kind !== "ok") {
-    return false;
+): Promise<DecodeOutcome> {
+  try {
+    const chunks = await store.getRawChunks(docId);
+    if (chunks.length === 0) {
+      return { kind: "empty" };
+    }
+    const result = runPipelineOverBodies(chunks.map((chunk) => chunk.body));
+    if (result.kind !== "ok") {
+      return { kind: "unsupported" };
+    }
+    const snapshots: StoredSnapshot[] = [...result.replayIndex.snapshots.entries()].map(
+      ([appliedCount, model]) => ({ appliedCount, model }),
+    );
+    const published = await publishDerivedData(
+      store,
+      docId,
+      { revisions: result.revisions, snapshots, timeline: result.timeline },
+      options,
+    );
+    return published
+      ? { kind: "published", revisionCount: result.revisions.length }
+      : { kind: "stale" };
+  } catch {
+    return { kind: "failed" };
   }
-  const snapshots: StoredSnapshot[] = [...result.replayIndex.snapshots.entries()].map(
-    ([appliedCount, model]) => ({ appliedCount, model }),
-  );
-  return publishDerivedData(
-    store,
-    docId,
-    { revisions: result.revisions, snapshots, timeline: result.timeline },
-    options,
-  );
 }

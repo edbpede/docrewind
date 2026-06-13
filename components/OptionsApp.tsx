@@ -7,7 +7,7 @@
 // (write). Never displays raw document data.
 
 import type { Component } from "solid-js";
-import { createResource, For } from "solid-js";
+import { createResource, createSignal, For, onMount, Show } from "solid-js";
 import CacheControls from "@/components/CacheControls";
 import DiagnosticsPreferences from "@/components/DiagnosticsPreferences";
 import PrivacySummary from "@/components/PrivacySummary";
@@ -17,7 +17,22 @@ import { asDocId } from "@/lib/domain/ids";
 import type { DocId } from "@/lib/domain/model";
 import { strings } from "@/lib/i18n/strings";
 import { sendMessage } from "@/lib/messaging";
-import { keepRawData, realIdentities, storageBudget, type Theme, theme } from "@/lib/settings";
+import {
+  createPendingDestructiveStorageClear,
+  createPendingStorageMaintenanceRequest,
+  getPendingDestructiveStorageClears,
+  getPendingStorageMaintenance,
+  keepRawData,
+  realIdentities,
+  removePendingDestructiveStorageClear,
+  removePendingStorageMaintenance,
+  type StorageBudget,
+  storageBudget,
+  type Theme,
+  theme,
+  upsertPendingDestructiveStorageClear,
+  upsertPendingStorageMaintenance,
+} from "@/lib/settings";
 
 const MIB = 1024 * 1024;
 
@@ -51,6 +66,11 @@ const OptionsApp: Component = () => {
     realIdentities.getValue(),
   );
   const [budget, { mutate: mutateBudget }] = createResource(() => storageBudget.getValue());
+  const [maintenanceStatus, setMaintenanceStatus] = createSignal<"pending" | "failed" | null>(null);
+
+  onMount(() => {
+    void refreshPendingStatus();
+  });
 
   function onTheme(next: Theme): void {
     mutateTheme(next);
@@ -63,12 +83,12 @@ const OptionsApp: Component = () => {
     const currentBudget = budget();
     void (async () => {
       const resolvedBudget = currentBudget ?? (await storageBudget.getValue());
-      await sendMessage("requestStorageMaintenance", {
+      await sendDurableMaintenance({
         docId,
         keepRawData: next,
         budget: resolvedBudget,
       });
-    })().catch(() => {});
+    })().catch(() => setMaintenanceStatus("failed"));
   }
 
   function onIdentities(next: boolean): void {
@@ -84,11 +104,79 @@ const OptionsApp: Component = () => {
     const next = { ...current, [field]: Math.round(mib * MIB) };
     mutateBudget(next);
     void storageBudget.setValue(next);
-    void sendMessage("requestStorageMaintenance", {
+    void sendDurableMaintenance({
       docId,
       keepRawData: keepRaw() ?? true,
       budget: next,
-    }).catch(() => {});
+    });
+  }
+
+  async function sendDurableMaintenance(input: {
+    readonly docId: DocId | null;
+    readonly keepRawData: boolean;
+    readonly budget: StorageBudget;
+  }): Promise<void> {
+    const request = createPendingStorageMaintenanceRequest(input);
+    await upsertPendingStorageMaintenance(request);
+    setMaintenanceStatus("pending");
+    try {
+      const ack = await sendMessage("requestStorageMaintenance", request);
+      if (ack.status === "completed") {
+        await removePendingStorageMaintenance(request.id);
+        await refreshPendingStatus();
+      } else {
+        setMaintenanceStatus(ack.status === "failed" ? "failed" : "pending");
+      }
+    } catch {
+      setMaintenanceStatus("failed");
+    }
+  }
+
+  async function refreshPendingStatus(): Promise<void> {
+    const [pendingMaintenance, pendingClears] = await Promise.all([
+      getPendingStorageMaintenance(),
+      getPendingDestructiveStorageClears(),
+    ]);
+    setMaintenanceStatus(
+      pendingMaintenance.length > 0 || pendingClears.length > 0 ? "pending" : null,
+    );
+  }
+
+  async function clearDocumentCache(targetDocId: DocId): Promise<void> {
+    const request = createPendingDestructiveStorageClear({
+      kind: "document",
+      docId: targetDocId,
+    });
+    await upsertPendingDestructiveStorageClear(request);
+    setMaintenanceStatus("pending");
+    try {
+      const ack = await sendMessage("clearDocumentCache", request);
+      if (ack.status === "completed") {
+        await removePendingDestructiveStorageClear(request.id);
+        await refreshPendingStatus();
+      } else {
+        setMaintenanceStatus(ack.status === "failed" ? "failed" : "pending");
+      }
+    } catch {
+      setMaintenanceStatus("failed");
+    }
+  }
+
+  async function clearAllCaches(): Promise<void> {
+    const request = createPendingDestructiveStorageClear({ kind: "all" });
+    await upsertPendingDestructiveStorageClear(request);
+    setMaintenanceStatus("pending");
+    try {
+      const ack = await sendMessage("clearAllCaches", request);
+      if (ack.status === "completed") {
+        await removePendingDestructiveStorageClear(request.id);
+        await refreshPendingStatus();
+      } else {
+        setMaintenanceStatus(ack.status === "failed" ? "failed" : "pending");
+      }
+    } catch {
+      setMaintenanceStatus("failed");
+    }
   }
 
   return (
@@ -157,7 +245,22 @@ const OptionsApp: Component = () => {
           </label>
         </section>
 
-        <CacheControls store={store} docId={docId} />
+        <Show when={maintenanceStatus()}>
+          {(status) => (
+            <p class="dr-card text-sm text-stone-700 dark:text-stone-300" role="status">
+              {status() === "failed"
+                ? strings.options.maintenanceFailed
+                : strings.options.maintenancePending}
+            </p>
+          )}
+        </Show>
+
+        <CacheControls
+          store={store}
+          docId={docId}
+          onClearDocument={clearDocumentCache}
+          onClearAll={clearAllCaches}
+        />
         <DiagnosticsPreferences />
       </main>
     </div>

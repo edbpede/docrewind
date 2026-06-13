@@ -68,6 +68,10 @@ function rangeKey(start: RevisionId, end: RevisionId): string {
   return `${start}:${end}`;
 }
 
+function publicationKey(docId: DocId, publicationId: string): string {
+  return `${docId}\u0000${publicationId}`;
+}
+
 /**
  * Deep-copy a value crossing the backend boundary. The idb backend isolates
  * callers from stored state via IndexedDB's structured-clone algorithm; this
@@ -146,14 +150,19 @@ export function createMemoryStore(options: MemoryStoreOptions = {}): RevisionSto
     docId: DocId,
     publication: ReplayPublication,
   ): Promise<void> {
-    backend.replayPublications.set(docId, cloneValue({ ...publication, parserVersion }));
+    backend.replayPublications.set(
+      publicationKey(docId, publication.publicationId),
+      cloneValue({ ...publication, parserVersion }),
+    );
   }
 
   async function getReplayPublication(
     docId: DocId,
     expectedPublicationId: string,
   ): Promise<ReplayPublication | null> {
-    const publication = backend.replayPublications.get(docId);
+    const publication = backend.replayPublications.get(
+      publicationKey(docId, expectedPublicationId),
+    );
     if (
       publication === undefined ||
       publication.parserVersion < parserVersion ||
@@ -162,6 +171,19 @@ export function createMemoryStore(options: MemoryStoreOptions = {}): RevisionSto
       return null;
     }
     return cloneValue(publication);
+  }
+
+  async function pruneReplayPublicationsExcept(
+    docId: DocId,
+    keepPublicationId: string,
+  ): Promise<void> {
+    const prefix = `${docId}\u0000`;
+    const keepKey = publicationKey(docId, keepPublicationId);
+    for (const key of backend.replayPublications.keys()) {
+      if (key.startsWith(prefix) && key !== keepKey) {
+        backend.replayPublications.delete(key);
+      }
+    }
   }
 
   async function saveDecoded(docId: DocId, revisions: readonly DecodedRevision[]): Promise<void> {
@@ -248,6 +270,10 @@ export function createMemoryStore(options: MemoryStoreOptions = {}): RevisionSto
   }
 
   async function pruneRawToCap(docId: DocId, capBytes: number): Promise<number> {
+    const meta = backend.cacheMeta.get(docId);
+    if (meta?.reconstructionStatus !== "complete") {
+      return 0;
+    }
     const target = Math.max(0, Math.floor(capBytes));
     const retained = await estimateRawBytes(docId);
     return retained > target ? deleteRawForDoc(docId) : 0;
@@ -274,6 +300,7 @@ export function createMemoryStore(options: MemoryStoreOptions = {}): RevisionSto
     let reclaimed = 0;
     for (const meta of docsByAge) {
       if (usage <= targetBytes) break;
+      if (meta.reconstructionStatus !== "complete") continue;
       const freed = await deleteRawForDoc(meta.docId);
       if (freed > 0) {
         reclaimed += freed;
@@ -288,7 +315,12 @@ export function createMemoryStore(options: MemoryStoreOptions = {}): RevisionSto
     backend.decoded.delete(docId);
     backend.snapshots.delete(docId);
     backend.timeline.delete(docId);
-    backend.replayPublications.delete(docId);
+    const prefix = `${docId}\u0000`;
+    for (const key of backend.replayPublications.keys()) {
+      if (key.startsWith(prefix)) {
+        backend.replayPublications.delete(key);
+      }
+    }
     backend.cacheMeta.delete(docId);
     backend.checkpoints.delete(docId);
   }
@@ -313,6 +345,7 @@ export function createMemoryStore(options: MemoryStoreOptions = {}): RevisionSto
     pruneRawToCapAll,
     saveReplayPublication,
     getReplayPublication,
+    pruneReplayPublicationsExcept,
     saveDecoded,
     getDecoded,
     saveSnapshots,

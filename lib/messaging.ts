@@ -41,15 +41,38 @@ export interface DecodeLeaseMessage {
 
 /** Request raw-cache maintenance through the background lease guard. */
 export interface RequestStorageMaintenanceMessage {
+  /**
+   * Durable retry id, when the sender persisted this request before sending.
+   * Background handlers do not trust this for authorization; it is only an ack
+   * correlation key for browser-local pending state.
+   */
+  readonly id?: string;
   /** `null` means apply generic/global options maintenance across all docs. */
   readonly docId: DocId | null;
   readonly keepRawData: boolean;
   readonly budget: StorageBudget;
   readonly reconstructionStatus?: CacheRecord["reconstructionStatus"];
+  readonly now?: number;
+  readonly queuedAt?: number;
+}
+
+/** Request a background-owned destructive clear for one document. */
+export interface ClearDocumentCacheMessage {
+  readonly id?: string;
+  readonly docId: DocId;
+  readonly kind?: "document";
+  readonly queuedAt?: number;
+}
+
+/** Request a background-owned destructive clear for every document. */
+export interface ClearAllCachesMessage {
+  readonly id?: string;
+  readonly kind?: "all";
+  readonly queuedAt?: number;
 }
 
 export interface StorageMaintenanceAck {
-  readonly deferred: boolean;
+  readonly status: "completed" | "deferred" | "failed";
   readonly reclaimedBytes: number;
 }
 
@@ -83,6 +106,8 @@ export interface ProtocolMap {
   beginDecodeLease(data: DecodeLeaseMessage): void;
   endDecodeLease(data: DecodeLeaseMessage): StorageMaintenanceAck;
   requestStorageMaintenance(data: RequestStorageMaintenanceMessage): StorageMaintenanceAck;
+  clearDocumentCache(data: ClearDocumentCacheMessage): StorageMaintenanceAck;
+  clearAllCaches(data: ClearAllCachesMessage): StorageMaintenanceAck;
 }
 
 export const { sendMessage, onMessage, removeAllListeners } =

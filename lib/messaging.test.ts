@@ -61,17 +61,17 @@ describe("messaging ProtocolMap", () => {
       expect(data.docId).toBe(docId);
     });
     onMessage("endDecodeLease", ({ data }) => ({
-      deferred: false,
+      status: "completed",
       reclaimedBytes: data.docId === docId ? 1 : 0,
     }));
     onMessage("requestStorageMaintenance", ({ data }) => ({
-      deferred: data.docId === docId,
+      status: data.docId === docId ? "deferred" : "completed",
       reclaimedBytes: data.keepRawData ? 0 : 2,
     }));
 
     await sendMessage("beginDecodeLease", { docId });
     expect(await sendMessage("endDecodeLease", { docId })).toEqual({
-      deferred: false,
+      status: "completed",
       reclaimedBytes: 1,
     });
     expect(
@@ -81,6 +81,24 @@ describe("messaging ProtocolMap", () => {
         budget: { perDocumentBytes: 1, globalCapBytes: 2 },
         reconstructionStatus: "partial",
       }),
-    ).toEqual({ deferred: true, reclaimedBytes: 2 });
+    ).toEqual({ status: "deferred", reclaimedBytes: 2 });
+  });
+
+  it("round-trips destructive cache clear messages", async () => {
+    const docId = asDocId("docCLEAR");
+    onMessage("clearDocumentCache", ({ data }) => ({
+      status: data.docId === docId ? "completed" : "failed",
+      reclaimedBytes: 0,
+    }));
+    onMessage("clearAllCaches", () => ({ status: "deferred", reclaimedBytes: 0 }));
+
+    expect(await sendMessage("clearDocumentCache", { docId })).toEqual({
+      status: "completed",
+      reclaimedBytes: 0,
+    });
+    expect(await sendMessage("clearAllCaches", {})).toEqual({
+      status: "deferred",
+      reclaimedBytes: 0,
+    });
   });
 });

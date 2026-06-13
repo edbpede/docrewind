@@ -5,7 +5,7 @@ import { fakeBrowser } from "wxt/testing";
 import OptionsApp from "@/components/OptionsApp";
 
 const { sendMessageMock, storeMock } = vi.hoisted(() => ({
-  sendMessageMock: vi.fn(async () => ({ deferred: false, reclaimedBytes: 0 })),
+  sendMessageMock: vi.fn(async () => ({ status: "completed", reclaimedBytes: 0 })),
   storeMock: {
     saveRawChunk: vi.fn(),
     getRawChunks: vi.fn(async () => []),
@@ -16,6 +16,7 @@ const { sendMessageMock, storeMock } = vi.hoisted(() => ({
     pruneRawToCapAll: vi.fn(async () => 0),
     saveReplayPublication: vi.fn(),
     getReplayPublication: vi.fn(async () => null),
+    pruneReplayPublicationsExcept: vi.fn(),
     saveDecoded: vi.fn(),
     getDecoded: vi.fn(async () => []),
     saveSnapshots: vi.fn(),
@@ -69,7 +70,10 @@ describe("OptionsApp storage policy controls", () => {
     installMatchMedia();
   });
 
-  afterEach(() => cleanup());
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
 
   it("turning off raw retention requests guarded maintenance without direct raw deletion", async () => {
     render(() => <OptionsApp />);
@@ -81,11 +85,16 @@ describe("OptionsApp storage policy controls", () => {
     expect(storeMock.deleteRawAll).not.toHaveBeenCalled();
     expect(storeMock.deleteAll).not.toHaveBeenCalled();
     await vi.waitFor(() =>
-      expect(sendMessageMock).toHaveBeenCalledWith("requestStorageMaintenance", {
-        docId: "docOptions",
-        keepRawData: false,
-        budget: { perDocumentBytes: 50 * MIB, globalCapBytes: 500 * MIB },
-      }),
+      expect(sendMessageMock).toHaveBeenCalledWith(
+        "requestStorageMaintenance",
+        expect.objectContaining({
+          id: `storage-maintenance:docOptions:policy:discard-raw:${50 * MIB}:${500 * MIB}`,
+          docId: "docOptions",
+          keepRawData: false,
+          budget: { perDocumentBytes: 50 * MIB, globalCapBytes: 500 * MIB },
+          queuedAt: expect.any(Number),
+        }),
+      ),
     );
   });
 
@@ -98,11 +107,16 @@ describe("OptionsApp storage policy controls", () => {
 
     expect(storeMock.pruneRawToCap).not.toHaveBeenCalled();
     expect(storeMock.pruneLRU).not.toHaveBeenCalled();
-    expect(sendMessageMock).toHaveBeenCalledWith("requestStorageMaintenance", {
-      docId: "docOptions",
-      keepRawData: true,
-      budget: { perDocumentBytes: 50 * MIB, globalCapBytes: 2 * MIB },
-    });
+    await vi.waitFor(() =>
+      expect(sendMessageMock).toHaveBeenCalledWith(
+        "requestStorageMaintenance",
+        expect.objectContaining({
+          docId: "docOptions",
+          keepRawData: true,
+          budget: { perDocumentBytes: 50 * MIB, globalCapBytes: 2 * MIB },
+        }),
+      ),
+    );
   });
 
   it("changing a budget on the generic options page requests guarded global maintenance", async () => {
@@ -115,10 +129,72 @@ describe("OptionsApp storage policy controls", () => {
 
     expect(storeMock.pruneRawToCapAll).not.toHaveBeenCalled();
     expect(storeMock.pruneLRU).not.toHaveBeenCalled();
-    expect(sendMessageMock).toHaveBeenCalledWith("requestStorageMaintenance", {
-      docId: null,
-      keepRawData: true,
-      budget: { perDocumentBytes: 50 * MIB, globalCapBytes: 3 * MIB },
-    });
+    await vi.waitFor(() =>
+      expect(sendMessageMock).toHaveBeenCalledWith(
+        "requestStorageMaintenance",
+        expect.objectContaining({
+          docId: null,
+          keepRawData: true,
+          budget: { perDocumentBytes: 50 * MIB, globalCapBytes: 3 * MIB },
+        }),
+      ),
+    );
+  });
+
+  it("clear-current routes through the background without direct document deletion", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(() => <OptionsApp />);
+    const clearCurrent = await screen.findByRole("button", { name: "Clear this document" });
+
+    await fireEvent.click(clearCurrent);
+
+    expect(storeMock.deleteDocument).not.toHaveBeenCalled();
+    expect(storeMock.deleteAll).not.toHaveBeenCalled();
+    await vi.waitFor(() =>
+      expect(sendMessageMock).toHaveBeenCalledWith(
+        "clearDocumentCache",
+        expect.objectContaining({
+          id: "destructive-clear:document:docOptions",
+          kind: "document",
+          docId: "docOptions",
+          queuedAt: expect.any(Number),
+        }),
+      ),
+    );
+  });
+
+  it("clear-all routes through the background without direct full deletion", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(() => <OptionsApp />);
+    const clearAll = await screen.findByRole("button", { name: "Clear all documents" });
+
+    await fireEvent.click(clearAll);
+
+    expect(storeMock.deleteDocument).not.toHaveBeenCalled();
+    expect(storeMock.deleteAll).not.toHaveBeenCalled();
+    await vi.waitFor(() =>
+      expect(sendMessageMock).toHaveBeenCalledWith(
+        "clearAllCaches",
+        expect.objectContaining({
+          id: "destructive-clear:*",
+          kind: "all",
+          queuedAt: expect.any(Number),
+        }),
+      ),
+    );
+  });
+
+  it("keeps a durable pending maintenance status when send fails", async () => {
+    sendMessageMock.mockRejectedValueOnce(new Error("sw unavailable"));
+    render(() => <OptionsApp />);
+    const checkbox = await screen.findByLabelText("Keep raw data for re-decoding");
+
+    await fireEvent.click(checkbox);
+
+    await vi.waitFor(() =>
+      expect(
+        screen.getByText("Storage cleanup could not be confirmed and will retry automatically."),
+      ).toBeTruthy(),
+    );
   });
 });

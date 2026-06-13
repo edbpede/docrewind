@@ -131,6 +131,12 @@ export interface RevisionStore {
     docId: DocId,
     expectedPublicationId: string,
   ): Promise<ReplayPublication | null>;
+  /**
+   * Best-effort same-document replay-publication GC. Deletes only generations
+   * whose id is not the exact active publication id; it does not establish or
+   * persist any "current publication" pointer.
+   */
+  pruneReplayPublicationsExcept(docId: DocId, keepPublicationId: string): Promise<void>;
 
   // --- Legacy split decoded data (compatibility / explicit consumption only) -
   saveDecoded(docId: DocId, revisions: readonly DecodedRevision[]): Promise<void>;

@@ -10,6 +10,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createIdbStore, isQuotaExceededError } from "./db";
 import { runRevisionStoreContract, type StoreHarness } from "./db.contract";
 import { createMemoryBackend, createMemoryStore } from "./db.memory";
+import { asDocId, asRevisionId } from "./domain/ids";
+import { createModel } from "./reconstruction/model";
 
 // --- Mocked navigator.storage (estimate/persist) ----------------------------
 let mockUsage = 0;
@@ -75,8 +77,52 @@ describe("idb schema", () => {
       "timeline",
     ]);
     expect([...db.transaction("rawChunks").store.indexNames]).toContain("by-doc");
+    expect([...db.transaction("replayPublications").store.indexNames]).toContain("by-doc");
     expect([...db.transaction("cacheMeta").store.indexNames]).toContain("by-last-accessed");
     db.close();
+  });
+
+  it("v3 upgrade invalidates old single-slot replay publication rows", async () => {
+    const name = `docrewind-schema-upgrade-${dbCounter++}`;
+    const docId = asDocId("legacyDoc");
+    const oldDb = await openDB(name, 2, {
+      upgrade(db) {
+        db.createObjectStore("replayPublications", { keyPath: "docId" });
+      },
+    });
+    await oldDb.put("replayPublications", {
+      docId,
+      publication: {
+        publicationId: "legacy-pub",
+        parserVersion: 1,
+        revisions: [
+          {
+            revisionId: asRevisionId(1),
+            userId: null,
+            sessionId: null,
+            time: null,
+            operations: [],
+          },
+        ],
+        snapshots: [{ appliedCount: 0, model: createModel() }],
+        timeline: [],
+        publishedAt: 1,
+      },
+    });
+    oldDb.close();
+
+    const store = createIdbStore({ name, parserVersion: 1 });
+
+    expect(await store.getReplayPublication(docId, "legacy-pub")).toBeNull();
+    await store.saveReplayPublication(docId, {
+      publicationId: "fresh-pub",
+      parserVersion: 1,
+      revisions: [],
+      snapshots: [],
+      timeline: [],
+      publishedAt: 2,
+    });
+    expect(await store.getReplayPublication(docId, "fresh-pub")).not.toBeNull();
   });
 });
 

@@ -21,9 +21,13 @@ export interface StorageMaintenanceRequest {
 }
 
 export interface StorageMaintenanceResult {
-  readonly deferred: boolean;
+  readonly status: "completed" | "deferred" | "failed";
   readonly reclaimedBytes: number;
 }
+
+export type DestructiveStorageRequest =
+  | { readonly kind: "document"; readonly docId: DocId }
+  | { readonly kind: "all" };
 
 /** Refresh LRU/cache metadata using byte counts only; never reads raw content. */
 export async function refreshCacheMeta(
@@ -81,12 +85,18 @@ export async function runStorageMaintenance(
   request: StorageMaintenanceRequest,
 ): Promise<number> {
   if (request.docId === null) {
+    // Global options requests are durable retry intents, not proof that every
+    // document has a reconstructable replay publication. Keep them content-free
+    // and idempotent; successful per-document replay terminal paths perform the
+    // actual raw pruning once reconstruction is complete. For existing completed
+    // documents, the store-level all-doc helpers skip incomplete cache metadata.
     return request.keepRawData
       ? enforceStorageBudgetForAll(store, request.budget)
-      : store.deleteRawAll();
+      : enforceStorageBudgetForAll(store, { ...request.budget, perDocumentBytes: 0 });
   }
 
   let reclaimed = 0;
+  const existingMeta = await store.getCacheMeta(request.docId);
   const refreshOptions =
     request.reconstructionStatus === undefined && request.now === undefined
       ? undefined
@@ -101,9 +111,16 @@ export async function runStorageMaintenance(
     await refreshCacheMeta(store, request.docId, refreshOptions);
   }
 
-  reclaimed += request.keepRawData
-    ? await enforceStorageBudget(store, request.docId, request.budget)
-    : await store.deleteRawForDoc(request.docId);
+  const canDiscardRaw =
+    request.reconstructionStatus === "complete" ||
+    (request.reconstructionStatus === undefined &&
+      existingMeta?.reconstructionStatus === "complete");
+
+  if (canDiscardRaw) {
+    reclaimed += request.keepRawData
+      ? await enforceStorageBudget(store, request.docId, request.budget)
+      : await store.deleteRawForDoc(request.docId);
+  }
 
   if (refreshOptions !== undefined) {
     await refreshCacheMeta(store, request.docId, refreshOptions);
@@ -121,28 +138,59 @@ export async function runStorageMaintenance(
 export function createStorageMaintenanceCoordinator(store: RevisionStore) {
   const activeLeaseCounts = new Map<string, number>();
   const pending = new Map<string, StorageMaintenanceRequest>();
+  const pendingDestructive = new Map<string, DestructiveStorageRequest>();
 
   const requestKey = (request: StorageMaintenanceRequest): string => request.docId ?? "*";
-  const isBlocked = (request: StorageMaintenanceRequest): boolean =>
-    request.docId === null
-      ? activeLeaseCounts.size > 0
-      : (activeLeaseCounts.get(request.docId) ?? 0) > 0;
+  const destructiveKey = (request: DestructiveStorageRequest): string =>
+    request.kind === "all" ? "*" : request.docId;
+  const isScopeBlocked = (docId: DocId | null): boolean =>
+    docId === null ? activeLeaseCounts.size > 0 : (activeLeaseCounts.get(docId) ?? 0) > 0;
+  const isBlocked = (request: StorageMaintenanceRequest): boolean => isScopeBlocked(request.docId);
 
-  async function drainPending(): Promise<number> {
+  async function runDestructiveStorage(request: DestructiveStorageRequest): Promise<void> {
+    if (request.kind === "all") {
+      await store.deleteAll();
+      return;
+    }
+    await store.deleteDocument(request.docId);
+  }
+
+  async function drainPending(): Promise<StorageMaintenanceResult> {
     let reclaimedBytes = 0;
-    let progressed = true;
-    while (progressed) {
-      progressed = false;
-      for (const [key, request] of [...pending.entries()]) {
-        if (isBlocked(request)) {
-          continue;
-        }
-        pending.delete(key);
-        reclaimedBytes += await runStorageMaintenance(store, request);
-        progressed = true;
+    let failed = false;
+
+    for (const [key, request] of [...pendingDestructive.entries()]) {
+      const blockedScope = request.kind === "all" ? null : request.docId;
+      if (isScopeBlocked(blockedScope)) {
+        continue;
+      }
+      try {
+        await runDestructiveStorage(request);
+        pendingDestructive.delete(key);
+      } catch {
+        failed = true;
       }
     }
-    return reclaimedBytes;
+
+    for (const [key, request] of [...pending.entries()]) {
+      if (isBlocked(request)) {
+        continue;
+      }
+      try {
+        reclaimedBytes += await runStorageMaintenance(store, request);
+        pending.delete(key);
+      } catch {
+        failed = true;
+      }
+    }
+
+    if (failed) {
+      return { status: "failed", reclaimedBytes };
+    }
+    if (pending.size > 0 || pendingDestructive.size > 0) {
+      return { status: "deferred", reclaimedBytes };
+    }
+    return { status: "completed", reclaimedBytes };
   }
 
   return {
@@ -157,16 +205,36 @@ export function createStorageMaintenanceCoordinator(store: RevisionStore) {
       } else {
         activeLeaseCounts.set(docId, count - 1);
       }
-      return { deferred: false, reclaimedBytes: await drainPending() };
+      return drainPending();
     },
 
     async request(request: StorageMaintenanceRequest): Promise<StorageMaintenanceResult> {
       if (isBlocked(request)) {
         pending.set(requestKey(request), request);
-        return { deferred: true, reclaimedBytes: 0 };
+        return { status: "deferred", reclaimedBytes: 0 };
       }
-      const reclaimedBytes = await runStorageMaintenance(store, request);
-      return { deferred: false, reclaimedBytes };
+      try {
+        const reclaimedBytes = await runStorageMaintenance(store, request);
+        return { status: "completed", reclaimedBytes };
+      } catch {
+        return { status: "failed", reclaimedBytes: 0 };
+      }
+    },
+
+    async requestDestructiveClear(
+      request: DestructiveStorageRequest,
+    ): Promise<StorageMaintenanceResult> {
+      const blockedScope = request.kind === "all" ? null : request.docId;
+      if (isScopeBlocked(blockedScope)) {
+        pendingDestructive.set(destructiveKey(request), request);
+        return { status: "deferred", reclaimedBytes: 0 };
+      }
+      try {
+        await runDestructiveStorage(request);
+        return { status: "completed", reclaimedBytes: 0 };
+      } catch {
+        return { status: "failed", reclaimedBytes: 0 };
+      }
     },
   };
 }

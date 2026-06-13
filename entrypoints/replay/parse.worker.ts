@@ -36,7 +36,7 @@ type ParseResultMessage =
       readonly timeline: readonly TimelineEvent[];
     }
   | {
-      readonly kind: "unsupported" | "empty";
+      readonly kind: "unsupported" | "empty" | "failed";
       readonly docId: string;
       readonly runId: number;
       readonly revisionCount: 0;
@@ -74,7 +74,7 @@ scope.addEventListener("message", (event: MessageEvent) => {
   // Async rejections (invalid docId, store I/O) would otherwise be unhandled and
   // leave the page waiting forever; post a terminal signal instead.
   void handleParse(request).catch(() => {
-    post({ kind: "unsupported", docId: request.docId, runId: request.runId, revisionCount: 0 });
+    post({ kind: "failed", docId: request.docId, runId: request.runId, revisionCount: 0 });
   });
 });
 

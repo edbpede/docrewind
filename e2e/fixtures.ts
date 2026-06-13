@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { type BrowserContext, test as base, chromium } from "@playwright/test";
+
+const fixturesDir = path.dirname(fileURLToPath(import.meta.url));
 
 // Extension E2E is Chromium-only and requires a persistent context — extensions
 // attach to the browser process at launch, not per-tab. No specs are authored in
@@ -8,7 +11,7 @@ import { type BrowserContext, test as base, chromium } from "@playwright/test";
 export const test = base.extend<{ context: BrowserContext; extensionId: string }>({
   // biome-ignore lint/correctness/noEmptyPattern: Playwright fixtures must destructure the (here unused) deps object.
   context: async ({}, use) => {
-    const pathToExtension = path.join(__dirname, "../.output/chrome-mv3");
+    const pathToExtension = path.join(fixturesDir, "../.output/chrome-mv3");
     const context = await chromium.launchPersistentContext("", {
       channel: "chromium",
       args: [

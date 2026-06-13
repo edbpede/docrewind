@@ -15,6 +15,8 @@ export interface CacheControlsProps {
   readonly store: RevisionStore;
   /** Present when the page was opened in the context of one document. */
   readonly docId: DocId | null;
+  readonly onClearDocument: (docId: DocId) => Promise<void>;
+  readonly onClearAll: () => Promise<void>;
 }
 
 function formatMib(bytes: number): string {
@@ -28,7 +30,7 @@ const CacheControls: Component<CacheControlsProps> = (props) => {
     if (!window.confirm(strings.options.clearConfirm)) {
       return;
     }
-    await props.store.deleteDocument(docId);
+    await props.onClearDocument(docId);
     void refetch();
   }
 
@@ -36,7 +38,7 @@ const CacheControls: Component<CacheControlsProps> = (props) => {
     if (!window.confirm(strings.options.clearConfirm)) {
       return;
     }
-    await props.store.deleteAll();
+    await props.onClearAll();
     void refetch();
   }
 

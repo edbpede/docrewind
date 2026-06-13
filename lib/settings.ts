@@ -7,6 +7,7 @@
 // real default). Bulk/queryable data lives in IndexedDB (lib/db.ts), not here.
 
 import { storage } from "#imports";
+import type { CacheRecord, DocId } from "./domain/model";
 
 /** Visual theme preference. `system` follows the OS setting. */
 export type Theme = "light" | "dark" | "system";
@@ -24,6 +25,67 @@ export interface StorageBudget {
   readonly perDocumentBytes: number;
   readonly globalCapBytes: number;
 }
+
+/** Durable, content-free retry item for background-owned raw-cache maintenance. */
+export interface PendingStorageMaintenanceRequest {
+  readonly id: string;
+  readonly docId: DocId | null;
+  readonly keepRawData: boolean;
+  readonly budget: StorageBudget;
+  readonly reconstructionStatus?: CacheRecord["reconstructionStatus"];
+  readonly now?: number;
+  readonly queuedAt: number;
+}
+
+export interface PendingStorageMaintenanceInput {
+  readonly docId: DocId | null;
+  readonly keepRawData: boolean;
+  readonly budget: StorageBudget;
+  readonly reconstructionStatus?: CacheRecord["reconstructionStatus"];
+  readonly now?: number;
+  readonly queuedAt?: number;
+}
+
+export type PendingDestructiveStorageClear =
+  | {
+      readonly id: string;
+      readonly kind: "document";
+      readonly docId: DocId;
+      readonly queuedAt: number;
+    }
+  | {
+      readonly id: string;
+      readonly kind: "all";
+      readonly queuedAt: number;
+    };
+
+export type PendingDestructiveStorageClearInput =
+  | {
+      readonly kind: "document";
+      readonly docId: DocId;
+      readonly queuedAt?: number;
+    }
+  | {
+      readonly kind: "all";
+      readonly queuedAt?: number;
+    };
+
+export type PendingDocumentStorageClear = Extract<
+  PendingDestructiveStorageClear,
+  { readonly kind: "document" }
+>;
+export type PendingAllStorageClear = Extract<
+  PendingDestructiveStorageClear,
+  { readonly kind: "all" }
+>;
+export type PendingDocumentStorageClearInput = Extract<
+  PendingDestructiveStorageClearInput,
+  { readonly kind: "document" }
+>;
+export type PendingAllStorageClearInput = Extract<
+  PendingDestructiveStorageClearInput,
+  { readonly kind: "all" }
+>;
 
 const MIB = 1024 * 1024;
 
@@ -84,3 +146,112 @@ export const storageBudget = storage.defineItem<StorageBudget>("local:storageBud
 export const diagnosticsMode = storage.defineItem<DiagnosticsMode>("local:diagnosticsMode", {
   fallback: "default",
 });
+
+/** Retryable maintenance intents that must survive MV3 service-worker restarts. */
+export const pendingStorageMaintenance = storage.defineItem<
+  readonly PendingStorageMaintenanceRequest[]
+>("local:pendingStorageMaintenance", {
+  fallback: [],
+});
+
+/** Retryable destructive clear intents, persisted before the UI sends them. */
+export const pendingDestructiveStorageClears = storage.defineItem<
+  readonly PendingDestructiveStorageClear[]
+>("local:pendingDestructiveStorageClears", {
+  fallback: [],
+});
+
+function pendingMaintenanceId(input: PendingStorageMaintenanceInput): string {
+  const scope = input.docId ?? "*";
+  const status = input.reconstructionStatus ?? "policy";
+  const rawPolicy = input.keepRawData ? "keep-raw" : "discard-raw";
+  const perDoc = Math.max(0, Math.floor(input.budget.perDocumentBytes));
+  const global = Math.max(0, Math.floor(input.budget.globalCapBytes));
+  return `storage-maintenance:${scope}:${status}:${rawPolicy}:${perDoc}:${global}`;
+}
+
+export function createPendingStorageMaintenanceRequest(
+  input: PendingStorageMaintenanceInput,
+): PendingStorageMaintenanceRequest {
+  return {
+    id: pendingMaintenanceId(input),
+    docId: input.docId,
+    keepRawData: input.keepRawData,
+    budget: input.budget,
+    ...(input.reconstructionStatus === undefined
+      ? {}
+      : { reconstructionStatus: input.reconstructionStatus }),
+    ...(input.now === undefined ? {} : { now: input.now }),
+    queuedAt: input.queuedAt ?? Date.now(),
+  };
+}
+
+export async function getPendingStorageMaintenance(): Promise<
+  readonly PendingStorageMaintenanceRequest[]
+> {
+  return pendingStorageMaintenance.getValue();
+}
+
+export async function upsertPendingStorageMaintenance(
+  request: PendingStorageMaintenanceRequest,
+): Promise<void> {
+  const current = await pendingStorageMaintenance.getValue();
+  await pendingStorageMaintenance.setValue([
+    ...current.filter((item) => item.id !== request.id),
+    request,
+  ]);
+}
+
+export async function removePendingStorageMaintenance(id: string): Promise<void> {
+  const current = await pendingStorageMaintenance.getValue();
+  await pendingStorageMaintenance.setValue(current.filter((item) => item.id !== id));
+}
+
+function destructiveClearId(input: PendingDestructiveStorageClearInput): string {
+  return input.kind === "all" ? "destructive-clear:*" : `destructive-clear:document:${input.docId}`;
+}
+
+export function createPendingDestructiveStorageClear(
+  input: PendingDocumentStorageClearInput,
+): PendingDocumentStorageClear;
+export function createPendingDestructiveStorageClear(
+  input: PendingAllStorageClearInput,
+): PendingAllStorageClear;
+export function createPendingDestructiveStorageClear(
+  input: PendingDestructiveStorageClearInput,
+): PendingDestructiveStorageClear {
+  if (input.kind === "all") {
+    return {
+      id: destructiveClearId(input),
+      kind: "all",
+      queuedAt: input.queuedAt ?? Date.now(),
+    };
+  }
+  return {
+    id: destructiveClearId(input),
+    kind: "document",
+    docId: input.docId,
+    queuedAt: input.queuedAt ?? Date.now(),
+  };
+}
+
+export async function getPendingDestructiveStorageClears(): Promise<
+  readonly PendingDestructiveStorageClear[]
+> {
+  return pendingDestructiveStorageClears.getValue();
+}
+
+export async function upsertPendingDestructiveStorageClear(
+  request: PendingDestructiveStorageClear,
+): Promise<void> {
+  const current = await pendingDestructiveStorageClears.getValue();
+  await pendingDestructiveStorageClears.setValue([
+    ...current.filter((item) => item.id !== request.id),
+    request,
+  ]);
+}
+
+export async function removePendingDestructiveStorageClear(id: string): Promise<void> {
+  const current = await pendingDestructiveStorageClears.getValue();
+  await pendingDestructiveStorageClears.setValue(current.filter((item) => item.id !== id));
+}

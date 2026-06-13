@@ -16,7 +16,12 @@ import type {
   RevisionId,
 } from "./domain/model";
 import { createModel } from "./reconstruction/model";
-import type { ReplayPublication, RetrievalCheckpoint, RevisionStore, StoredSnapshot } from "./store";
+import type {
+  ReplayPublication,
+  RetrievalCheckpoint,
+  RevisionStore,
+  StoredSnapshot,
+} from "./store";
 
 /** A store plus a way to reopen the same backing data at a new parser version. */
 export interface StoreHarness {
@@ -64,14 +69,18 @@ function replayPublication(publicationId: string, revisions = [decodedRev(1)]): 
   };
 }
 
-function cacheRec(docId: DocId, lastAccessedAt: number): CacheRecord {
+function cacheRec(
+  docId: DocId,
+  lastAccessedAt: number,
+  reconstructionStatus: CacheRecord["reconstructionStatus"] = "complete",
+): CacheRecord {
   return {
     docId,
     createdAt: 0,
     lastAccessedAt,
     parserVersion: 1,
     estimatedBytes: 0,
-    reconstructionStatus: "none",
+    reconstructionStatus,
     rawRetained: true,
   };
 }
@@ -220,6 +229,33 @@ export function runRevisionStoreContract(
       expect(loaded?.revisions.map((r) => r.revisionId)).toEqual([rev(1), rev(2)]);
       expect(loaded?.snapshots.map((s) => s.appliedCount)).toEqual([0, 2]);
       expect(loaded?.timeline).toHaveLength(1);
+    });
+
+    it("keeps multiple replay publication generations for the same document isolated", async () => {
+      await store.saveReplayPublication(docA, replayPublication("pub-old", [decodedRev(1)]));
+      await store.saveReplayPublication(docA, replayPublication("pub-current", [decodedRev(2)]));
+
+      const oldPublication = await store.getReplayPublication(docA, "pub-old");
+      const currentPublication = await store.getReplayPublication(docA, "pub-current");
+
+      expect(oldPublication?.publicationId).toBe("pub-old");
+      expect(oldPublication?.revisions.map((revision) => revision.revisionId)).toEqual([rev(1)]);
+      expect(currentPublication?.publicationId).toBe("pub-current");
+      expect(currentPublication?.revisions.map((revision) => revision.revisionId)).toEqual([
+        rev(2),
+      ]);
+    });
+
+    it("prunes only stale replay publications for the scoped document", async () => {
+      await store.saveReplayPublication(docA, replayPublication("pub-old"));
+      await store.saveReplayPublication(docA, replayPublication("pub-current"));
+      await store.saveReplayPublication(docB, replayPublication("pub-other"));
+
+      await store.pruneReplayPublicationsExcept(docA, "pub-current");
+
+      expect(await store.getReplayPublication(docA, "pub-old")).toBeNull();
+      expect(await store.getReplayPublication(docA, "pub-current")).not.toBeNull();
+      expect(await store.getReplayPublication(docB, "pub-other")).not.toBeNull();
     });
 
     it("value-isolates replay publications across store boundaries", async () => {

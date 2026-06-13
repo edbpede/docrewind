@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { beforeEach, describe, expect, it } from "vitest";
-import { PARSER_VERSION } from "./decoder/version";
 import { createMemoryStore } from "./db.memory";
+import { PARSER_VERSION } from "./decoder/version";
 import { asDocId, asRevisionId } from "./domain/ids";
 import type { RawPayload } from "./domain/model";
 import {
@@ -96,9 +96,10 @@ describe("storage maintenance", () => {
       docId,
       keepRawData: false,
       budget: { perDocumentBytes: 1, globalCapBytes: 1 },
+      reconstructionStatus: "complete",
     });
 
-    expect(deferred.deferred).toBe(true);
+    expect(deferred.status).toBe("deferred");
     expect(await store.getRawChunks(docId)).toHaveLength(1);
 
     const released = await coordinator.endDecodeLease(docId);
@@ -126,11 +127,13 @@ describe("storage maintenance", () => {
       docId: rawDocId,
       keepRawData: false,
       budget: { perDocumentBytes: 1, globalCapBytes: 1 },
+      reconstructionStatus: "complete",
     });
     await coordinator.request({
       docId: rawDocId,
       keepRawData: false,
       budget: { perDocumentBytes: 1, globalCapBytes: 1 },
+      reconstructionStatus: "complete",
     });
     await coordinator.endDecodeLease(rawDocId);
 
@@ -138,11 +141,66 @@ describe("storage maintenance", () => {
     expect(await store.getRawChunks(rawDocId)).toEqual([]);
   });
 
+  it("does not discard raw data for partial reconstruction maintenance", async () => {
+    const store = createMemoryStore();
+    const docId = asDocId("maintDoc");
+    await store.saveRawChunk(raw("body"));
+
+    const coordinator = createStorageMaintenanceCoordinator(store);
+    const ack = await coordinator.request({
+      docId,
+      keepRawData: false,
+      budget: { perDocumentBytes: 1, globalCapBytes: 1 },
+      reconstructionStatus: "partial",
+    });
+
+    expect(ack.status).toBe("completed");
+    expect(await store.getRawChunks(docId)).toHaveLength(1);
+    expect((await store.getCacheMeta(docId))?.reconstructionStatus).toBe("partial");
+  });
+
+  it("global maintenance prunes only documents already marked complete", async () => {
+    const store = createMemoryStore();
+    const completeDoc = asDocId("completeMaintDoc");
+    const partialDoc = asDocId("partialMaintDoc");
+    await store.saveRawChunk({ ...raw("complete"), docId: completeDoc });
+    await store.saveRawChunk({ ...raw("partial"), docId: partialDoc });
+    await refreshCacheMeta(store, completeDoc, { now: 1, reconstructionStatus: "complete" });
+    await refreshCacheMeta(store, partialDoc, { now: 2, reconstructionStatus: "partial" });
+
+    const reclaimed = await enforceStorageBudgetForAll(store, {
+      perDocumentBytes: 0,
+      globalCapBytes: 0,
+    });
+
+    expect(reclaimed).toBeGreaterThan(0);
+    expect(await store.getRawChunks(completeDoc)).toEqual([]);
+    expect(await store.getRawChunks(partialDoc)).toHaveLength(1);
+  });
+
+  it("defers destructive document clear until the scoped lease is safe", async () => {
+    const store = createMemoryStore();
+    const coordinator = createStorageMaintenanceCoordinator(store);
+    const docId = asDocId("maintDoc");
+    await store.saveRawChunk(raw("body"));
+
+    coordinator.beginDecodeLease(docId);
+    const deferred = await coordinator.requestDestructiveClear({ kind: "document", docId });
+
+    expect(deferred.status).toBe("deferred");
+    expect(await store.getRawChunks(docId)).toHaveLength(1);
+
+    const released = await coordinator.endDecodeLease(docId);
+
+    expect(released.status).toBe("completed");
+    expect(await store.getRawChunks(docId)).toEqual([]);
+  });
+
   it("enforces per-document raw budget on the normal maintenance path", async () => {
     const store = createMemoryStore();
     const docId = asDocId("maintDoc");
     await store.saveRawChunk(raw("x".repeat(100)));
-    await refreshCacheMeta(store, docId, { now: 1 });
+    await refreshCacheMeta(store, docId, { now: 1, reconstructionStatus: "complete" });
 
     const retained = await store.estimateRawBytes(docId);
     const reclaimed = await enforceStorageBudget(store, docId, {
@@ -163,8 +221,8 @@ describe("storage maintenance", () => {
       ...raw("y".repeat(100)),
       docId: otherDoc,
     });
-    await refreshCacheMeta(store, docId, { now: 1 });
-    await refreshCacheMeta(store, otherDoc, { now: 2 });
+    await refreshCacheMeta(store, docId, { now: 1, reconstructionStatus: "complete" });
+    await refreshCacheMeta(store, otherDoc, { now: 2, reconstructionStatus: "complete" });
 
     const retained = await store.estimateRawBytes(docId);
     const reclaimed = await enforceStorageBudgetForAll(store, {

@@ -35,6 +35,8 @@ export default defineConfig({
       "lib/replay/**",
       "lib/i18n/**",
       "lib/theme.test.ts",
+      // Playwright owns assembled-extension specs under e2e/.
+      "e2e/**",
     ],
     coverage: { provider: "v8", reporter: ["text", "html"] },
   },

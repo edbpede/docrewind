@@ -15,6 +15,14 @@ import { createIdbStore } from "@/lib/db";
 import { asDocId, asRevisionId } from "@/lib/domain/ids";
 import type { RawPayload } from "@/lib/domain/model";
 import { removeAllListeners, sendMessage } from "@/lib/messaging";
+import {
+  createPendingDestructiveStorageClear,
+  createPendingStorageMaintenanceRequest,
+  getPendingDestructiveStorageClears,
+  getPendingStorageMaintenance,
+  upsertPendingDestructiveStorageClear,
+  upsertPendingStorageMaintenance,
+} from "@/lib/settings";
 
 function runBackground(): void {
   // defineBackground(fn) => { main: fn }.
@@ -142,16 +150,99 @@ describe("background retrieval wiring", () => {
       docId,
       keepRawData: false,
       budget: { perDocumentBytes: 1, globalCapBytes: 1 },
-      reconstructionStatus: "partial",
+      reconstructionStatus: "complete",
     });
 
-    expect(deferred.deferred).toBe(true);
+    expect(deferred.status).toBe("deferred");
     expect(await store.getRawChunks(docId)).toHaveLength(1);
 
     const released = await sendMessage("endDecodeLease", { docId });
 
-    expect(released.deferred).toBe(false);
+    expect(released.status).toBe("completed");
     expect(released.reclaimedBytes).toBeGreaterThan(0);
     expect(await store.getRawChunks(docId)).toEqual([]);
+  });
+
+  it("routes destructive document clear through the lease-aware background coordinator", async () => {
+    const docId = asDocId("docClearBG");
+    const store = createIdbStore();
+    await store.saveRawChunk({
+      docId,
+      range: {
+        requested: { start: asRevisionId(1), end: asRevisionId(1) },
+        received: { start: asRevisionId(1), end: asRevisionId(1) },
+      },
+      receivedAt: 0,
+      body: "raw-body",
+    } satisfies RawPayload);
+
+    runBackground();
+    await sendMessage("beginDecodeLease", { docId });
+    const deferred = await sendMessage("clearDocumentCache", { docId });
+
+    expect(deferred.status).toBe("deferred");
+    expect(await store.getRawChunks(docId)).toHaveLength(1);
+
+    const released = await sendMessage("endDecodeLease", { docId });
+
+    expect(released.status).toBe("completed");
+    expect(await store.getRawChunks(docId)).toEqual([]);
+    expect(await store.readCheckpoint(docId)).toBeNull();
+  });
+
+  it("drains persisted pending maintenance on background startup", async () => {
+    const docId = asDocId("docPendingBG");
+    const store = createIdbStore();
+    await store.saveRawChunk({
+      docId,
+      range: {
+        requested: { start: asRevisionId(1), end: asRevisionId(1) },
+        received: { start: asRevisionId(1), end: asRevisionId(1) },
+      },
+      receivedAt: 0,
+      body: "raw-body",
+    } satisfies RawPayload);
+    const request = createPendingStorageMaintenanceRequest({
+      docId,
+      keepRawData: false,
+      budget: { perDocumentBytes: 1, globalCapBytes: 1 },
+      reconstructionStatus: "complete",
+      queuedAt: 1,
+    });
+    await upsertPendingStorageMaintenance(request);
+
+    runBackground();
+
+    await vi.waitFor(async () => {
+      expect(await store.getRawChunks(docId)).toEqual([]);
+      expect(await getPendingStorageMaintenance()).toEqual([]);
+    });
+  });
+
+  it("drains persisted destructive clear requests on background startup", async () => {
+    const docId = asDocId("docPendingClearBG");
+    const store = createIdbStore();
+    await store.saveRawChunk({
+      docId,
+      range: {
+        requested: { start: asRevisionId(1), end: asRevisionId(1) },
+        received: { start: asRevisionId(1), end: asRevisionId(1) },
+      },
+      receivedAt: 0,
+      body: "raw-body",
+    } satisfies RawPayload);
+    const request = createPendingDestructiveStorageClear({
+      kind: "document",
+      docId,
+      queuedAt: 1,
+    });
+    await upsertPendingDestructiveStorageClear(request);
+
+    runBackground();
+
+    await vi.waitFor(async () => {
+      expect(await store.getRawChunks(docId)).toEqual([]);
+      expect(await getPendingDestructiveStorageClears()).toEqual([]);
+    });
   });
 });

@@ -38,13 +38,22 @@ import { sendMessage } from "@/lib/messaging";
 import { segmentsAt } from "@/lib/reconstruction/render";
 import { modelAtRevisionIndex } from "@/lib/reconstruction/snapshot";
 import {
+  type DecodeOutcome,
   loadReplayData,
   publishDerivedData,
+  type ReplayData,
   type ReplayDerivedData,
   runPipelineSameThread,
 } from "@/lib/replay/load";
 import { type RetrievalErrorCategory, retrievalError } from "@/lib/retrieval/errors";
-import { keepRawData, realIdentities, storageBudget } from "@/lib/settings";
+import {
+  createPendingStorageMaintenanceRequest,
+  keepRawData,
+  realIdentities,
+  removePendingStorageMaintenance,
+  storageBudget,
+  upsertPendingStorageMaintenance,
+} from "@/lib/settings";
 import type { RevisionStore } from "@/lib/store";
 
 export interface ReplayAppProps {
@@ -62,7 +71,7 @@ type WorkerDecodeMessage =
       readonly revisionCount: number;
     } & ReplayDerivedData)
   | {
-      readonly kind: "unsupported" | "empty";
+      readonly kind: "unsupported" | "empty" | "failed";
       readonly docId: string;
       readonly runId: number;
       readonly revisionCount: 0;
@@ -73,6 +82,7 @@ type WorkerDecodeMessage =
 const POLL_MS = 750;
 const STALL_POLLS = 16; // ~12s with no checkpoint advance
 const NO_CHECKPOINT_MS = 20_000; // no first checkpoint at all
+const RUN_TIMEOUT_MS = 45_000; // total wall-clock bound for one retrieval attempt
 const TICK_MS = 120; // playback frame budget (throttled)
 const TICK_MS_REDUCED = 320; // calmer cadence under reduced motion
 let pageSessionSequence = 0;
@@ -86,12 +96,15 @@ function createPageSessionId(): string {
 }
 
 /** Parse `?u=` strictly — never `Number("")` (which yields a valid-looking 0). */
-function parseUserIndex(raw: string | null): number | null {
+export function parseUserIndex(raw: string | null): number | null {
   if (raw === null || raw === "") {
     return null;
   }
-  const parsed = Number.parseInt(raw, 10);
-  return Number.isInteger(parsed) ? parsed : null;
+  if (!/^(0|[1-9]\d*)$/.test(raw)) {
+    return null;
+  }
+  const parsed = Number(raw);
+  return Number.isSafeInteger(parsed) ? parsed : null;
 }
 
 /** Determinate progress percent from the checkpoint, clamped to [0, 100]. */
@@ -122,7 +135,11 @@ function isWorkerDecodeMessage(value: unknown): value is WorkerDecodeMessage {
   ) {
     return false;
   }
-  if (candidate.kind === "empty" || candidate.kind === "unsupported") {
+  if (
+    candidate.kind === "empty" ||
+    candidate.kind === "unsupported" ||
+    candidate.kind === "failed"
+  ) {
     return candidate.revisionCount === 0;
   }
   return (
@@ -210,6 +227,8 @@ const MessageCard: Component<{
   </main>
 );
 
+type NonReplayState = "empty" | "unsupported" | "failed" | "missing-publication";
+
 /** The active replay surface for a validated document. */
 const ReplaySurface: Component<{
   readonly docId: DocId;
@@ -226,6 +245,7 @@ const ReplaySurface: Component<{
   const [phase, setPhase] = createSignal<ProgressPhase>("discovering");
   const [pct, setPct] = createSignal(0);
   const [errorCategory, setErrorCategory] = createSignal<RetrievalErrorCategory | null>(null);
+  const [nonReplayState, setNonReplayState] = createSignal<NonReplayState | null>(null);
   const [retrievalDoneRunId, setRetrievalDoneRunId] = createSignal<number | null>(null);
 
   const [prefersReducedMotion, setPrefersReducedMotion] = createSignal(false);
@@ -243,15 +263,36 @@ const ReplaySurface: Component<{
         ? undefined
         : { docId: props.docId, runId, publicationId: publicationIdForRun(runId) };
     },
-    async ({ docId, runId, publicationId }) => {
-      let published = false;
+    async ({ docId, runId, publicationId }): Promise<ReplayData | undefined> => {
+      let reconstructionStatus: "partial" | "complete" = "partial";
       try {
-        published = await decode(docId, runId, publicationId);
-        const data = await loadReplayData(props.store, docId, publicationId);
-        return data;
+        const outcome = await decode(docId, runId, publicationId);
+        if (outcome.kind !== "published") {
+          if (outcome.kind !== "stale" && isActiveRun(runId)) {
+            setNonReplayState(outcome.kind);
+          }
+          return undefined;
+        }
+        const result = await loadReplayData(props.store, docId, publicationId);
+        if (result.kind !== "ok") {
+          if (isActiveRun(runId)) {
+            setNonReplayState("missing-publication");
+          }
+          return undefined;
+        }
+        if (isActiveRun(runId)) {
+          await props.store.pruneReplayPublicationsExcept(docId, publicationId).catch(() => {});
+        }
+        reconstructionStatus = "complete";
+        return result.data;
+      } catch {
+        if (isActiveRun(runId)) {
+          setNonReplayState("failed");
+        }
+        return undefined;
       } finally {
         if (isActiveRun(runId)) {
-          await finishRunMaintenance(runId, published ? "complete" : "partial");
+          await finishRunMaintenance(runId, reconstructionStatus);
         }
       }
     },
@@ -302,12 +343,22 @@ const ReplaySurface: Component<{
       keepRawData.getValue(),
       storageBudget.getValue(),
     ]);
-    await sendMessage("requestStorageMaintenance", {
+    const request = createPendingStorageMaintenanceRequest({
       docId: props.docId,
       keepRawData: retainRaw,
       budget,
       reconstructionStatus,
-    }).catch(() => {});
+    });
+    await upsertPendingStorageMaintenance(request);
+    try {
+      const ack = await sendMessage("requestStorageMaintenance", request);
+      if (ack.status === "completed") {
+        await removePendingStorageMaintenance(request.id);
+      }
+    } catch {
+      // Durable pending state was written before send; background startup or a
+      // later lease release will retry this content-free maintenance request.
+    }
   }
 
   async function finishRunMaintenance(
@@ -318,7 +369,11 @@ const ReplaySurface: Component<{
     await releasePageLease(runId);
   }
 
-  async function decode(docId: DocId, runId: number, publicationId: string): Promise<boolean> {
+  async function decode(
+    docId: DocId,
+    runId: number,
+    publicationId: string,
+  ): Promise<DecodeOutcome> {
     if (props.useWorker && typeof Worker !== "undefined") {
       return decodeInWorker(docId, runId, publicationId);
     }
@@ -328,8 +383,12 @@ const ReplaySurface: Component<{
     });
   }
 
-  function decodeInWorker(docId: DocId, runId: number, publicationId: string): Promise<boolean> {
-    return new Promise<boolean>((resolve, reject) => {
+  function decodeInWorker(
+    docId: DocId,
+    runId: number,
+    publicationId: string,
+  ): Promise<DecodeOutcome> {
+    return new Promise<DecodeOutcome>((resolve) => {
       const localWorker = new Worker(new URL("./parse.worker.ts", import.meta.url), {
         type: "module",
       });
@@ -343,19 +402,24 @@ const ReplaySurface: Component<{
         localWorker.terminate();
         const message: unknown = event.data;
         if (!isWorkerDecodeMessage(message) || message.docId !== docId || message.runId !== runId) {
-          resolve(false);
+          resolve(isActiveRun(runId) ? { kind: "failed" } : { kind: "stale" });
           return;
         }
         if (!isActiveRun(runId) || message.kind !== "done") {
-          resolve(false);
+          resolve(message.kind === "done" ? { kind: "stale" } : { kind: message.kind });
           return;
         }
         publishDerivedData(props.store, docId, message, {
           publicationId,
           shouldPublish: () => isActiveRun(runId),
         }).then(
-          (published) => resolve(published),
-          reject,
+          (published) =>
+            resolve(
+              published
+                ? { kind: "published", revisionCount: message.revisionCount }
+                : { kind: "stale" },
+            ),
+          () => resolve({ kind: "failed" }),
         );
       });
       localWorker.addEventListener("error", (event) => {
@@ -363,7 +427,8 @@ const ReplaySurface: Component<{
           worker = undefined;
         }
         localWorker.terminate();
-        reject(event.error ?? new Error("parse worker failed"));
+        void event.error;
+        resolve({ kind: "failed" });
       });
       localWorker.postMessage({ docId, runId });
     });
@@ -387,14 +452,37 @@ const ReplaySurface: Component<{
 
   // ── Retrieval flow: fire start, poll the checkpoint, detect stalls ──────────
   let pollTimer: ReturnType<typeof setInterval> | undefined;
+  let runTimeoutTimer: ReturnType<typeof setTimeout> | undefined;
 
-  function stopPolling(runId?: number): void {
-    if ((runId === undefined || isActiveRun(runId)) && pollTimer !== undefined) {
+  function stopRunTimers(runId?: number): void {
+    if (runId !== undefined && !isActiveRun(runId)) {
+      return;
+    }
+    if (pollTimer !== undefined) {
       clearInterval(pollTimer);
       pollTimer = undefined;
     }
+    if (runTimeoutTimer !== undefined) {
+      clearTimeout(runTimeoutTimer);
+      runTimeoutTimer = undefined;
+    }
   }
-  onCleanup(stopPolling);
+  onCleanup(stopRunTimers);
+
+  function failRun(runId: number, category: RetrievalErrorCategory): void {
+    if (!isActiveRun(runId)) {
+      return;
+    }
+    setErrorCategory(category);
+    setPhase("error");
+    stopRunTimers(runId);
+    activeRunId = ++nextRunId;
+    worker?.terminate();
+    worker = undefined;
+    setRetrievalDoneRunId(null);
+    mutateLoaded(undefined);
+    void finishRunMaintenance(runId, "partial");
+  }
 
   function startFlow(): void {
     if (activeRunId !== 0) {
@@ -409,6 +497,7 @@ const ReplaySurface: Component<{
     setPhase("discovering");
     setPct(0);
     setErrorCategory(null);
+    setNonReplayState(null);
     setRetrievalDoneRunId(null);
     mutateLoaded(undefined);
 
@@ -421,16 +510,13 @@ const ReplaySurface: Component<{
           return;
         }
         if (!ack.ok) {
-          setErrorCategory(ack.error.category);
-          setPhase("error");
-          stopPolling(runId);
-          void finishRunMaintenance(runId, "partial");
+          failRun(runId, ack.error.category);
           return;
         }
         setPct(100);
         setPhase("fetching");
         setRetrievalDoneRunId(runId);
-        stopPolling(runId);
+        stopRunTimers(runId);
       })
       .catch(() => {
         // SW restarting / page navigating: the poll + stall detection surface it.
@@ -439,49 +525,60 @@ const ReplaySurface: Component<{
     const startedAt = Date.now();
     let lastNextStart = -1;
     let stallCount = 0;
+    let pollInFlight = false;
 
-    stopPolling();
+    stopRunTimers();
+    runTimeoutTimer = setTimeout(() => {
+      if (!isActiveRun(runId)) {
+        return;
+      }
+      failRun(runId, "endpoint-unavailable");
+    }, RUN_TIMEOUT_MS);
     pollTimer = setInterval(() => {
+      if (pollInFlight) {
+        return;
+      }
+      pollInFlight = true;
       void (async () => {
-        if (!isActiveRun(runId)) {
-          return;
-        }
-        const checkpoint = await props.store.readCheckpoint(props.docId);
-        if (!isActiveRun(runId)) {
-          return;
-        }
-        if (checkpoint === null) {
-          if (Date.now() - startedAt > NO_CHECKPOINT_MS) {
-            setErrorCategory("endpoint-unavailable");
-            setPhase("error");
-            stopPolling(runId);
-            void finishRunMaintenance(runId, "partial");
+        try {
+          if (!isActiveRun(runId)) {
+            return;
           }
-          return;
-        }
-
-        const next = Number(checkpoint.nextStart);
-
-        if (checkpoint.completed) {
-          // Checkpoints are durable resume state, not a page-run proof. A stale
-          // completion from an older run must not decode or stop polling; the
-          // current `startRetrieval` ack above is the authoritative terminal.
-          return;
-        }
-
-        setPct(checkpointPct(next, Number(checkpoint.upperBound)));
-        setPhase("fetching");
-        if (next === lastNextStart) {
-          stallCount += 1;
-          if (stallCount >= STALL_POLLS) {
-            setErrorCategory("network-failure");
-            setPhase("error");
-            stopPolling(runId);
-            void finishRunMaintenance(runId, "partial");
+          const checkpoint = await props.store.readCheckpoint(props.docId);
+          if (!isActiveRun(runId)) {
+            return;
           }
-        } else {
-          stallCount = 0;
-          lastNextStart = next;
+          if (checkpoint === null) {
+            if (Date.now() - startedAt > NO_CHECKPOINT_MS) {
+              failRun(runId, "endpoint-unavailable");
+            }
+            return;
+          }
+
+          const next = Number(checkpoint.nextStart);
+
+          if (checkpoint.completed) {
+            // Checkpoints are durable resume state, not a page-run proof. A stale
+            // completion from an older run must not decode or stop polling; the
+            // current `startRetrieval` ack above is the authoritative terminal.
+            return;
+          }
+
+          setPct(checkpointPct(next, Number(checkpoint.upperBound)));
+          setPhase("fetching");
+          if (next === lastNextStart) {
+            stallCount += 1;
+            if (stallCount >= STALL_POLLS) {
+              failRun(runId, "network-failure");
+            }
+          } else {
+            stallCount = 0;
+            lastNextStart = next;
+          }
+        } catch {
+          failRun(runId, "network-failure");
+        } finally {
+          pollInFlight = false;
         }
       })();
     }, POLL_MS);
@@ -499,7 +596,7 @@ const ReplaySurface: Component<{
     worker = undefined;
     void sendMessage("cancelRetrieval", { docId: props.docId }).catch(() => {});
     void finishRunMaintenance(cancelledRunId, "partial");
-    stopPolling();
+    stopRunTimers();
     setRetrievalDoneRunId(null);
     mutateLoaded(undefined);
     setErrorCategory("cancellation");
@@ -569,6 +666,26 @@ const ReplaySurface: Component<{
     );
   }
 
+  function renderNonReplay(state: NonReplayState) {
+    const category: RetrievalErrorCategory =
+      state === "unsupported" ? "unsupported-format" : "reconstruction-failure";
+    const error = retrievalError(category);
+    return (
+      <MessageCard
+        title={
+          state === "empty"
+            ? strings.app.emptyReplayTitle
+            : state === "missing-publication"
+              ? strings.app.loadFailed
+              : errorTitle(category)
+        }
+        body={state === "empty" ? strings.app.emptyReplayHint : error.userMessage}
+        actionLabel={strings.progress.retry}
+        onAction={onRetry}
+      />
+    );
+  }
+
   return (
     <div class="dr-page">
       <ErrorBoundary
@@ -581,47 +698,54 @@ const ReplaySurface: Component<{
           />
         )}
       >
-        <Suspense fallback={renderProgress()}>
-          <Show when={loaded()} fallback={renderProgress()}>
-            {(data) => (
-              <main class="mx-auto flex max-w-3xl flex-col gap-4 p-6">
-                <header>
-                  <PrivacyBanner approximationNote={strings.privacy.approximationNote} />
-                </header>
-                <PlaybackControls
-                  playing={playing()}
-                  speed={speed()}
-                  onPlayPause={onPlayPause}
-                  onRestart={() => {
-                    setPlaying(false);
-                    setCurrentIndex(0);
-                  }}
-                  onSpeed={(value) => setSpeed(value)}
-                />
-                <Timeline
-                  currentIndex={currentIndex()}
-                  max={maxIndex()}
-                  events={markers()}
-                  onScrub={(index) => setCurrentIndex(index)}
-                />
-                <SummaryInsights
-                  revisions={data().revisions}
-                  timeline={data().timeline}
-                  realIdentities={showRealIdentities() ?? false}
-                />
-                <DocumentViewport segments={currentSegments()} />
-                <footer class="pt-2 text-sm">
-                  <a
-                    class="text-revision underline"
-                    href={`options.html?doc=${encodeURIComponent(props.docId)}`}
-                  >
-                    {strings.app.optionsLink}
-                  </a>
-                </footer>
-              </main>
-            )}
-          </Show>
-        </Suspense>
+        <Show
+          when={nonReplayState()}
+          fallback={
+            <Suspense fallback={renderProgress()}>
+              <Show when={loaded()} fallback={renderProgress()}>
+                {(data) => (
+                  <main class="mx-auto flex max-w-3xl flex-col gap-4 p-6">
+                    <header>
+                      <PrivacyBanner approximationNote={strings.privacy.approximationNote} />
+                    </header>
+                    <PlaybackControls
+                      playing={playing()}
+                      speed={speed()}
+                      onPlayPause={onPlayPause}
+                      onRestart={() => {
+                        setPlaying(false);
+                        setCurrentIndex(0);
+                      }}
+                      onSpeed={(value) => setSpeed(value)}
+                    />
+                    <Timeline
+                      currentIndex={currentIndex()}
+                      max={maxIndex()}
+                      events={markers()}
+                      onScrub={(index) => setCurrentIndex(index)}
+                    />
+                    <SummaryInsights
+                      revisions={data().revisions}
+                      timeline={data().timeline}
+                      realIdentities={showRealIdentities() ?? false}
+                    />
+                    <DocumentViewport segments={currentSegments()} />
+                    <footer class="pt-2 text-sm">
+                      <a
+                        class="text-revision underline"
+                        href={`options.html?doc=${encodeURIComponent(props.docId)}`}
+                      >
+                        {strings.app.optionsLink}
+                      </a>
+                    </footer>
+                  </main>
+                )}
+              </Show>
+            </Suspense>
+          }
+        >
+          {(state) => renderNonReplay(state())}
+        </Show>
       </ErrorBoundary>
     </div>
   );

@@ -50,6 +50,8 @@ export const strings = {
     optionsLink: "Settings & privacy",
     loadFailed: "Couldn't load this replay",
     loadFailedHint: "Reload the document tab and activate DocRewind again.",
+    emptyReplayTitle: "No replay data",
+    emptyReplayHint: "DocRewind did not find any revision chunks to reconstruct.",
   },
   privacy: {
     bannerTitle: "This is a reconstruction, not the live document.",
@@ -101,6 +103,8 @@ export const strings = {
     clearCurrent: "Clear this document",
     clearAll: "Clear all documents",
     clearConfirm: "This permanently deletes the cached history. Continue?",
+    maintenancePending: "Storage cleanup is pending and will retry automatically.",
+    maintenanceFailed: "Storage cleanup could not be confirmed and will retry automatically.",
     usageUnknown: "Storage usage is unavailable.",
     diagnosticsHeading: "Diagnostics",
     diagnosticsBody: "Choose how much structural detail DocRewind records while decoding.",

@@ -33,6 +33,12 @@ import { buildRevisionsLoadUrl } from "@/lib/protocol/endpoints";
 import { fail, ok, type Result, type RetrievalError, retrievalError } from "@/lib/retrieval/errors";
 import { type CancellationToken, runRetrieval } from "@/lib/retrieval/orchestrator";
 import type { ChunkFetcher, ChunkRequest } from "@/lib/retrieval/transport";
+import {
+  getPendingDestructiveStorageClears,
+  getPendingStorageMaintenance,
+  removePendingDestructiveStorageClear,
+  removePendingStorageMaintenance,
+} from "@/lib/settings";
 import { createStorageMaintenanceCoordinator, refreshCacheMeta } from "@/lib/storage-maintenance";
 
 export default defineBackground(() => {
@@ -46,6 +52,46 @@ export default defineBackground(() => {
   // and stops — preventing two concurrent runs from racing the IDB store when
   // MV3 dispatches overlapping messages (handlers are not serialized).
   const runEpochByDoc = new Map<string, number>();
+
+  const cancelDocumentRun = (docId: DocId): void => {
+    cancelledDocs.add(docId);
+    runEpochByDoc.set(docId, (runEpochByDoc.get(docId) ?? 0) + 1);
+  };
+
+  const cancelAllDocumentRuns = (): void => {
+    for (const docId of runEpochByDoc.keys()) {
+      cancelDocumentRun(docId as DocId);
+    }
+  };
+
+  async function requestDestructiveClear(
+    request: { readonly kind: "document"; readonly docId: DocId } | { readonly kind: "all" },
+  ) {
+    if (request.kind === "all") {
+      cancelAllDocumentRuns();
+      return maintenance.requestDestructiveClear({ kind: "all" });
+    }
+    cancelDocumentRun(request.docId);
+    return maintenance.requestDestructiveClear({ kind: "document", docId: request.docId });
+  }
+
+  async function drainPersistedRequests(): Promise<void> {
+    for (const request of await getPendingDestructiveStorageClears()) {
+      const ack = await requestDestructiveClear(request);
+      if (ack.status === "completed") {
+        await removePendingDestructiveStorageClear(request.id);
+      }
+    }
+
+    for (const request of await getPendingStorageMaintenance()) {
+      const ack = await maintenance.request(request);
+      if (ack.status === "completed") {
+        await removePendingStorageMaintenance(request.id);
+      }
+    }
+  }
+
+  void drainPersistedRequests();
 
   // ── LIVE §24 transport adapters ──────────────────────────────────────────
   const DOCS_ORIGIN = "https://docs.google.com";
@@ -219,19 +265,44 @@ export default defineBackground(() => {
   });
 
   onMessage("cancelRetrieval", ({ data }) => {
-    cancelledDocs.add(data.docId);
     // Bump the epoch too: a later `startRetrieval` clears `cancelledDocs`, but
     // the in-flight run is pinned to its own epoch and still observes the bump.
-    runEpochByDoc.set(data.docId, (runEpochByDoc.get(data.docId) ?? 0) + 1);
+    cancelDocumentRun(data.docId);
   });
 
   onMessage("beginDecodeLease", ({ data }) => {
     maintenance.beginDecodeLease(data.docId);
   });
 
-  onMessage("endDecodeLease", ({ data }) => maintenance.endDecodeLease(data.docId));
+  onMessage("endDecodeLease", async ({ data }) => {
+    const ack = await maintenance.endDecodeLease(data.docId);
+    await drainPersistedRequests();
+    return ack;
+  });
 
-  onMessage("requestStorageMaintenance", ({ data }) => maintenance.request(data));
+  onMessage("requestStorageMaintenance", async ({ data }) => {
+    const ack = await maintenance.request(data);
+    if (ack.status === "completed" && data.id !== undefined) {
+      await removePendingStorageMaintenance(data.id);
+    }
+    return ack;
+  });
+
+  onMessage("clearDocumentCache", async ({ data }) => {
+    const ack = await requestDestructiveClear({ kind: "document", docId: data.docId });
+    if (ack.status === "completed" && data.id !== undefined) {
+      await removePendingDestructiveStorageClear(data.id);
+    }
+    return ack;
+  });
+
+  onMessage("clearAllCaches", async ({ data }) => {
+    const ack = await requestDestructiveClear({ kind: "all" });
+    if (ack.status === "completed" && data.id !== undefined) {
+      await removePendingDestructiveStorageClear(data.id);
+    }
+    return ack;
+  });
 
   onMessage("startRetrieval", async ({ data }) => {
     // Best-effort in-memory raw lease. MV3 may restart this service worker and
