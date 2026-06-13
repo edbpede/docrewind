@@ -159,11 +159,15 @@ anchor_filter() {
 
 # --- gate B part 2: build the single-review payload --------------------------
 build_payload() {
-  jq --arg commit "${HEAD_SHA:-}" --arg marker "$MARKER" '
-    {
+  jq --arg commit "${HEAD_SHA:-}" --arg marker "$MARKER" \
+     --arg empty "No concerns found in the changed lines." '
+    # The summary is ALWAYS posted, so guarantee a non-empty body: fall back to a
+    # neutral "no concerns" note when the model returns a blank/whitespace summary.
+    ( (.summary // "") | gsub("^\\s+|\\s+$"; "") ) as $s
+    | {
       commit_id: $commit,
       event: "COMMENT",
-      body: ($marker + "\n\n" + (.summary // "")),
+      body: ($marker + "\n\n" + (if $s == "" then $empty else $s end)),
       comments: ( (.comments // []) | map(
           { path, line, side, body }
           + ( if has("start_line") then { start_line } else {} end )
@@ -235,12 +239,13 @@ main() {
   anchor_filter
   build_payload
 
-  spr=$(jq -r '.should_post_review' "$REVIEW_JSON" 2>/dev/null || echo "true")
+  # Always post one COMMENT review: the summary body plus any high-confidence
+  # inline comments that survived the anchor filter. The model's
+  # should_post_review flag is intentionally ignored — every PR gets a short
+  # summary so it is always visible that the reviewer ran. build_payload
+  # guarantees a non-empty body even when the model returns no findings.
   ncomments=$(jq '.comments | length' "$PAYLOAD" 2>/dev/null || echo 0)
-  if [ "$spr" = "false" ] && [ "${ncomments:-0}" -eq 0 ]; then
-    log "should_post_review=false and no comments survived — skipping post (valid no-op)"
-    return 0
-  fi
+  log "posting review (inline comments=${ncomments:-0})"
 
   [ "$SKIP_POST" = "1" ] && { log "SKIP_POST set; payload at $PAYLOAD"; return 0; }
   post_review

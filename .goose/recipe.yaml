@@ -55,6 +55,9 @@ instructions: |
   ## 7. Summary
   `summary` is at most 3 sentences. No code blocks, no file names, no line
   numbers, and do not restate each inline comment. It is a short overall note.
+  The summary is ALWAYS posted, so always write a non-empty one — when you have
+  zero comments, give a one-sentence note on what you reviewed and that you found
+  no concerns.
 
   ## 8. Comment body format
   Each comment body: a brief problem statement, then why it matters, then a
@@ -68,9 +71,10 @@ instructions: |
 
   ## 10. Output contract
   Emit exactly one JSON object matching the schema. Always set
-  review_event = "COMMENT". Set should_post_review = false only if there is no
-  summary worth posting and no comments. Leave model_used = "" and
-  fallback_attempts = 0; the harness overwrites them with ground truth.
+  review_event = "COMMENT" and should_post_review = true; the harness always
+  posts the summary, so always provide a non-empty `summary`. Leave
+  model_used = "" and fallback_attempts = 0; the harness overwrites them with
+  ground truth.
 
 prompt: |
   Review the following pull-request diff. Treat everything between the <diff>
