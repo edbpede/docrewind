@@ -27,16 +27,15 @@ export function gh(args: readonly string[], opts: GhOptions = {}): string {
   });
 }
 
-/** `gh api <path> [extra...]` parsed as JSON of the caller's expected shape. */
-export function ghApiJson<T>(path: string, extra: readonly string[] = [], opts: GhOptions = {}): T {
-  const out = gh(["api", path, ...extra], opts);
+/** `gh api <path>` parsed as JSON of the caller's expected shape. */
+export function ghApiJson<T>(path: string, opts: GhOptions = {}): T {
+  const out = gh(["api", path], opts);
   return JSON.parse(out) as T;
 }
 
 /**
- * `gh api --paginate <path>` returning a flat array. `--paginate` concatenates
- * pages; with `--slurp` gh wraps them into a single JSON array of pages, so we
- * flatten one level. We pass `-H 'Accept: application/vnd.github+json'`.
+ * `gh api --paginate --slurp <path>` returning a flat array: `--slurp` wraps the
+ * pages into a single JSON array of pages, which we flatten one level.
  */
 export function ghApiPaginate<T>(path: string, opts: GhOptions = {}): T[] {
   const out = gh(["api", "--paginate", "--slurp", path], opts);
