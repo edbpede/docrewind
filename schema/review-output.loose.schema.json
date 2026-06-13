@@ -1,0 +1,141 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://docrewind/schema/review-output.loose.schema.json",
+  "title": "PR review output (loose — Goose recipe + ajv validator)",
+  "description": "Single source of truth for the reviewer's structured output. build-schemas.ts derives a loose variant (drives Goose response.json_schema + the ajv validator) and a strict variant (drives the NanoGPT-direct response_format). Do not hand-edit the derived files — edit this base and re-run build-schemas.ts.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "summary",
+    "should_post_review",
+    "review_event",
+    "comments",
+    "dropped_or_uncertain_findings"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "summary": {
+      "type": "string",
+      "maxLength": 600,
+      "description": "<=3 sentences. No code blocks, no file/line refs. Does not repeat inline comments."
+    },
+    "should_post_review": {
+      "type": "boolean"
+    },
+    "review_event": {
+      "type": "string",
+      "const": "COMMENT",
+      "description": "Schema-level prevention of APPROVE/REQUEST_CHANGES. The poster also enforces this."
+    },
+    "comments": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "line",
+          "side",
+          "body",
+          "severity",
+          "category",
+          "confidence",
+          "rationale"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "line": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "side": {
+            "type": "string",
+            "enum": ["LEFT", "RIGHT"]
+          },
+          "start_line": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "start_side": {
+            "type": "string",
+            "enum": ["LEFT", "RIGHT"]
+          },
+          "body": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          },
+          "severity": {
+            "type": "string",
+            "enum": ["low", "medium", "high", "critical"]
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "bug",
+              "security",
+              "data_loss",
+              "concurrency",
+              "api_misuse",
+              "edge_case",
+              "confusing_behavior",
+              "doc_inconsistency"
+            ]
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "rationale": {
+            "type": "string",
+            "maxLength": 1000,
+            "description": "Why this is high-confidence; not shown to users."
+          },
+          "dedupe_key": {
+            "type": "string",
+            "description": "ADVISORY ONLY. The authoritative dedupe key is computed deterministically in lib/dedupe.ts from path + anchored line + normalized body fingerprint; the model's value is ignored (it is unstable across the model-fallback ladder)."
+          }
+        }
+      }
+    },
+    "dropped_or_uncertain_findings": {
+      "type": "array",
+      "maxItems": 30,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "reason"],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "line": {
+            "type": "integer"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500
+          }
+        }
+      }
+    },
+    "model_used": {
+      "type": "string",
+      "description": "Filled by the model; overwritten by the wrapper (authoritative)."
+    },
+    "fallback_attempts": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Advisory; the wrapper records truth separately."
+    }
+  }
+}

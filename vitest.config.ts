@@ -31,6 +31,10 @@ export default defineConfig({
       "lib/retrieval/**",
       "lib/worker/**",
       "lib/docs-url/**",
+      // The PR-review CI tooling (scripts/pr-review/**) is pure Node/Bun logic
+      // that imports `bun:test`, which Vitest cannot resolve. It runs under Bun
+      // via `test:pr-review`. Keep it out of the Vitest glob.
+      "scripts/**",
     ],
     coverage: { provider: "v8", reporter: ["text", "html"] },
   },
