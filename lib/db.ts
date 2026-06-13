@@ -97,7 +97,7 @@ export function isQuotaExceededError(err: unknown): boolean {
 }
 
 /** Best-effort byte size of a raw chunk's opaque body (length only, never content). */
-function estimateRawBytes(payload: RawPayload): number {
+function estimatePayloadBytes(payload: RawPayload): number {
   try {
     const serialized = JSON.stringify(payload.body);
     return typeof serialized === "string" ? serialized.length : 0;
@@ -160,7 +160,7 @@ export function createIdbStore(options: IdbStoreOptions = {}): RevisionStore {
     const meta = await d.get("cacheMeta", docId);
     if (meta === undefined) return;
     // Raw was discarded — mark for re-fetch (PRD §9.8).
-    await d.put("cacheMeta", { ...meta, rawRetained: false });
+    await d.put("cacheMeta", { ...meta, estimatedBytes: 0, rawRetained: false });
   }
 
   async function saveRawChunk(chunk: RawPayload): Promise<void> {
@@ -191,6 +191,12 @@ export function createIdbStore(options: IdbStoreOptions = {}): RevisionStore {
       .slice()
       .sort((a, b) => a.start - b.start || a.end - b.end)
       .map((r) => r.payload);
+  }
+
+  async function estimateRawBytes(docId: DocId): Promise<number> {
+    const d = await db();
+    const records = await d.getAllFromIndex("rawChunks", "by-doc", docId);
+    return records.reduce((total, record) => total + estimatePayloadBytes(record.payload), 0);
   }
 
   async function saveDecoded(docId: DocId, revisions: readonly DecodedRevision[]): Promise<void> {
@@ -264,10 +270,50 @@ export function createIdbStore(options: IdbStoreOptions = {}): RevisionStore {
     let reclaimed = 0;
     const tx = d.transaction("rawChunks", "readwrite");
     for (const r of records) {
-      reclaimed += estimateRawBytes(r.payload);
+      reclaimed += estimatePayloadBytes(r.payload);
       await tx.store.delete([r.docId, r.start, r.end]);
     }
     await tx.done;
+    if (reclaimed > 0) {
+      await flagRawDiscarded(docId);
+    }
+    return reclaimed;
+  }
+
+  async function deleteRawAll(): Promise<number> {
+    const d = await db();
+    const records = await d.getAll("rawChunks");
+    const reclaimed = records.reduce(
+      (total, record) => total + estimatePayloadBytes(record.payload),
+      0,
+    );
+    const tx = d.transaction(["rawChunks", "cacheMeta"], "readwrite");
+    const raw = tx.objectStore("rawChunks");
+    const metaStore = tx.objectStore("cacheMeta");
+    await raw.clear();
+    const metas = await metaStore.getAll();
+    await Promise.all(
+      metas.map((meta) => metaStore.put({ ...meta, estimatedBytes: 0, rawRetained: false })),
+    );
+    await tx.done;
+    return reclaimed;
+  }
+
+  async function pruneRawToCap(docId: DocId, capBytes: number): Promise<number> {
+    const target = Math.max(0, Math.floor(capBytes));
+    const retained = await estimateRawBytes(docId);
+    return retained > target ? deleteRawForDoc(docId) : 0;
+  }
+
+  async function pruneRawToCapAll(capBytes: number): Promise<number> {
+    const d = await db();
+    const rawDocs = (await d.getAll("rawChunks")).map((record) => record.docId);
+    const metaDocs = (await d.getAll("cacheMeta")).map((record) => record.docId);
+    const docs = new Set<DocId>([...rawDocs, ...metaDocs]);
+    let reclaimed = 0;
+    for (const docId of docs) {
+      reclaimed += await pruneRawToCap(docId, capBytes);
+    }
     return reclaimed;
   }
 
@@ -284,7 +330,6 @@ export function createIdbStore(options: IdbStoreOptions = {}): RevisionStore {
       if (freed > 0) {
         reclaimed += freed;
         usage -= freed;
-        await flagRawDiscarded(meta.docId);
       }
     }
     return reclaimed;
@@ -327,6 +372,11 @@ export function createIdbStore(options: IdbStoreOptions = {}): RevisionStore {
   return {
     saveRawChunk,
     getRawChunks,
+    estimateRawBytes,
+    deleteRawForDoc,
+    deleteRawAll,
+    pruneRawToCap,
+    pruneRawToCapAll,
     saveDecoded,
     getDecoded,
     saveSnapshots,

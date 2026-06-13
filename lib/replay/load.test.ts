@@ -122,4 +122,25 @@ describe("runPipelineSameThread", () => {
     const data = await loadReplayData(store, DOC);
     expect(data.revisions).toEqual([]);
   });
+
+  test("suppresses same-thread derived writes when the producing run is stale", async () => {
+    const store = createMemoryStore();
+    const body = { changelog: [{ ty: "is", s: "stale", ibi: 1, revision_id: 1 }] };
+    await store.saveRawChunk({
+      docId: DOC,
+      range: {
+        requested: { start: asRevisionId(1), end: asRevisionId(1) },
+        received: { start: asRevisionId(1), end: asRevisionId(1) },
+      },
+      receivedAt: 0,
+      body,
+    } satisfies RawPayload);
+
+    const published = await runPipelineSameThread(store, DOC, { shouldPublish: () => false });
+
+    expect(published).toBe(false);
+    expect(await store.getDecoded(DOC)).toEqual([]);
+    expect(await store.getSnapshots(DOC)).toEqual([]);
+    expect(await store.getTimeline(DOC)).toEqual([]);
+  });
 });

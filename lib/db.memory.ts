@@ -70,7 +70,7 @@ function cloneValue<T>(value: T): T {
   return structuredClone(value);
 }
 
-function estimateRawBytes(payload: RawPayload): number {
+function estimatePayloadBytes(payload: RawPayload): number {
   try {
     const serialized = JSON.stringify(payload.body);
     return typeof serialized === "string" ? serialized.length : 0;
@@ -122,6 +122,16 @@ export function createMemoryStore(options: MemoryStoreOptions = {}): RevisionSto
           a.range.received.end - b.range.received.end,
       )
       .map(cloneValue);
+  }
+
+  async function estimateRawBytes(docId: DocId): Promise<number> {
+    const perDoc = backend.rawChunks.get(docId);
+    if (perDoc === undefined) return 0;
+    let total = 0;
+    for (const payload of perDoc.values()) {
+      total += estimatePayloadBytes(payload);
+    }
+    return total;
   }
 
   async function saveDecoded(docId: DocId, revisions: readonly DecodedRevision[]): Promise<void> {
@@ -178,14 +188,50 @@ export function createMemoryStore(options: MemoryStoreOptions = {}): RevisionSto
     backend.checkpoints.set(checkpoint.docId, cloneValue(checkpoint));
   }
 
-  function deleteRawForDoc(docId: DocId): number {
+  async function deleteRawForDoc(docId: DocId): Promise<number> {
     const perDoc = backend.rawChunks.get(docId);
     if (perDoc === undefined) return 0;
     let reclaimed = 0;
     for (const payload of perDoc.values()) {
-      reclaimed += estimateRawBytes(payload);
+      reclaimed += estimatePayloadBytes(payload);
     }
     backend.rawChunks.delete(docId);
+    const meta = backend.cacheMeta.get(docId);
+    if (meta !== undefined) {
+      backend.cacheMeta.set(docId, { ...meta, estimatedBytes: 0, rawRetained: false });
+    }
+    return reclaimed;
+  }
+
+  async function deleteRawAll(): Promise<number> {
+    let reclaimed = 0;
+    for (const perDoc of backend.rawChunks.values()) {
+      for (const payload of perDoc.values()) {
+        reclaimed += estimatePayloadBytes(payload);
+      }
+    }
+    backend.rawChunks.clear();
+    for (const meta of backend.cacheMeta.values()) {
+      backend.cacheMeta.set(meta.docId, { ...meta, estimatedBytes: 0, rawRetained: false });
+    }
+    return reclaimed;
+  }
+
+  async function pruneRawToCap(docId: DocId, capBytes: number): Promise<number> {
+    const target = Math.max(0, Math.floor(capBytes));
+    const retained = await estimateRawBytes(docId);
+    return retained > target ? deleteRawForDoc(docId) : 0;
+  }
+
+  async function pruneRawToCapAll(capBytes: number): Promise<number> {
+    const docs = new Set<DocId>([
+      ...backend.rawChunks.keys(),
+      ...backend.cacheMeta.keys(),
+    ] as DocId[]);
+    let reclaimed = 0;
+    for (const docId of docs) {
+      reclaimed += await pruneRawToCap(docId, capBytes);
+    }
     return reclaimed;
   }
 
@@ -198,11 +244,10 @@ export function createMemoryStore(options: MemoryStoreOptions = {}): RevisionSto
     let reclaimed = 0;
     for (const meta of docsByAge) {
       if (usage <= targetBytes) break;
-      const freed = deleteRawForDoc(meta.docId);
+      const freed = await deleteRawForDoc(meta.docId);
       if (freed > 0) {
         reclaimed += freed;
         usage -= freed;
-        backend.cacheMeta.set(meta.docId, { ...meta, rawRetained: false });
       }
     }
     return reclaimed;
@@ -229,6 +274,11 @@ export function createMemoryStore(options: MemoryStoreOptions = {}): RevisionSto
   return {
     saveRawChunk,
     getRawChunks,
+    estimateRawBytes,
+    deleteRawForDoc,
+    deleteRawAll,
+    pruneRawToCap,
+    pruneRawToCapAll,
     saveDecoded,
     getDecoded,
     saveSnapshots,

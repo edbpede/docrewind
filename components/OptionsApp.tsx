@@ -17,6 +17,7 @@ import { asDocId } from "@/lib/domain/ids";
 import type { DocId } from "@/lib/domain/model";
 import { strings } from "@/lib/i18n/strings";
 import { keepRawData, realIdentities, storageBudget, type Theme, theme } from "@/lib/settings";
+import { enforceStorageBudget, enforceStorageBudgetForAll } from "@/lib/storage-maintenance";
 
 const MIB = 1024 * 1024;
 
@@ -59,6 +60,9 @@ const OptionsApp: Component = () => {
   function onKeepRaw(next: boolean): void {
     mutateKeepRaw(next);
     void keepRawData.setValue(next);
+    if (!next) {
+      void store.deleteRawAll();
+    }
   }
 
   function onIdentities(next: boolean): void {
@@ -74,6 +78,9 @@ const OptionsApp: Component = () => {
     const next = { ...current, [field]: Math.round(mib * MIB) };
     mutateBudget(next);
     void storageBudget.setValue(next);
+    void (docId === null
+      ? enforceStorageBudgetForAll(store, next)
+      : enforceStorageBudget(store, docId, next));
   }
 
   return (

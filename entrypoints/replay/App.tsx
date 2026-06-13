@@ -37,9 +37,15 @@ import { errorTitle, strings } from "@/lib/i18n/strings";
 import { sendMessage } from "@/lib/messaging";
 import { segmentsAt } from "@/lib/reconstruction/render";
 import { modelAtRevisionIndex } from "@/lib/reconstruction/snapshot";
-import { loadReplayData, runPipelineSameThread } from "@/lib/replay/load";
+import {
+  loadReplayData,
+  publishDerivedData,
+  type ReplayDerivedData,
+  runPipelineSameThread,
+} from "@/lib/replay/load";
 import { type RetrievalErrorCategory, retrievalError } from "@/lib/retrieval/errors";
-import { realIdentities } from "@/lib/settings";
+import { keepRawData, realIdentities, storageBudget } from "@/lib/settings";
+import { applyPostDecodeStoragePolicy } from "@/lib/storage-maintenance";
 import type { RevisionStore } from "@/lib/store";
 
 export interface ReplayAppProps {
@@ -48,6 +54,20 @@ export interface ReplayAppProps {
   /** Force the same-thread pipeline when false (tests skip the Worker). */
   readonly useWorker?: boolean;
 }
+
+type WorkerDecodeMessage =
+  | ({
+      readonly kind: "done";
+      readonly docId: string;
+      readonly runId: number;
+      readonly revisionCount: number;
+    } & ReplayDerivedData)
+  | {
+      readonly kind: "unsupported" | "empty";
+      readonly docId: string;
+      readonly runId: number;
+      readonly revisionCount: 0;
+    };
 
 // Poll cadence + liveness thresholds (Seam C1 + F1). Stall/timeout resolve to an
 // error state with Retry/Cancel — never an infinite "discovering".
@@ -72,6 +92,37 @@ function checkpointPct(nextStart: number, upperBound: number): number {
     return 0;
   }
   return Math.max(0, Math.min(100, Math.round(((nextStart - 1) / upperBound) * 100)));
+}
+
+function isWorkerDecodeMessage(value: unknown): value is WorkerDecodeMessage {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const candidate = value as {
+    kind?: unknown;
+    docId?: unknown;
+    runId?: unknown;
+    revisionCount?: unknown;
+    revisions?: unknown;
+    snapshots?: unknown;
+    timeline?: unknown;
+  };
+  if (
+    typeof candidate.docId !== "string" ||
+    !Number.isInteger(candidate.runId) ||
+    !Number.isInteger(candidate.revisionCount)
+  ) {
+    return false;
+  }
+  if (candidate.kind === "empty" || candidate.kind === "unsupported") {
+    return candidate.revisionCount === 0;
+  }
+  return (
+    candidate.kind === "done" &&
+    Array.isArray(candidate.revisions) &&
+    Array.isArray(candidate.snapshots) &&
+    Array.isArray(candidate.timeline)
+  );
 }
 
 /** Project timeline events onto the applied-count axis for the Timeline markers. */
@@ -167,7 +218,7 @@ const ReplaySurface: Component<{
   const [phase, setPhase] = createSignal<ProgressPhase>("discovering");
   const [pct, setPct] = createSignal(0);
   const [errorCategory, setErrorCategory] = createSignal<RetrievalErrorCategory | null>(null);
-  const [retrievalDone, setRetrievalDone] = createSignal(false);
+  const [retrievalDoneRunId, setRetrievalDoneRunId] = createSignal<number | null>(null);
 
   const [prefersReducedMotion, setPrefersReducedMotion] = createSignal(false);
 
@@ -177,41 +228,84 @@ const ReplaySurface: Component<{
 
   // Decode runs only AFTER retrieval completes (the worker reads raw chunks).
   // Either path writes decoded/snapshots/timeline; we then re-read via one path.
-  const [loaded] = createResource(
-    () => (retrievalDone() ? props.docId : undefined),
-    async (docId) => {
-      await decode(docId);
-      return loadReplayData(props.store, docId);
+  const [loaded, { mutate: mutateLoaded }] = createResource(
+    () => {
+      const runId = retrievalDoneRunId();
+      return runId === null ? undefined : { docId: props.docId, runId };
+    },
+    async ({ docId, runId }) => {
+      const published = await decode(docId, runId);
+      const data = await loadReplayData(props.store, docId);
+      if (published && isActiveRun(runId)) {
+        const [retainRaw, budget] = await Promise.all([
+          keepRawData.getValue(),
+          storageBudget.getValue(),
+        ]);
+        if (isActiveRun(runId)) {
+          await applyPostDecodeStoragePolicy(props.store, docId, {
+            keepRawData: retainRaw,
+            budget,
+          });
+        }
+      }
+      return data;
     },
   );
 
   let worker: Worker | undefined;
   onCleanup(() => worker?.terminate());
 
-  async function decode(docId: DocId): Promise<void> {
-    if (props.useWorker && typeof Worker !== "undefined") {
-      await decodeInWorker(docId);
-    } else {
-      await runPipelineSameThread(props.store, docId);
-    }
+  let nextRunId = 0;
+  let activeRunId = 0;
+
+  function isActiveRun(runId: number): boolean {
+    return activeRunId === runId;
   }
 
-  function decodeInWorker(docId: DocId): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
-      worker = new Worker(new URL("./parse.worker.ts", import.meta.url), { type: "module" });
+  async function decode(docId: DocId, runId: number): Promise<boolean> {
+    if (props.useWorker && typeof Worker !== "undefined") {
+      return decodeInWorker(docId, runId);
+    }
+    return runPipelineSameThread(props.store, docId, {
+      shouldPublish: () => isActiveRun(runId),
+    });
+  }
+
+  function decodeInWorker(docId: DocId, runId: number): Promise<boolean> {
+    return new Promise<boolean>((resolve, reject) => {
+      const localWorker = new Worker(new URL("./parse.worker.ts", import.meta.url), {
+        type: "module",
+      });
+      worker = localWorker;
       // Any terminal signal (done/unsupported/empty) ends decode; the page then
       // re-reads, and an unsupported/empty result surfaces as an empty document.
-      worker.addEventListener("message", () => {
-        worker?.terminate();
-        worker = undefined;
-        resolve();
+      localWorker.addEventListener("message", (event: MessageEvent) => {
+        if (worker === localWorker) {
+          worker = undefined;
+        }
+        localWorker.terminate();
+        const message: unknown = event.data;
+        if (!isWorkerDecodeMessage(message) || message.docId !== docId || message.runId !== runId) {
+          resolve(false);
+          return;
+        }
+        if (!isActiveRun(runId) || message.kind !== "done") {
+          resolve(false);
+          return;
+        }
+        publishDerivedData(props.store, docId, message, () => isActiveRun(runId)).then(
+          (published) => resolve(published),
+          reject,
+        );
       });
-      worker.addEventListener("error", (event) => {
-        worker?.terminate();
-        worker = undefined;
+      localWorker.addEventListener("error", (event) => {
+        if (worker === localWorker) {
+          worker = undefined;
+        }
+        localWorker.terminate();
         reject(event.error ?? new Error("parse worker failed"));
       });
-      worker.postMessage({ docId });
+      localWorker.postMessage({ docId, runId });
     });
   }
 
@@ -234,8 +328,8 @@ const ReplaySurface: Component<{
   // ── Retrieval flow: fire start, poll the checkpoint, detect stalls ──────────
   let pollTimer: ReturnType<typeof setInterval> | undefined;
 
-  function stopPolling(): void {
-    if (pollTimer !== undefined) {
+  function stopPolling(runId?: number): void {
+    if ((runId === undefined || isActiveRun(runId)) && pollTimer !== undefined) {
       clearInterval(pollTimer);
       pollTimer = undefined;
     }
@@ -243,20 +337,34 @@ const ReplaySurface: Component<{
   onCleanup(stopPolling);
 
   function startFlow(): void {
+    const runId = ++nextRunId;
+    activeRunId = runId;
+    worker?.terminate();
+    worker = undefined;
     setPhase("discovering");
     setPct(0);
     setErrorCategory(null);
-    setRetrievalDone(false);
+    setRetrievalDoneRunId(null);
+    mutateLoaded(undefined);
 
-    // Fire start; the ack resolves only at end-of-run, so it is used ONLY as a
-    // late terminal classification — never for liveness (Seam F1).
+    // Fire start; the ack resolves only at end-of-run, so it is the only
+    // terminal signal allowed to open the decode gate for this page run.
+    // Persisted completed checkpoints have no run id and can be stale.
     void sendMessage("startRetrieval", { docId: props.docId, userIndex: props.userIndex })
       .then((ack) => {
+        if (!isActiveRun(runId)) {
+          return;
+        }
         if (!ack.ok) {
           setErrorCategory(ack.error.category);
           setPhase("error");
-          stopPolling();
+          stopPolling(runId);
+          return;
         }
+        setPct(100);
+        setPhase("fetching");
+        setRetrievalDoneRunId(runId);
+        stopPolling(runId);
       })
       .catch(() => {
         // SW restarting / page navigating: the poll + stall detection surface it.
@@ -269,34 +377,39 @@ const ReplaySurface: Component<{
     stopPolling();
     pollTimer = setInterval(() => {
       void (async () => {
+        if (!isActiveRun(runId)) {
+          return;
+        }
         const checkpoint = await props.store.readCheckpoint(props.docId);
+        if (!isActiveRun(runId)) {
+          return;
+        }
         if (checkpoint === null) {
           if (Date.now() - startedAt > NO_CHECKPOINT_MS) {
             setErrorCategory("endpoint-unavailable");
             setPhase("error");
-            stopPolling();
+            stopPolling(runId);
           }
           return;
         }
 
         const next = Number(checkpoint.nextStart);
-        setPct(checkpointPct(next, Number(checkpoint.upperBound)));
 
         if (checkpoint.completed) {
-          setPct(100);
-          setPhase("fetching");
-          setRetrievalDone(true); // gate the decode resource
-          stopPolling();
+          // Checkpoints are durable resume state, not a page-run proof. A stale
+          // completion from an older run must not decode or stop polling; the
+          // current `startRetrieval` ack above is the authoritative terminal.
           return;
         }
 
+        setPct(checkpointPct(next, Number(checkpoint.upperBound)));
         setPhase("fetching");
         if (next === lastNextStart) {
           stallCount += 1;
           if (stallCount >= STALL_POLLS) {
             setErrorCategory("network-failure");
             setPhase("error");
-            stopPolling();
+            stopPolling(runId);
           }
         } else {
           stallCount = 0;
@@ -312,8 +425,13 @@ const ReplaySurface: Component<{
   }
 
   function onCancel(): void {
+    activeRunId = ++nextRunId;
+    worker?.terminate();
+    worker = undefined;
     void sendMessage("cancelRetrieval", { docId: props.docId }).catch(() => {});
     stopPolling();
+    setRetrievalDoneRunId(null);
+    mutateLoaded(undefined);
     setErrorCategory("cancellation");
     setPhase("error");
   }

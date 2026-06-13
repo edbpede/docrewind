@@ -103,6 +103,84 @@ export function runRevisionStoreContract(
       expect(chunks[0]?.body).toBe("v2");
     });
 
+    it("estimates and deletes raw for one document without deleting derived data", async () => {
+      await store.saveRawChunk(rawChunk(docA, 1, 4, "raw-a"));
+      await store.saveRawChunk(rawChunk(docB, 1, 4, "raw-b"));
+      await store.saveDecoded(docA, [decodedRev(1)]);
+      await store.saveSnapshots(docA, [snapshot(1)]);
+      await store.saveTimeline(docA, [largeEdit(1)]);
+      await store.putCacheMeta(cacheRec(docA, 10));
+      await store.writeCheckpoint({
+        docId: docA,
+        upperBound: rev(4),
+        nextStart: rev(5),
+        completed: true,
+        updatedAt: 0,
+      });
+
+      expect(await store.estimateRawBytes(docA)).toBeGreaterThan(0);
+      const reclaimed = await store.deleteRawForDoc(docA);
+
+      expect(reclaimed).toBeGreaterThan(0);
+      expect(await store.estimateRawBytes(docA)).toBe(0);
+      expect(await store.getRawChunks(docA)).toEqual([]);
+      expect((await store.getRawChunks(docB)).map((c) => c.body)).toEqual(["raw-b"]);
+      expect(await store.getDecoded(docA)).toHaveLength(1);
+      expect(await store.getSnapshots(docA)).toHaveLength(1);
+      expect(await store.getTimeline(docA)).toHaveLength(1);
+      expect(await store.readCheckpoint(docA)).not.toBeNull();
+      expect((await store.getCacheMeta(docA))?.rawRetained).toBe(false);
+      expect((await store.getCacheMeta(docA))?.estimatedBytes).toBe(0);
+    });
+
+    it("deletes all raw chunks without deleting derived data", async () => {
+      await store.saveRawChunk(rawChunk(docA, 1, 4, "raw-a"));
+      await store.saveRawChunk(rawChunk(docB, 1, 4, "raw-b"));
+      await store.saveDecoded(docA, [decodedRev(1)]);
+      await store.putCacheMeta(cacheRec(docA, 1));
+      await store.putCacheMeta(cacheRec(docB, 2));
+
+      const reclaimed = await store.deleteRawAll();
+
+      expect(reclaimed).toBeGreaterThan(0);
+      expect(await store.getRawChunks(docA)).toEqual([]);
+      expect(await store.getRawChunks(docB)).toEqual([]);
+      expect(await store.getDecoded(docA)).toHaveLength(1);
+      expect((await store.getCacheMeta(docA))?.rawRetained).toBe(false);
+      expect((await store.getCacheMeta(docB))?.rawRetained).toBe(false);
+    });
+
+    it("coarsely prunes one document when its raw bytes exceed the per-document cap", async () => {
+      await store.saveRawChunk(rawChunk(docA, 1, 4, "x".repeat(100)));
+      await store.saveRawChunk(rawChunk(docB, 1, 4, "y"));
+      await store.putCacheMeta(cacheRec(docA, 1));
+      await store.putCacheMeta(cacheRec(docB, 2));
+
+      const retained = await store.estimateRawBytes(docA);
+      const reclaimed = await store.pruneRawToCap(docA, retained - 1);
+
+      expect(reclaimed).toBeGreaterThan(0);
+      expect(await store.getRawChunks(docA)).toEqual([]);
+      expect(await store.getRawChunks(docB)).toHaveLength(1);
+      expect((await store.getCacheMeta(docA))?.rawRetained).toBe(false);
+    });
+
+    it("coarsely applies a per-document raw cap across all documents", async () => {
+      await store.saveRawChunk(rawChunk(docA, 1, 4, "x".repeat(100)));
+      await store.saveRawChunk(rawChunk(docB, 1, 4, "y".repeat(100)));
+      await store.putCacheMeta(cacheRec(docA, 1));
+      await store.putCacheMeta(cacheRec(docB, 2));
+
+      const retained = await store.estimateRawBytes(docA);
+      const reclaimed = await store.pruneRawToCapAll(retained - 1);
+
+      expect(reclaimed).toBeGreaterThan(0);
+      expect(await store.getRawChunks(docA)).toEqual([]);
+      expect(await store.getRawChunks(docB)).toEqual([]);
+      expect((await store.getCacheMeta(docA))?.rawRetained).toBe(false);
+      expect((await store.getCacheMeta(docB))?.rawRetained).toBe(false);
+    });
+
     it("round-trips decoded / snapshots / timeline", async () => {
       await store.saveDecoded(docA, [decodedRev(1), decodedRev(2)]);
       await store.saveSnapshots(docA, [snapshot(0), snapshot(2)]);

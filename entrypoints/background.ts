@@ -33,6 +33,7 @@ import { buildRevisionsLoadUrl } from "@/lib/protocol/endpoints";
 import { fail, ok, type Result, type RetrievalError, retrievalError } from "@/lib/retrieval/errors";
 import { type CancellationToken, runRetrieval } from "@/lib/retrieval/orchestrator";
 import type { ChunkFetcher, ChunkRequest } from "@/lib/retrieval/transport";
+import { refreshCacheMeta } from "@/lib/storage-maintenance";
 
 export default defineBackground(() => {
   const store = createIdbStore();
@@ -247,6 +248,12 @@ export default defineBackground(() => {
     if (runEpochByDoc.get(data.docId) === epoch) {
       runEpochByDoc.delete(data.docId);
       cancelledDocs.delete(data.docId);
+    }
+    if (result.ok) {
+      await refreshCacheMeta(store, data.docId, {
+        now: Date.now(),
+        reconstructionStatus: "partial",
+      });
     }
     // The error is content-free by construction — never log raw bodies (§13.7).
     return result.ok ? { ok: true } : { ok: false, error: result.error };
