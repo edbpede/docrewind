@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fakeBrowser } from "wxt/testing";
 import App from "@/entrypoints/replay/App";
+import { PARSER_VERSION } from "@/lib/decoder/version";
 import { createMemoryStore } from "@/lib/db.memory";
 import { asDocId, asRevisionId } from "@/lib/domain/ids";
 import type { DecodedRevision, RawPayload } from "@/lib/domain/model";
@@ -168,6 +169,32 @@ describe("Replay App run gating", () => {
     expect(await store.getRawChunks(DOC)).toHaveLength(1);
   });
 
+  it("does not load a stale publication whose id matches a bare remounted run counter", async () => {
+    sendMessageMock.mockResolvedValue({ ok: true });
+    const store = createMemoryStore();
+    await store.saveReplayPublication(DOC, {
+      publicationId: "1",
+      parserVersion: PARSER_VERSION,
+      revisions: [
+        {
+          revisionId: asRevisionId(1),
+          userId: null,
+          sessionId: null,
+          time: null,
+          operations: [{ ty: "is", s: "old", ibi: 1 }],
+        },
+      ],
+      snapshots: [{ appliedCount: 0, model: createModel() }],
+      timeline: [],
+      publishedAt: 1,
+    });
+
+    render(() => <App store={store} useWorker={false} />);
+    await vi.waitFor(() => expect(screen.getByText("Settings & privacy")).toBeTruthy());
+
+    expect(screen.queryByText("old")).toBeNull();
+  });
+
   it("publishes worker-derived data only when the worker result runId matches the active run", async () => {
     sendMessageMock.mockResolvedValue({ ok: true });
     installFakeWorker((request) => ({
@@ -180,11 +207,17 @@ describe("Replay App run gating", () => {
       timeline: [],
     }));
     const store = createMemoryStore();
+    const stalePublicationIds: string[] = [];
+    const saveStalePublication = store.saveReplayPublication.bind(store);
+    store.saveReplayPublication = async (docId, publication) => {
+      stalePublicationIds.push(publication.publicationId);
+      await saveStalePublication(docId, publication);
+    };
 
     render(() => <App store={store} />);
     await vi.waitFor(() => expect(screen.getByText("Settings & privacy")).toBeTruthy());
 
-    expect(await store.getDecoded(DOC)).toEqual([]);
+    expect(stalePublicationIds).toEqual([]);
     cleanup();
 
     installMatchMedia();
@@ -200,10 +233,61 @@ describe("Replay App run gating", () => {
       timeline: [],
     }));
     const nextStore = createMemoryStore();
+    const freshPublicationIds: string[] = [];
+    const saveFreshPublication = nextStore.saveReplayPublication.bind(nextStore);
+    nextStore.saveReplayPublication = async (docId, publication) => {
+      freshPublicationIds.push(publication.publicationId);
+      await saveFreshPublication(docId, publication);
+    };
 
     render(() => <App store={nextStore} />);
     await vi.waitFor(() => expect(screen.getByText("Settings & privacy")).toBeTruthy());
 
-    expect(await nextStore.getDecoded(DOC)).toHaveLength(1);
+    expect(freshPublicationIds).toHaveLength(1);
+    expect(freshPublicationIds[0]).not.toBe("1");
+    expect(await nextStore.getReplayPublication(DOC, freshPublicationIds[0] ?? "")).not.toBeNull();
+  });
+
+  it("generates distinct publicationIds across remounts", async () => {
+    sendMessageMock.mockResolvedValue({ ok: true });
+    const store = createMemoryStore();
+    const publicationIds: string[] = [];
+    const savePublication = store.saveReplayPublication.bind(store);
+    store.saveReplayPublication = async (docId, publication) => {
+      publicationIds.push(publication.publicationId);
+      await savePublication(docId, publication);
+    };
+    installFakeWorker((request) => ({
+      kind: "done",
+      docId: request.docId,
+      runId: request.runId,
+      revisionCount: 1,
+      revisions: [decodedRevision()],
+      snapshots: [{ appliedCount: 0, model: createModel() }],
+      timeline: [],
+    }));
+
+    render(() => <App store={store} />);
+    await vi.waitFor(() => expect(publicationIds).toHaveLength(1));
+    cleanup();
+
+    installMatchMedia();
+    setReplayUrl();
+    sendMessageMock.mockResolvedValue({ ok: true });
+    installFakeWorker((request) => ({
+      kind: "done",
+      docId: request.docId,
+      runId: request.runId,
+      revisionCount: 1,
+      revisions: [decodedRevision()],
+      snapshots: [{ appliedCount: 0, model: createModel() }],
+      timeline: [],
+    }));
+
+    render(() => <App store={store} />);
+    await vi.waitFor(() => expect(publicationIds).toHaveLength(2));
+
+    expect(new Set(publicationIds).size).toBe(2);
+    expect(publicationIds).not.toContain("1");
   });
 });

@@ -4,7 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fakeBrowser } from "wxt/testing";
 import OptionsApp from "@/components/OptionsApp";
 
-const { storeMock } = vi.hoisted(() => ({
+const { sendMessageMock, storeMock } = vi.hoisted(() => ({
+  sendMessageMock: vi.fn(async () => ({ deferred: false, reclaimedBytes: 0 })),
   storeMock: {
     saveRawChunk: vi.fn(),
     getRawChunks: vi.fn(async () => []),
@@ -13,6 +14,8 @@ const { storeMock } = vi.hoisted(() => ({
     deleteRawAll: vi.fn(async () => 0),
     pruneRawToCap: vi.fn(async () => 0),
     pruneRawToCapAll: vi.fn(async () => 0),
+    saveReplayPublication: vi.fn(),
+    getReplayPublication: vi.fn(async () => null),
     saveDecoded: vi.fn(),
     getDecoded: vi.fn(async () => []),
     saveSnapshots: vi.fn(),
@@ -33,6 +36,10 @@ const { storeMock } = vi.hoisted(() => ({
 
 vi.mock("@/lib/db", () => ({
   createIdbStore: () => storeMock,
+}));
+
+vi.mock("@/lib/messaging", () => ({
+  sendMessage: sendMessageMock,
 }));
 
 const MIB = 1024 * 1024;
@@ -57,34 +64,48 @@ describe("OptionsApp storage policy controls", () => {
         value.mockClear();
       }
     }
+    sendMessageMock.mockClear();
     window.history.replaceState(null, "", "/options.html?doc=docOptions");
     installMatchMedia();
   });
 
   afterEach(() => cleanup());
 
-  it("turning off raw retention triggers raw-only cleanup", async () => {
+  it("turning off raw retention requests guarded maintenance without direct raw deletion", async () => {
     render(() => <OptionsApp />);
     const checkbox = await screen.findByLabelText("Keep raw data for re-decoding");
 
     await fireEvent.click(checkbox);
 
-    expect(storeMock.deleteRawAll).toHaveBeenCalledTimes(1);
+    expect((checkbox as HTMLInputElement).checked).toBe(false);
+    expect(storeMock.deleteRawAll).not.toHaveBeenCalled();
     expect(storeMock.deleteAll).not.toHaveBeenCalled();
+    await vi.waitFor(() =>
+      expect(sendMessageMock).toHaveBeenCalledWith("requestStorageMaintenance", {
+        docId: "docOptions",
+        keepRawData: false,
+        budget: { perDocumentBytes: 50 * MIB, globalCapBytes: 500 * MIB },
+      }),
+    );
   });
 
-  it("changing a budget immediately schedules configured raw maintenance", async () => {
+  it("changing a budget requests guarded configured raw maintenance", async () => {
     render(() => <OptionsApp />);
     const globalCap = await screen.findByLabelText("Global cap (MB)");
     await vi.waitFor(() => expect((globalCap as HTMLInputElement).value).toBe("500"));
 
     await fireEvent.change(globalCap, { target: { value: "2" } });
 
-    expect(storeMock.pruneRawToCap).toHaveBeenCalledWith("docOptions", 50 * MIB);
-    expect(storeMock.pruneLRU).toHaveBeenCalledWith(2 * MIB);
+    expect(storeMock.pruneRawToCap).not.toHaveBeenCalled();
+    expect(storeMock.pruneLRU).not.toHaveBeenCalled();
+    expect(sendMessageMock).toHaveBeenCalledWith("requestStorageMaintenance", {
+      docId: "docOptions",
+      keepRawData: true,
+      budget: { perDocumentBytes: 50 * MIB, globalCapBytes: 2 * MIB },
+    });
   });
 
-  it("changing a budget on the generic options page enforces per-document and global caps", async () => {
+  it("changing a budget on the generic options page requests guarded global maintenance", async () => {
     window.history.replaceState(null, "", "/options.html");
     render(() => <OptionsApp />);
     const globalCap = await screen.findByLabelText("Global cap (MB)");
@@ -92,7 +113,12 @@ describe("OptionsApp storage policy controls", () => {
 
     await fireEvent.change(globalCap, { target: { value: "3" } });
 
-    expect(storeMock.pruneRawToCapAll).toHaveBeenCalledWith(50 * MIB);
-    expect(storeMock.pruneLRU).toHaveBeenCalledWith(3 * MIB);
+    expect(storeMock.pruneRawToCapAll).not.toHaveBeenCalled();
+    expect(storeMock.pruneLRU).not.toHaveBeenCalled();
+    expect(sendMessageMock).toHaveBeenCalledWith("requestStorageMaintenance", {
+      docId: null,
+      keepRawData: true,
+      budget: { perDocumentBytes: 50 * MIB, globalCapBytes: 3 * MIB },
+    });
   });
 });

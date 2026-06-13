@@ -5,6 +5,7 @@
 // the seeded round-trip, and the same-thread pipeline → re-read single path.
 
 import { describe, expect, test } from "bun:test";
+import { PARSER_VERSION } from "../decoder/version";
 import { createMemoryStore } from "../db.memory";
 import { asDocId, asRevisionId } from "../domain/ids";
 import type { DecodedRevision, RawPayload } from "../domain/model";
@@ -54,8 +55,8 @@ describe("rebuildReplayIndex", () => {
         receivedAt: 0,
         body,
       } satisfies RawPayload);
-      await runPipelineSameThread(store, DOC);
-      const data = await loadReplayData(store, DOC);
+      await runPipelineSameThread(store, DOC, { publicationId: "pub-scrub" });
+      const data = await loadReplayData(store, DOC, "pub-scrub");
       const finalModel = modelAtRevisionIndex(data.replayIndex, data.revisions.length);
       expect(currentText(finalModel)).toBe("hello world");
     })();
@@ -63,28 +64,68 @@ describe("rebuildReplayIndex", () => {
 });
 
 describe("loadReplayData", () => {
-  test("round-trips seeded decoded/snapshots/timeline", async () => {
+  test("reads the matching atomic replay publication", async () => {
     const store = createMemoryStore();
-    const decoded = [revision(1)];
-    await store.saveDecoded(DOC, decoded);
-    await store.saveSnapshots(DOC, [snapshot(0, createModel())]);
+    await store.saveDecoded(DOC, [revision(99)]);
+    await store.saveSnapshots(DOC, [snapshot(99, createModel())]);
     await store.saveTimeline(DOC, []);
-    const data = await loadReplayData(store, DOC);
+    await store.saveReplayPublication(DOC, {
+      publicationId: "pub-fresh",
+      parserVersion: PARSER_VERSION,
+      revisions: [revision(1)],
+      snapshots: [snapshot(0, createModel())],
+      timeline: [],
+      publishedAt: 1,
+    });
+
+    const data = await loadReplayData(store, DOC, "pub-fresh");
+
     expect(data.revisions).toHaveLength(1);
+    expect(data.revisions[0]?.revisionId).toBe(asRevisionId(1));
     expect(data.timeline).toEqual([]);
     expect(data.replayIndex.snapshots.has(0)).toBe(true);
   });
 
-  test("returns empty data when nothing is stored (never throws on a miss)", async () => {
+  test("ignores legacy split stores when no matching publication exists", async () => {
     const store = createMemoryStore();
-    const data = await loadReplayData(store, asDocId("EmptyDoc"));
+    await store.saveDecoded(DOC, [revision(1)]);
+    await store.saveSnapshots(DOC, [snapshot(0, createModel())]);
+    await store.saveTimeline(DOC, []);
+
+    const data = await loadReplayData(store, DOC, "missing-pub");
+
+    expect(data.revisions).toEqual([]);
+    expect(data.timeline).toEqual([]);
+    expect(data.replayIndex.revisions).toEqual([]);
+  });
+
+  test("returns empty data for the wrong publication id", async () => {
+    const store = createMemoryStore();
+    await store.saveReplayPublication(DOC, {
+      publicationId: "pub-a",
+      parserVersion: PARSER_VERSION,
+      revisions: [revision(1)],
+      snapshots: [snapshot(0, createModel())],
+      timeline: [],
+      publishedAt: 1,
+    });
+
+    const data = await loadReplayData(store, DOC, "pub-b");
+
+    expect(data.revisions).toEqual([]);
+    expect(data.replayIndex.revisions).toEqual([]);
+  });
+
+  test("returns empty data when nothing is published (never throws on a miss)", async () => {
+    const store = createMemoryStore();
+    const data = await loadReplayData(store, asDocId("EmptyDoc"), "missing-pub");
     expect(data.revisions).toEqual([]);
     expect(data.replayIndex.revisions).toEqual([]);
   });
 });
 
 describe("runPipelineSameThread", () => {
-  test("writes decoded/snapshots/timeline that loadReplayData then reads (one path)", async () => {
+  test("writes one replay publication that loadReplayData then reads", async () => {
     const store = createMemoryStore();
     const body = { changelog: [{ ty: "is", s: "abc", ibi: 1, revision_id: 1 }] };
     await store.saveRawChunk({
@@ -97,9 +138,11 @@ describe("runPipelineSameThread", () => {
       body,
     } satisfies RawPayload);
 
-    await runPipelineSameThread(store, DOC);
+    await runPipelineSameThread(store, DOC, { publicationId: "pub-pipeline" });
 
-    const data = await loadReplayData(store, DOC);
+    expect(await store.getReplayPublication(DOC, "pub-pipeline")).not.toBeNull();
+    expect(await store.getDecoded(DOC)).toEqual([]);
+    const data = await loadReplayData(store, DOC, "pub-pipeline");
     expect(data.revisions.length).toBeGreaterThan(0);
     const finalModel = modelAtRevisionIndex(data.replayIndex, data.revisions.length);
     expect(currentText(finalModel)).toBe("abc");
@@ -117,10 +160,11 @@ describe("runPipelineSameThread", () => {
       body: { not_a_changelog: true },
     } satisfies RawPayload);
 
-    await runPipelineSameThread(store, DOC);
+    await runPipelineSameThread(store, DOC, { publicationId: "pub-unsupported" });
 
-    const data = await loadReplayData(store, DOC);
+    const data = await loadReplayData(store, DOC, "pub-unsupported");
     expect(data.revisions).toEqual([]);
+    expect(await store.getReplayPublication(DOC, "pub-unsupported")).toBeNull();
   });
 
   test("suppresses same-thread derived writes when the producing run is stale", async () => {
@@ -136,9 +180,13 @@ describe("runPipelineSameThread", () => {
       body,
     } satisfies RawPayload);
 
-    const published = await runPipelineSameThread(store, DOC, { shouldPublish: () => false });
+    const published = await runPipelineSameThread(store, DOC, {
+      publicationId: "pub-stale",
+      shouldPublish: () => false,
+    });
 
     expect(published).toBe(false);
+    expect(await store.getReplayPublication(DOC, "pub-stale")).toBeNull();
     expect(await store.getDecoded(DOC)).toEqual([]);
     expect(await store.getSnapshots(DOC)).toEqual([]);
     expect(await store.getTimeline(DOC)).toEqual([]);

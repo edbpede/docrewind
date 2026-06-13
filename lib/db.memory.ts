@@ -15,7 +15,13 @@ import type {
   RevisionId,
   TimelineEvent,
 } from "./domain/model";
-import type { RetrievalCheckpoint, RevisionStore, StoredSnapshot, UsageEstimate } from "./store";
+import type {
+  ReplayPublication,
+  RetrievalCheckpoint,
+  RevisionStore,
+  StoredSnapshot,
+  UsageEstimate,
+} from "./store";
 
 interface VersionedDecoded {
   readonly parserVersion: number;
@@ -40,6 +46,7 @@ export interface MemoryBackend {
   readonly decoded: Map<string, VersionedDecoded>;
   readonly snapshots: Map<string, VersionedSnapshots>;
   readonly timeline: Map<string, VersionedTimeline>;
+  readonly replayPublications: Map<string, ReplayPublication>;
   readonly cacheMeta: Map<string, CacheRecord>;
   readonly checkpoints: Map<string, RetrievalCheckpoint>;
 }
@@ -51,6 +58,7 @@ export function createMemoryBackend(): MemoryBackend {
     decoded: new Map(),
     snapshots: new Map(),
     timeline: new Map(),
+    replayPublications: new Map(),
     cacheMeta: new Map(),
     checkpoints: new Map(),
   };
@@ -132,6 +140,28 @@ export function createMemoryStore(options: MemoryStoreOptions = {}): RevisionSto
       total += estimatePayloadBytes(payload);
     }
     return total;
+  }
+
+  async function saveReplayPublication(
+    docId: DocId,
+    publication: ReplayPublication,
+  ): Promise<void> {
+    backend.replayPublications.set(docId, cloneValue({ ...publication, parserVersion }));
+  }
+
+  async function getReplayPublication(
+    docId: DocId,
+    expectedPublicationId: string,
+  ): Promise<ReplayPublication | null> {
+    const publication = backend.replayPublications.get(docId);
+    if (
+      publication === undefined ||
+      publication.parserVersion < parserVersion ||
+      publication.publicationId !== expectedPublicationId
+    ) {
+      return null;
+    }
+    return cloneValue(publication);
   }
 
   async function saveDecoded(docId: DocId, revisions: readonly DecodedRevision[]): Promise<void> {
@@ -258,6 +288,7 @@ export function createMemoryStore(options: MemoryStoreOptions = {}): RevisionSto
     backend.decoded.delete(docId);
     backend.snapshots.delete(docId);
     backend.timeline.delete(docId);
+    backend.replayPublications.delete(docId);
     backend.cacheMeta.delete(docId);
     backend.checkpoints.delete(docId);
   }
@@ -267,6 +298,7 @@ export function createMemoryStore(options: MemoryStoreOptions = {}): RevisionSto
     backend.decoded.clear();
     backend.snapshots.clear();
     backend.timeline.clear();
+    backend.replayPublications.clear();
     backend.cacheMeta.clear();
     backend.checkpoints.clear();
   }
@@ -279,6 +311,8 @@ export function createMemoryStore(options: MemoryStoreOptions = {}): RevisionSto
     deleteRawAll,
     pruneRawToCap,
     pruneRawToCapAll,
+    saveReplayPublication,
+    getReplayPublication,
     saveDecoded,
     getDecoded,
     saveSnapshots,

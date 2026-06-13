@@ -7,7 +7,9 @@
 
 import { defineExtensionMessaging } from "@webext-core/messaging";
 import type { DocId } from "./domain/ids";
+import type { CacheRecord } from "./domain/model";
 import type { RetrievalError } from "./retrieval/errors";
+import type { StorageBudget } from "./settings";
 import type { RetrievalCheckpoint } from "./store";
 
 /** Activate the replay surface for a detected document. */
@@ -30,6 +32,25 @@ export interface CancelRetrievalMessage {
 /** Look up the persisted retrieval checkpoint for a document. */
 export interface GetCheckpointMessage {
   readonly docId: DocId;
+}
+
+/** Mark raw chunks for a document as in use by retrieval/decode. */
+export interface DecodeLeaseMessage {
+  readonly docId: DocId;
+}
+
+/** Request raw-cache maintenance through the background lease guard. */
+export interface RequestStorageMaintenanceMessage {
+  /** `null` means apply generic/global options maintenance across all docs. */
+  readonly docId: DocId | null;
+  readonly keepRawData: boolean;
+  readonly budget: StorageBudget;
+  readonly reconstructionStatus?: CacheRecord["reconstructionStatus"];
+}
+
+export interface StorageMaintenanceAck {
+  readonly deferred: boolean;
+  readonly reclaimedBytes: number;
 }
 
 /** Synchronous-ish acknowledgement returned by `startRetrieval`. */
@@ -59,6 +80,9 @@ export interface ProtocolMap {
   cancelRetrieval(data: CancelRetrievalMessage): void;
   retrievalProgress(data: RetrievalProgress): void;
   getCheckpoint(data: GetCheckpointMessage): RetrievalCheckpoint | null;
+  beginDecodeLease(data: DecodeLeaseMessage): void;
+  endDecodeLease(data: DecodeLeaseMessage): StorageMaintenanceAck;
+  requestStorageMaintenance(data: RequestStorageMaintenanceMessage): StorageMaintenanceAck;
 }
 
 export const { sendMessage, onMessage, removeAllListeners } =

@@ -19,10 +19,16 @@ import type {
   RevisionId,
   TimelineEvent,
 } from "./domain/model";
-import type { RetrievalCheckpoint, RevisionStore, StoredSnapshot, UsageEstimate } from "./store";
+import type {
+  ReplayPublication,
+  RetrievalCheckpoint,
+  RevisionStore,
+  StoredSnapshot,
+  UsageEstimate,
+} from "./store";
 
 const DB_NAME = "docrewind";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 /** A raw chunk row: the composite `[docId,start,end]` key fields + the payload. */
 interface RawChunkRecord {
@@ -48,6 +54,10 @@ interface TimelineRecord {
   readonly parserVersion: number;
   readonly events: readonly TimelineEvent[];
 }
+interface ReplayPublicationRecord {
+  readonly docId: DocId;
+  readonly publication: ReplayPublication;
+}
 
 interface DocRewindDB extends DBSchema {
   rawChunks: {
@@ -58,6 +68,7 @@ interface DocRewindDB extends DBSchema {
   decoded: { key: string; value: DecodedRecord; indexes: { "by-doc": string } };
   snapshots: { key: string; value: SnapshotsRecord; indexes: { "by-doc": string } };
   timeline: { key: string; value: TimelineRecord; indexes: { "by-doc": string } };
+  replayPublications: { key: string; value: ReplayPublicationRecord };
   cacheMeta: { key: string; value: CacheRecord; indexes: { "by-last-accessed": number } };
   checkpoints: { key: string; value: RetrievalCheckpoint };
 }
@@ -65,24 +76,40 @@ interface DocRewindDB extends DBSchema {
 function openDocRewindDb(name: string): Promise<IDBPDatabase<DocRewindDB>> {
   return openDB<DocRewindDB>(name, DB_VERSION, {
     upgrade(db) {
-      const rawChunks = db.createObjectStore("rawChunks", {
-        keyPath: ["docId", "start", "end"],
-      });
-      rawChunks.createIndex("by-doc", "docId");
+      if (!db.objectStoreNames.contains("rawChunks")) {
+        const rawChunks = db.createObjectStore("rawChunks", {
+          keyPath: ["docId", "start", "end"],
+        });
+        rawChunks.createIndex("by-doc", "docId");
+      }
 
-      const decoded = db.createObjectStore("decoded", { keyPath: "docId" });
-      decoded.createIndex("by-doc", "docId");
+      if (!db.objectStoreNames.contains("decoded")) {
+        const decoded = db.createObjectStore("decoded", { keyPath: "docId" });
+        decoded.createIndex("by-doc", "docId");
+      }
 
-      const snapshots = db.createObjectStore("snapshots", { keyPath: "docId" });
-      snapshots.createIndex("by-doc", "docId");
+      if (!db.objectStoreNames.contains("snapshots")) {
+        const snapshots = db.createObjectStore("snapshots", { keyPath: "docId" });
+        snapshots.createIndex("by-doc", "docId");
+      }
 
-      const timeline = db.createObjectStore("timeline", { keyPath: "docId" });
-      timeline.createIndex("by-doc", "docId");
+      if (!db.objectStoreNames.contains("timeline")) {
+        const timeline = db.createObjectStore("timeline", { keyPath: "docId" });
+        timeline.createIndex("by-doc", "docId");
+      }
 
-      const cacheMeta = db.createObjectStore("cacheMeta", { keyPath: "docId" });
-      cacheMeta.createIndex("by-last-accessed", "lastAccessedAt");
+      if (!db.objectStoreNames.contains("replayPublications")) {
+        db.createObjectStore("replayPublications", { keyPath: "docId" });
+      }
 
-      db.createObjectStore("checkpoints", { keyPath: "docId" });
+      if (!db.objectStoreNames.contains("cacheMeta")) {
+        const cacheMeta = db.createObjectStore("cacheMeta", { keyPath: "docId" });
+        cacheMeta.createIndex("by-last-accessed", "lastAccessedAt");
+      }
+
+      if (!db.objectStoreNames.contains("checkpoints")) {
+        db.createObjectStore("checkpoints", { keyPath: "docId" });
+      }
     },
   });
 }
@@ -197,6 +224,31 @@ export function createIdbStore(options: IdbStoreOptions = {}): RevisionStore {
     const d = await db();
     const records = await d.getAllFromIndex("rawChunks", "by-doc", docId);
     return records.reduce((total, record) => total + estimatePayloadBytes(record.payload), 0);
+  }
+
+  async function saveReplayPublication(
+    docId: DocId,
+    publication: ReplayPublication,
+  ): Promise<void> {
+    const d = await db();
+    const currentPublication: ReplayPublication = { ...publication, parserVersion };
+    await d.put("replayPublications", { docId, publication: currentPublication });
+  }
+
+  async function getReplayPublication(
+    docId: DocId,
+    expectedPublicationId: string,
+  ): Promise<ReplayPublication | null> {
+    const d = await db();
+    const rec = await d.get("replayPublications", docId);
+    if (
+      rec === undefined ||
+      rec.publication.parserVersion < parserVersion ||
+      rec.publication.publicationId !== expectedPublicationId
+    ) {
+      return null;
+    }
+    return rec.publication;
   }
 
   async function saveDecoded(docId: DocId, revisions: readonly DecodedRevision[]): Promise<void> {
@@ -339,13 +391,14 @@ export function createIdbStore(options: IdbStoreOptions = {}): RevisionStore {
     const d = await db();
     await deleteRawForDoc(docId);
     const tx = d.transaction(
-      ["decoded", "snapshots", "timeline", "cacheMeta", "checkpoints"],
+      ["decoded", "snapshots", "timeline", "replayPublications", "cacheMeta", "checkpoints"],
       "readwrite",
     );
     await Promise.all([
       tx.objectStore("decoded").delete(docId),
       tx.objectStore("snapshots").delete(docId),
       tx.objectStore("timeline").delete(docId),
+      tx.objectStore("replayPublications").delete(docId),
       tx.objectStore("cacheMeta").delete(docId),
       tx.objectStore("checkpoints").delete(docId),
       tx.done,
@@ -355,7 +408,15 @@ export function createIdbStore(options: IdbStoreOptions = {}): RevisionStore {
   async function deleteAll(): Promise<void> {
     const d = await db();
     const tx = d.transaction(
-      ["rawChunks", "decoded", "snapshots", "timeline", "cacheMeta", "checkpoints"],
+      [
+        "rawChunks",
+        "decoded",
+        "snapshots",
+        "timeline",
+        "replayPublications",
+        "cacheMeta",
+        "checkpoints",
+      ],
       "readwrite",
     );
     await Promise.all([
@@ -363,6 +424,7 @@ export function createIdbStore(options: IdbStoreOptions = {}): RevisionStore {
       tx.objectStore("decoded").clear(),
       tx.objectStore("snapshots").clear(),
       tx.objectStore("timeline").clear(),
+      tx.objectStore("replayPublications").clear(),
       tx.objectStore("cacheMeta").clear(),
       tx.objectStore("checkpoints").clear(),
       tx.done,
@@ -377,6 +439,8 @@ export function createIdbStore(options: IdbStoreOptions = {}): RevisionStore {
     deleteRawAll,
     pruneRawToCap,
     pruneRawToCapAll,
+    saveReplayPublication,
+    getReplayPublication,
     saveDecoded,
     getDecoded,
     saveSnapshots,

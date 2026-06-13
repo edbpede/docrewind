@@ -64,12 +64,13 @@ describe("idb schema", () => {
       // any DocId; getRawChunks opens the db
       "any" as never,
     );
-    const db = await openDB(name, 1);
+    const db = await openDB(name);
     expect([...db.objectStoreNames].sort()).toEqual([
       "cacheMeta",
       "checkpoints",
       "decoded",
       "rawChunks",
+      "replayPublications",
       "snapshots",
       "timeline",
     ]);

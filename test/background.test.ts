@@ -11,7 +11,9 @@ import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fakeBrowser } from "wxt/testing";
 import background from "@/entrypoints/background";
-import { asDocId } from "@/lib/domain/ids";
+import { createIdbStore } from "@/lib/db";
+import { asDocId, asRevisionId } from "@/lib/domain/ids";
+import type { RawPayload } from "@/lib/domain/model";
 import { removeAllListeners, sendMessage } from "@/lib/messaging";
 
 function runBackground(): void {
@@ -60,7 +62,7 @@ describe("background retrieval wiring", () => {
     runBackground();
     const ack = await sendMessage("startRetrieval", { docId: asDocId("docBG"), userIndex: null });
 
-    expect(ack.ok).toBe(true);
+    expect(ack).toEqual({ ok: true });
     // Discovery read the bootstrap; the chunk fetch carried first-party cookies.
     expect(calls.some((c) => c.url.includes("/document/d/docBG/edit"))).toBe(true);
     const loadCall = calls.find((c) => c.url.includes("/revisions/load"));
@@ -119,5 +121,37 @@ describe("background retrieval wiring", () => {
     runBackground();
     const checkpoint = await sendMessage("getCheckpoint", { docId: asDocId("docNONE") });
     expect(checkpoint).toBeNull();
+  });
+
+  it("defers guarded raw maintenance while a decode lease is active", async () => {
+    const docId = asDocId("docLease");
+    const store = createIdbStore();
+    await store.saveRawChunk({
+      docId,
+      range: {
+        requested: { start: asRevisionId(1), end: asRevisionId(1) },
+        received: { start: asRevisionId(1), end: asRevisionId(1) },
+      },
+      receivedAt: 0,
+      body: "raw-body",
+    } satisfies RawPayload);
+
+    runBackground();
+    await sendMessage("beginDecodeLease", { docId });
+    const deferred = await sendMessage("requestStorageMaintenance", {
+      docId,
+      keepRawData: false,
+      budget: { perDocumentBytes: 1, globalCapBytes: 1 },
+      reconstructionStatus: "partial",
+    });
+
+    expect(deferred.deferred).toBe(true);
+    expect(await store.getRawChunks(docId)).toHaveLength(1);
+
+    const released = await sendMessage("endDecodeLease", { docId });
+
+    expect(released.deferred).toBe(false);
+    expect(released.reclaimedBytes).toBeGreaterThan(0);
+    expect(await store.getRawChunks(docId)).toEqual([]);
   });
 });

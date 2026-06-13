@@ -54,4 +54,33 @@ describe("messaging ProtocolMap", () => {
     });
     expect(phase).toBe("fetching");
   });
+
+  it("round-trips guarded storage maintenance messages", async () => {
+    const docId = asDocId("docMAINT");
+    onMessage("beginDecodeLease", ({ data }) => {
+      expect(data.docId).toBe(docId);
+    });
+    onMessage("endDecodeLease", ({ data }) => ({
+      deferred: false,
+      reclaimedBytes: data.docId === docId ? 1 : 0,
+    }));
+    onMessage("requestStorageMaintenance", ({ data }) => ({
+      deferred: data.docId === docId,
+      reclaimedBytes: data.keepRawData ? 0 : 2,
+    }));
+
+    await sendMessage("beginDecodeLease", { docId });
+    expect(await sendMessage("endDecodeLease", { docId })).toEqual({
+      deferred: false,
+      reclaimedBytes: 1,
+    });
+    expect(
+      await sendMessage("requestStorageMaintenance", {
+        docId,
+        keepRawData: false,
+        budget: { perDocumentBytes: 1, globalCapBytes: 2 },
+        reconstructionStatus: "partial",
+      }),
+    ).toEqual({ deferred: true, reclaimedBytes: 2 });
+  });
 });

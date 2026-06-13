@@ -45,7 +45,6 @@ import {
 } from "@/lib/replay/load";
 import { type RetrievalErrorCategory, retrievalError } from "@/lib/retrieval/errors";
 import { keepRawData, realIdentities, storageBudget } from "@/lib/settings";
-import { applyPostDecodeStoragePolicy } from "@/lib/storage-maintenance";
 import type { RevisionStore } from "@/lib/store";
 
 export interface ReplayAppProps {
@@ -76,6 +75,15 @@ const STALL_POLLS = 16; // ~12s with no checkpoint advance
 const NO_CHECKPOINT_MS = 20_000; // no first checkpoint at all
 const TICK_MS = 120; // playback frame budget (throttled)
 const TICK_MS_REDUCED = 320; // calmer cadence under reduced motion
+let pageSessionSequence = 0;
+
+function createPageSessionId(): string {
+  if (typeof globalThis.crypto?.randomUUID === "function") {
+    return globalThis.crypto.randomUUID();
+  }
+  pageSessionSequence += 1;
+  return `page-${Date.now().toString(36)}-${pageSessionSequence.toString(36)}`;
+}
 
 /** Parse `?u=` strictly — never `Number("")` (which yields a valid-looking 0). */
 function parseUserIndex(raw: string | null): number | null {
@@ -227,51 +235,100 @@ const ReplaySurface: Component<{
   const [showRealIdentities] = createResource(() => realIdentities.getValue());
 
   // Decode runs only AFTER retrieval completes (the worker reads raw chunks).
-  // Either path writes decoded/snapshots/timeline; we then re-read via one path.
+  // Either path writes one replay publication; we then re-read exactly that id.
   const [loaded, { mutate: mutateLoaded }] = createResource(
     () => {
       const runId = retrievalDoneRunId();
-      return runId === null ? undefined : { docId: props.docId, runId };
+      return runId === null
+        ? undefined
+        : { docId: props.docId, runId, publicationId: publicationIdForRun(runId) };
     },
-    async ({ docId, runId }) => {
-      const published = await decode(docId, runId);
-      const data = await loadReplayData(props.store, docId);
-      if (published && isActiveRun(runId)) {
-        const [retainRaw, budget] = await Promise.all([
-          keepRawData.getValue(),
-          storageBudget.getValue(),
-        ]);
+    async ({ docId, runId, publicationId }) => {
+      let published = false;
+      try {
+        published = await decode(docId, runId, publicationId);
+        const data = await loadReplayData(props.store, docId, publicationId);
+        return data;
+      } finally {
         if (isActiveRun(runId)) {
-          await applyPostDecodeStoragePolicy(props.store, docId, {
-            keepRawData: retainRaw,
-            budget,
-          });
+          await finishRunMaintenance(runId, published ? "complete" : "partial");
         }
       }
-      return data;
     },
   );
 
   let worker: Worker | undefined;
-  onCleanup(() => worker?.terminate());
+  onCleanup(() => {
+    worker?.terminate();
+    for (const runId of [...leasedRunIds]) {
+      void finishRunMaintenance(runId, "partial");
+    }
+    void sendMessage("cancelRetrieval", { docId: props.docId }).catch(() => {});
+  });
 
   let nextRunId = 0;
   let activeRunId = 0;
+  const pageSessionId = createPageSessionId();
+  const leasedRunIds = new Set<number>();
 
   function isActiveRun(runId: number): boolean {
     return activeRunId === runId;
   }
 
-  async function decode(docId: DocId, runId: number): Promise<boolean> {
+  function publicationIdForRun(runId: number): string {
+    return `${pageSessionId}:${runId}`;
+  }
+
+  function beginPageLease(runId: number): void {
+    leasedRunIds.add(runId);
+    void sendMessage("beginDecodeLease", { docId: props.docId }).catch(() => {});
+  }
+
+  async function releasePageLease(runId: number): Promise<void> {
+    if (!leasedRunIds.delete(runId)) {
+      return;
+    }
+    await sendMessage("endDecodeLease", { docId: props.docId }).catch(() => {});
+  }
+
+  async function requestMaintenanceForRun(
+    runId: number,
+    reconstructionStatus: "partial" | "complete",
+  ): Promise<void> {
+    if (!leasedRunIds.has(runId)) {
+      return;
+    }
+    const [retainRaw, budget] = await Promise.all([
+      keepRawData.getValue(),
+      storageBudget.getValue(),
+    ]);
+    await sendMessage("requestStorageMaintenance", {
+      docId: props.docId,
+      keepRawData: retainRaw,
+      budget,
+      reconstructionStatus,
+    }).catch(() => {});
+  }
+
+  async function finishRunMaintenance(
+    runId: number,
+    reconstructionStatus: "partial" | "complete",
+  ): Promise<void> {
+    await requestMaintenanceForRun(runId, reconstructionStatus);
+    await releasePageLease(runId);
+  }
+
+  async function decode(docId: DocId, runId: number, publicationId: string): Promise<boolean> {
     if (props.useWorker && typeof Worker !== "undefined") {
-      return decodeInWorker(docId, runId);
+      return decodeInWorker(docId, runId, publicationId);
     }
     return runPipelineSameThread(props.store, docId, {
+      publicationId,
       shouldPublish: () => isActiveRun(runId),
     });
   }
 
-  function decodeInWorker(docId: DocId, runId: number): Promise<boolean> {
+  function decodeInWorker(docId: DocId, runId: number, publicationId: string): Promise<boolean> {
     return new Promise<boolean>((resolve, reject) => {
       const localWorker = new Worker(new URL("./parse.worker.ts", import.meta.url), {
         type: "module",
@@ -293,7 +350,10 @@ const ReplaySurface: Component<{
           resolve(false);
           return;
         }
-        publishDerivedData(props.store, docId, message, () => isActiveRun(runId)).then(
+        publishDerivedData(props.store, docId, message, {
+          publicationId,
+          shouldPublish: () => isActiveRun(runId),
+        }).then(
           (published) => resolve(published),
           reject,
         );
@@ -337,8 +397,13 @@ const ReplaySurface: Component<{
   onCleanup(stopPolling);
 
   function startFlow(): void {
+    if (activeRunId !== 0) {
+      const previousRunId = activeRunId;
+      void finishRunMaintenance(previousRunId, "partial");
+    }
     const runId = ++nextRunId;
     activeRunId = runId;
+    beginPageLease(runId);
     worker?.terminate();
     worker = undefined;
     setPhase("discovering");
@@ -359,6 +424,7 @@ const ReplaySurface: Component<{
           setErrorCategory(ack.error.category);
           setPhase("error");
           stopPolling(runId);
+          void finishRunMaintenance(runId, "partial");
           return;
         }
         setPct(100);
@@ -389,6 +455,7 @@ const ReplaySurface: Component<{
             setErrorCategory("endpoint-unavailable");
             setPhase("error");
             stopPolling(runId);
+            void finishRunMaintenance(runId, "partial");
           }
           return;
         }
@@ -410,6 +477,7 @@ const ReplaySurface: Component<{
             setErrorCategory("network-failure");
             setPhase("error");
             stopPolling(runId);
+            void finishRunMaintenance(runId, "partial");
           }
         } else {
           stallCount = 0;
@@ -425,10 +493,12 @@ const ReplaySurface: Component<{
   }
 
   function onCancel(): void {
+    const cancelledRunId = activeRunId;
     activeRunId = ++nextRunId;
     worker?.terminate();
     worker = undefined;
     void sendMessage("cancelRetrieval", { docId: props.docId }).catch(() => {});
+    void finishRunMaintenance(cancelledRunId, "partial");
     stopPolling();
     setRetrievalDoneRunId(null);
     mutateLoaded(undefined);

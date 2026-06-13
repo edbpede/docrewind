@@ -6,15 +6,15 @@
 // reactive view over these.
 //
 // ONE read path for both the Worker and the same-thread fallback: whichever path
-// runs the pipeline WRITES decoded/snapshots/timeline to the store, and the page
-// then re-reads via `loadReplayData`. `rebuildReplayIndex` reconstructs the
-// in-memory `ReplayIndex` (snapshots array → `Map`) so `modelAtRevisionIndex`
-// can scrub cheaply.
+// runs the pipeline publishes a single atomic replay-publication record, and the
+// page then re-reads via `loadReplayData`. Legacy split decoded/snapshots/timeline
+// stores are compatibility-only and are deliberately not consulted here.
 
+import { PARSER_VERSION } from "../decoder/version";
 import type { DecodedRevision, DocId, TimelineEvent } from "../domain/model";
 import type { DocumentModel } from "../reconstruction/model";
 import { type ReplayIndex, SNAPSHOT_CADENCE } from "../reconstruction/snapshot";
-import type { RevisionStore, StoredSnapshot } from "../store";
+import type { ReplayPublication, RevisionStore, StoredSnapshot } from "../store";
 import { runPipelineOverBodies } from "../worker/pipeline";
 
 /** Everything the replay surface needs after a successful load. */
@@ -29,6 +29,12 @@ export interface ReplayDerivedData {
   readonly revisions: readonly DecodedRevision[];
   readonly snapshots: readonly StoredSnapshot[];
   readonly timeline: readonly TimelineEvent[];
+}
+
+export interface ReplayPublishOptions {
+  readonly publicationId: string;
+  readonly shouldPublish?: () => boolean;
+  readonly now?: () => number;
 }
 
 /**
@@ -48,33 +54,50 @@ export function rebuildReplayIndex(
   return { revisions: decoded, cadence: SNAPSHOT_CADENCE, snapshots: map };
 }
 
-/** Read decoded/snapshots/timeline for a document and rebuild its replay index. */
-export async function loadReplayData(store: RevisionStore, docId: DocId): Promise<ReplayData> {
-  const [revisions, snapshots, timeline] = await Promise.all([
-    store.getDecoded(docId),
-    store.getSnapshots(docId),
-    store.getTimeline(docId),
-  ]);
-  return { revisions, timeline, replayIndex: rebuildReplayIndex(revisions, snapshots) };
+function emptyReplayData(): ReplayData {
+  return { revisions: [], timeline: [], replayIndex: rebuildReplayIndex([], []) };
+}
+
+/** Read one matching atomic replay publication and rebuild its replay index. */
+export async function loadReplayData(
+  store: RevisionStore,
+  docId: DocId,
+  expectedPublicationId: string,
+): Promise<ReplayData> {
+  const publication = await store.getReplayPublication(docId, expectedPublicationId);
+  if (publication === null) {
+    return emptyReplayData();
+  }
+  return {
+    revisions: publication.revisions,
+    timeline: publication.timeline,
+    replayIndex: rebuildReplayIndex(publication.revisions, publication.snapshots),
+  };
 }
 
 /**
- * Persist decoded/snapshots/timeline after a caller has proven the producing
- * run is still current. The optional gate is re-checked immediately before each
- * write so stale same-thread work cannot continue publishing after a retry.
+ * Persist the full replay artifact as one atomic publication after the caller
+ * has proven the producing run is still current. The gate is checked immediately
+ * before the single store write so stale same-thread work cannot publish after a
+ * retry.
  */
 export async function publishDerivedData(
   store: RevisionStore,
   docId: DocId,
   data: ReplayDerivedData,
-  shouldPublish: () => boolean = () => true,
+  options: ReplayPublishOptions,
 ): Promise<boolean> {
+  const shouldPublish = options.shouldPublish ?? (() => true);
   if (!shouldPublish()) return false;
-  await store.saveDecoded(docId, data.revisions);
-  if (!shouldPublish()) return false;
-  await store.saveSnapshots(docId, data.snapshots);
-  if (!shouldPublish()) return false;
-  await store.saveTimeline(docId, data.timeline);
+  const publication: ReplayPublication = {
+    publicationId: options.publicationId,
+    parserVersion: PARSER_VERSION,
+    revisions: data.revisions,
+    snapshots: data.snapshots,
+    timeline: data.timeline,
+    publishedAt: options.now?.() ?? Date.now(),
+  };
+  await store.saveReplayPublication(docId, publication);
   return shouldPublish();
 }
 
@@ -88,7 +111,7 @@ export async function publishDerivedData(
 export async function runPipelineSameThread(
   store: RevisionStore,
   docId: DocId,
-  options: { readonly shouldPublish?: () => boolean } = {},
+  options: ReplayPublishOptions,
 ): Promise<boolean> {
   const chunks = await store.getRawChunks(docId);
   const result = runPipelineOverBodies(chunks.map((chunk) => chunk.body));
@@ -102,6 +125,6 @@ export async function runPipelineSameThread(
     store,
     docId,
     { revisions: result.revisions, snapshots, timeline: result.timeline },
-    options.shouldPublish,
+    options,
   );
 }

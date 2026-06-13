@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { beforeEach, describe, expect, it } from "vitest";
+import { PARSER_VERSION } from "./decoder/version";
 import { createMemoryStore } from "./db.memory";
 import { asDocId, asRevisionId } from "./domain/ids";
-import type { DecodedRevision, RawPayload } from "./domain/model";
+import type { RawPayload } from "./domain/model";
 import {
   applyPostDecodeStoragePolicy,
+  createStorageMaintenanceCoordinator,
   enforceStorageBudget,
   enforceStorageBudgetForAll,
   refreshCacheMeta,
@@ -20,16 +22,6 @@ function raw(body: unknown): RawPayload {
     },
     receivedAt: 0,
     body,
-  };
-}
-
-function decoded(): DecodedRevision {
-  return {
-    revisionId: asRevisionId(1),
-    userId: null,
-    sessionId: null,
-    time: null,
-    operations: [],
   };
 }
 
@@ -64,7 +56,22 @@ describe("storage maintenance", () => {
     const store = createMemoryStore();
     const docId = asDocId("maintDoc");
     await store.saveRawChunk(raw("body"));
-    await store.saveDecoded(docId, [decoded()]);
+    await store.saveReplayPublication(docId, {
+      publicationId: "pub-maint",
+      parserVersion: PARSER_VERSION,
+      revisions: [
+        {
+          revisionId: asRevisionId(1),
+          userId: null,
+          sessionId: null,
+          time: null,
+          operations: [],
+        },
+      ],
+      snapshots: [],
+      timeline: [],
+      publishedAt: 456,
+    });
 
     await applyPostDecodeStoragePolicy(store, docId, {
       keepRawData: false,
@@ -73,9 +80,62 @@ describe("storage maintenance", () => {
     });
 
     expect(await store.getRawChunks(docId)).toEqual([]);
-    expect(await store.getDecoded(docId)).toHaveLength(1);
+    expect(await store.getReplayPublication(docId, "pub-maint")).not.toBeNull();
     expect((await store.getCacheMeta(docId))?.rawRetained).toBe(false);
     expect((await store.getCacheMeta(docId))?.reconstructionStatus).toBe("complete");
+  });
+
+  it("defers keepRaw=false cleanup while a decode lease is active", async () => {
+    const store = createMemoryStore();
+    const coordinator = createStorageMaintenanceCoordinator(store);
+    const docId = asDocId("maintDoc");
+    await store.saveRawChunk(raw("body"));
+
+    coordinator.beginDecodeLease(docId);
+    const deferred = await coordinator.request({
+      docId,
+      keepRawData: false,
+      budget: { perDocumentBytes: 1, globalCapBytes: 1 },
+    });
+
+    expect(deferred.deferred).toBe(true);
+    expect(await store.getRawChunks(docId)).toHaveLength(1);
+
+    const released = await coordinator.endDecodeLease(docId);
+
+    expect(released.reclaimedBytes).toBeGreaterThan(0);
+    expect(await store.getRawChunks(docId)).toEqual([]);
+  });
+
+  it("coalesces repeated deferred maintenance requests until the lease is safe", async () => {
+    const base = createMemoryStore();
+    const rawDocId = asDocId("maintDoc");
+    let deleteCalls = 0;
+    const store = {
+      ...base,
+      deleteRawForDoc: async (docId: typeof rawDocId): Promise<number> => {
+        deleteCalls += 1;
+        return base.deleteRawForDoc(docId);
+      },
+    };
+    const coordinator = createStorageMaintenanceCoordinator(store);
+    await store.saveRawChunk(raw("body"));
+
+    coordinator.beginDecodeLease(rawDocId);
+    await coordinator.request({
+      docId: rawDocId,
+      keepRawData: false,
+      budget: { perDocumentBytes: 1, globalCapBytes: 1 },
+    });
+    await coordinator.request({
+      docId: rawDocId,
+      keepRawData: false,
+      budget: { perDocumentBytes: 1, globalCapBytes: 1 },
+    });
+    await coordinator.endDecodeLease(rawDocId);
+
+    expect(deleteCalls).toBe(1);
+    expect(await store.getRawChunks(rawDocId)).toEqual([]);
   });
 
   it("enforces per-document raw budget on the normal maintenance path", async () => {

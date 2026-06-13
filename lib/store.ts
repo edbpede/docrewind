@@ -46,6 +46,22 @@ export interface StoredSnapshot {
 }
 
 /**
+ * One atomic replay artifact for a decoded document. Replay rendering reads this
+ * single record only; the legacy split decoded/snapshot/timeline stores remain
+ * compatibility surfaces and are not authoritative for replay load.
+ */
+export interface ReplayPublication {
+  /** Unique per replay attempt / document epoch; never a bare page-local run id. */
+  readonly publicationId: string;
+  /** Decode-pipeline version that produced this publication. */
+  readonly parserVersion: number;
+  readonly revisions: readonly DecodedRevision[];
+  readonly snapshots: readonly StoredSnapshot[];
+  readonly timeline: readonly TimelineEvent[];
+  readonly publishedAt: number;
+}
+
+/**
  * Resumable-retrieval checkpoint (PRD §10.6). Persisted after each chunk so a
  * terminated service worker RESUMES rather than restarts. `nextStart` is the
  * resume cursor — the first revision not yet retrieved; retrieval is complete
@@ -103,7 +119,20 @@ export interface RevisionStore {
    */
   pruneRawToCapAll(capBytes: number): Promise<number>;
 
-  // --- Decoded data (owner: worker) ---------------------------------------
+  // --- Atomic replay publication (owner: replay page after active-run proof) -
+  /** Persist one full replay artifact as a single publication record. */
+  saveReplayPublication(docId: DocId, publication: ReplayPublication): Promise<void>;
+  /**
+   * Read the replay publication only when its unique attempt id matches. A miss,
+   * stale parser version, or id mismatch returns null rather than falling back to
+   * legacy split stores.
+   */
+  getReplayPublication(
+    docId: DocId,
+    expectedPublicationId: string,
+  ): Promise<ReplayPublication | null>;
+
+  // --- Legacy split decoded data (compatibility / explicit consumption only) -
   saveDecoded(docId: DocId, revisions: readonly DecodedRevision[]): Promise<void>;
   getDecoded(docId: DocId): Promise<readonly DecodedRevision[]>;
   saveSnapshots(docId: DocId, snapshots: readonly StoredSnapshot[]): Promise<void>;

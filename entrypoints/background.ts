@@ -33,10 +33,11 @@ import { buildRevisionsLoadUrl } from "@/lib/protocol/endpoints";
 import { fail, ok, type Result, type RetrievalError, retrievalError } from "@/lib/retrieval/errors";
 import { type CancellationToken, runRetrieval } from "@/lib/retrieval/orchestrator";
 import type { ChunkFetcher, ChunkRequest } from "@/lib/retrieval/transport";
-import { refreshCacheMeta } from "@/lib/storage-maintenance";
+import { createStorageMaintenanceCoordinator, refreshCacheMeta } from "@/lib/storage-maintenance";
 
 export default defineBackground(() => {
   const store = createIdbStore();
+  const maintenance = createStorageMaintenanceCoordinator(store);
 
   // Per-document cancellation flags for in-flight retrievals.
   const cancelledDocs = new Set<string>();
@@ -224,7 +225,20 @@ export default defineBackground(() => {
     runEpochByDoc.set(data.docId, (runEpochByDoc.get(data.docId) ?? 0) + 1);
   });
 
+  onMessage("beginDecodeLease", ({ data }) => {
+    maintenance.beginDecodeLease(data.docId);
+  });
+
+  onMessage("endDecodeLease", ({ data }) => maintenance.endDecodeLease(data.docId));
+
+  onMessage("requestStorageMaintenance", ({ data }) => maintenance.request(data));
+
   onMessage("startRetrieval", async ({ data }) => {
+    // Best-effort in-memory raw lease. MV3 may restart this service worker and
+    // lose it, so all maintenance requests are idempotent and replay terminal
+    // paths retry cleanup; while this worker is alive, raw pruning waits until
+    // retrieval and page decode have both released their leases.
+    maintenance.beginDecodeLease(data.docId);
     cancelledDocs.delete(data.docId);
     // Claim a fresh epoch; any earlier run for this docId is now stale and will
     // self-cancel on its next `isCancelled()` check.
@@ -233,30 +247,34 @@ export default defineBackground(() => {
     const cancellation: CancellationToken = {
       isCancelled: () => cancelledDocs.has(data.docId) || runEpochByDoc.get(data.docId) !== epoch,
     };
-    const result = await runRetrieval(
-      {
-        fetcher: liveFetcher,
-        discovery: createLiveDiscovery(data.userIndex),
-        store,
-        sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-        now: () => Date.now(),
-      },
-      { docId: data.docId, userIndex: data.userIndex, cancellation },
-    );
-    // Drop our epoch entry if still current (a newer start would have replaced
-    // it), and clear any cancel flag this run consumed — keeps both maps bounded.
-    if (runEpochByDoc.get(data.docId) === epoch) {
-      runEpochByDoc.delete(data.docId);
-      cancelledDocs.delete(data.docId);
+    try {
+      const result = await runRetrieval(
+        {
+          fetcher: liveFetcher,
+          discovery: createLiveDiscovery(data.userIndex),
+          store,
+          sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+          now: () => Date.now(),
+        },
+        { docId: data.docId, userIndex: data.userIndex, cancellation },
+      );
+      // Drop our epoch entry if still current (a newer start would have replaced
+      // it), and clear any cancel flag this run consumed — keeps both maps bounded.
+      if (runEpochByDoc.get(data.docId) === epoch) {
+        runEpochByDoc.delete(data.docId);
+        cancelledDocs.delete(data.docId);
+      }
+      if (result.ok) {
+        await refreshCacheMeta(store, data.docId, {
+          now: Date.now(),
+          reconstructionStatus: "partial",
+        });
+      }
+      // The error is content-free by construction — never log raw bodies (§13.7).
+      return result.ok ? { ok: true } : { ok: false, error: result.error };
+    } finally {
+      await maintenance.endDecodeLease(data.docId);
     }
-    if (result.ok) {
-      await refreshCacheMeta(store, data.docId, {
-        now: Date.now(),
-        reconstructionStatus: "partial",
-      });
-    }
-    // The error is content-free by construction — never log raw bodies (§13.7).
-    return result.ok ? { ok: true } : { ok: false, error: result.error };
   });
 
   onMessage("getCheckpoint", ({ data }) => store.readCheckpoint(data.docId));
