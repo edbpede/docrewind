@@ -37,6 +37,7 @@ REVIEW_MODELS="${REVIEW_MODELS:-$DEFAULT_MODELS}"
 mkdir -p "$WORKDIR"
 RAW_OUT="$WORKDIR/raw.out"
 GOOSE_ERR="$WORKDIR/goose.err"
+INDENTED_DIFF="$WORKDIR/diff.indented.patch"
 CLEANED="$WORKDIR/cleaned.out"
 REVIEW_JSON="$WORKDIR/review.json"
 VALID_TSV="$WORKDIR/valid_lines.tsv"
@@ -87,35 +88,49 @@ validate_gate_a() {
 
 # --- tiered fallback loop -> review.json -------------------------------------
 run_review() {
-  attempt=0; ok=0; host_fail=0
+  attempt=0; ok=0; host_fail=0; auth_fail=0
+  # goose renders --params into the recipe YAML, so a multi-line diff injected
+  # raw into the `prompt:` block scalar breaks YAML ("could not find expected
+  # ':'"). Indenting every line by 2 spaces keeps all substituted lines at or
+  # above the block indent, so they cannot break out — this is also the YAML
+  # injection defense for untrusted diff content. awk still reads the ORIGINAL
+  # diff for anchors, so line numbers are unaffected.
+  sed 's/^/  /' "$DIFF_FILE" > "$INDENTED_DIFF" 2>/dev/null || cp "$DIFF_FILE" "$INDENTED_DIFF"
   for model in $REVIEW_MODELS; do
     attempt=$((attempt + 1))
-    : > "$GOOSE_ERR"
-    if ! GOOSE_MODEL="$model" run_with_timeout \
-          goose run --recipe "$RECIPE" --params diff="$DIFF_FILE" \
-          > "$RAW_OUT" 2> "$GOOSE_ERR"; then
-      if grep -qiE '404|no route|invalid url|unknown host|could not resolve|connection refused|name or service not known' \
-            "$GOOSE_ERR" "$RAW_OUT" 2>/dev/null; then
-        host_fail=$((host_fail + 1))
-      fi
-      log "tier $attempt ($model): goose failed (exit/timeout)"
-      continue
-    fi
-    if ! extract_json "$RAW_OUT" "$REVIEW_JSON"; then
-      log "tier $attempt ($model): no JSON extractable"
-      continue
-    fi
-    if validate_gate_a "$REVIEW_JSON"; then
+    : > "$GOOSE_ERR"; : > "$RAW_OUT"
+    rc=0
+    # A recipe run ignores GOOSE_MODEL/GOOSE_PROVIDER env, so the tier model is
+    # passed via the explicit --model/--provider flags. --quiet keeps stdout to
+    # the model response; --no-session avoids writing session state in CI.
+    run_with_timeout \
+      goose run --recipe "$RECIPE" --params diff="$INDENTED_DIFF" \
+      --provider "${GOOSE_PROVIDER:-openai}" --model "$model" \
+      --quiet --no-session \
+      > "$RAW_OUT" 2> "$GOOSE_ERR" || rc=$?
+    # goose can exit 0 even on provider/auth errors (the error text lands on
+    # stdout), so a tier "succeeds" only if it yields schema-valid JSON — never
+    # by exit code alone.
+    if extract_json "$RAW_OUT" "$REVIEW_JSON" && validate_gate_a "$REVIEW_JSON"; then
       jq --arg m "$model" --argjson a "$((attempt - 1))" \
          '.model_used = $m | .fallback_attempts = $a' "$REVIEW_JSON" > "$REVIEW_JSON.tmp" \
          && mv "$REVIEW_JSON.tmp" "$REVIEW_JSON"
       log "tier $attempt ($model): accepted (fallback_attempts=$((attempt - 1)))"
       ok=1; break
     fi
-    log "tier $attempt ($model): schema-invalid output"
+    # Diagnose this tier from BOTH streams (rc is unreliable; errors may be on
+    # stdout). host/auth signatures repeated across tiers indicate a config bug
+    # rather than model flakiness.
+    if grep -qiE '404|no route|invalid url|unknown host|could not resolve|connection refused|name or service not known' \
+          "$GOOSE_ERR" "$RAW_OUT" 2>/dev/null; then host_fail=$((host_fail + 1)); fi
+    if grep -qiE '401|403|unauthorized|forbidden|authentication failed|invalid session|invalid api key' \
+          "$GOOSE_ERR" "$RAW_OUT" 2>/dev/null; then auth_fail=$((auth_fail + 1)); fi
+    log "tier $attempt ($model): no valid review (rc=$rc): $({ tail -c 300 "$RAW_OUT"; cat "$GOOSE_ERR"; } 2>/dev/null | tr '\n' ' ' | cut -c1-280)"
   done
   if [ "$ok" -ne 1 ]; then
-    if [ "$host_fail" -ge 2 ]; then
+    if [ "$auth_fail" -ge 2 ]; then
+      log "::error::all tiers failed authentication — likely a missing/invalid NANOGPT_API_KEY secret"
+    elif [ "$host_fail" -ge 2 ]; then
       log "::error::all tiers failed identically — likely OPENAI_HOST/provider misconfig, not model flakiness"
     fi
     log "all tiers failed"

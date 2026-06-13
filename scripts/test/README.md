@@ -39,24 +39,30 @@ non-zero on any failure. Shell is kept bash-3.2-compatible so it runs on stock m
 3. **Tune if needed.** `OPENAI_HOST`, `GOOSE_MAX_TURNS`, the model tiers in `scripts/review.sh`
    (`DEFAULT_MODELS`), and `MAX_DIFF_BYTES`.
 
-## M0 — provider handshake (do this first in CI, highest risk)
+## M0 / M1 — provider handshake and recipe invocation (RESOLVED against Goose 1.37.0)
 
 NanoGPT is OpenAI-compatible, so Goose's built-in `openai` provider is reused with a custom
-host. The exact host/path join must be confirmed empirically (the docs are mildly
-inconsistent). Try, capturing the constructed request URL with Goose debug logging, and
-confirm the path is `…/api/v1/chat/completions` (no `/v1/v1`):
+host. Confirmed empirically against Goose 1.37.0:
 
-| Try | Variable | Value |
-|---|---|---|
-| 1 | `OPENAI_HOST` | `https://nano-gpt.com/api` |
-| 2 | `OPENAI_HOST` | `https://nano-gpt.com/api/v1` |
-| 3 | `GOOSE_PROVIDER__HOST` | `https://nano-gpt.com/api` |
+- **Host:** `OPENAI_HOST=https://nano-gpt.com/api` is correct. Goose appends the OpenAI path,
+  producing `https://nano-gpt.com/api/v1/chat/completions` (no `/v1/v1`). `GOOSE_PROVIDER__HOST`
+  is not needed.
+- **Model/provider on a recipe run:** a `--recipe` run **ignores** the `GOOSE_MODEL` /
+  `GOOSE_PROVIDER` env vars ("No model configured"). The tier model must be passed via the
+  explicit `goose run --provider <p> --model <m>` flags. `review.sh` does this per tier.
+- **Parameter injection:** Goose renders `--params` into the recipe YAML *before* parsing it,
+  so a multi-line diff injected raw into the `prompt: |` block scalar breaks YAML
+  (`Invalid recipe: could not find expected ':'`). `review.sh` indents every diff line by two
+  spaces before passing it, which keeps all substituted lines at or above the block indent (and
+  doubles as a YAML-injection defense). `awk` still reads the original diff for anchors.
+- **Exit code:** Goose can exit `0` even on provider/auth errors, writing the error text to
+  **stdout**. `review.sh` therefore treats a tier as successful only when it yields
+  schema-valid JSON, and scans both streams for host/auth signatures to drive its diagnostics.
 
-Use a `:thinking` model at `GOOSE_MAX_TURNS=1` (the production condition) so schema
-enforcement under reasoning tokens is exercised here. If the final JSON object is not
-reliably emitted, raise `GOOSE_MAX_TURNS` to `2` (still tool-less, so still safe) and/or rely
-on the `review.sh` extractor. Also confirm the recipe parameter-injection mechanism
-(`--params diff=…` vs stdin) — `review.sh` currently passes `--params diff="$DIFF_FILE"`.
+Still to confirm on the first live CI run with a valid key: whether a `:thinking` model at
+`GOOSE_MAX_TURNS=1` reliably emits the schema object via Goose's `final_output` tool. If not,
+raise `GOOSE_MAX_TURNS` to `2` (still tool-less, so still safe) and/or rely on the `review.sh`
+extractor.
 
 ## Verification scope — what is proven where
 

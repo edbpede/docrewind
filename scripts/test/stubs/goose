@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# Stub `goose` for review.sh tests. Ignores all CLI args; behaviour is env-driven.
-#   STUB_FAIL_MODELS : space-separated GOOSE_MODEL values that should exit non-zero
+# Stub `goose` for review.sh tests. Reads the model from the --model flag (how
+# review.sh passes it for recipe runs), falling back to GOOSE_MODEL. Behaviour:
+#   STUB_FAIL_MODELS : space-separated model ids that should exit non-zero
 #   STUB_HOST_FAIL=1 : failing models emit a host/route 4xx signature on stderr
 #   STUB_GOOSE_OUT   : path to a file whose contents are written to stdout on success
-model="${GOOSE_MODEL:-unknown}"
+model="${GOOSE_MODEL:-}"
+prev=""
+for a in "$@"; do
+  [ "$prev" = "--model" ] && model="$a"
+  prev="$a"
+done
+model="${model:-unknown}"
 case " ${STUB_FAIL_MODELS:-} " in
   *" $model "*)
     if [ "${STUB_HOST_FAIL:-0}" = "1" ]; then
