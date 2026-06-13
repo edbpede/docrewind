@@ -185,7 +185,7 @@ This plan **follows `.augment/rules/bun-solid-pro.md`** as the authoritative sou
     }
     ```
 
-    - [ ] Adjust `test:logic` globs to the actual pure-logic test locations once Phase 3 creates them; the implementer must confirm paths rather than assume.
+    - [x] Adjust `test:logic` globs to the actual pure-logic test locations once Phase 3 creates them; the implementer must confirm paths rather than assume.
 - [x] Install pinned dependencies with Bun (exact versions; commit `bun.lock`):
   - [x] Runtime: `bun add solid-js idb @webext-core/messaging`.
   - [x] Dev/build: `bun add -D wxt @wxt-dev/module-solid @wxt-dev/unocss @wxt-dev/storage unocss @unocss/preset-wind4 typescript vitest @solidjs/testing-library jsdom @playwright/test @types/chrome`.
@@ -239,36 +239,36 @@ This plan **follows `.augment/rules/bun-solid-pro.md`** as the authoritative sou
 
 ### 3.2 Decoder (pure)
 
-- [ ] Implement `lib/protocol/framing.ts` to strip the `)]}'` guard before `JSON.parse` (Appendix A.3).
-- [ ] Implement `lib/decoder/decode.ts` against the source-confirmed grammar (Appendix A.2): `is`, `ds`, `mlti` (recurse depth-first over `mts`), and suggestion ops `iss`/`dss`/`msfd`/`usfd`.
-  - [ ] Model operations as a **discriminated union** keyed on `ty` with an exhaustive `never` default (guidelines "discriminated union").
-  - [ ] Use **branded types** for `DocId`/`RevisionId` (guidelines "branded type").
-  - [ ] Decode comments/images/tables/footnotes/equations/drawings/list-formatting as typed **opaque placeholders** that preserve position+timing and never abort (PRD §9.4, §15.3).
-  - [ ] Isolate unknown operation types and continue when safe; mark them in output.
-- [ ] Respect `noUncheckedIndexedAccess` — guard all array index reads.
+- [x] Implement `lib/protocol/framing.ts` to strip the `)]}'` guard before `JSON.parse` (Appendix A.3).
+- [x] Implement `lib/decoder/decode.ts` against the source-confirmed grammar (Appendix A.2): `is`, `ds`, `mlti` (recurse depth-first over `mts`), and suggestion ops `iss`/`dss`/`msfd`/`usfd`.
+  - [x] Model operations as a **discriminated union** keyed on `ty` with an exhaustive `never` default (guidelines "discriminated union").
+  - [x] Use **branded types** for `DocId`/`RevisionId` (guidelines "branded type").
+  - [x] Decode comments/images/tables/footnotes/equations/drawings/list-formatting as typed **opaque placeholders** that preserve position+timing and never abort (PRD §9.4, §15.3).
+  - [x] Isolate unknown operation types and continue when safe; mark them in output.
+- [x] Respect `noUncheckedIndexedAccess` — guard all array index reads.
 
 ### 3.3 Reconstruction engine (pure)
 
-- [ ] Implement `lib/reconstruction/model.ts` as a flat character array where each character carries insert/delete revision and a suggestion flag (Appendix A.2).
-- [ ] Implement apply semantics: insert splices at `ibi-1`; delete pops the inclusive `si..ei` range; `mlti` recurses; handle the `EndOfBody` sentinel (body vs footnote text).
-- [ ] Emit replayable **states/snapshots/deltas** with snapshotting for efficient scrubbing.
-- [ ] Guarantee text-level equality with current document text at end-of-timeline for the simple fixture corpus (PRD §15.3 MUST).
+- [x] Implement `lib/reconstruction/model.ts` as a flat character array where each character carries insert/delete revision and a suggestion flag (Appendix A.2).
+- [x] Implement apply semantics: insert splices at `ibi-1`; delete pops the inclusive `si..ei` range; `mlti` recurses; handle the `EndOfBody` sentinel (body vs footnote text).
+- [x] Emit replayable **states/snapshots/deltas** with snapshotting for efficient scrubbing.
+- [x] Guarantee text-level equality with current document text at end-of-timeline for the simple fixture corpus (PRD §15.3 MUST).
 
 ### 3.4 Timeline derivation (pure)
 
-- [ ] Implement `lib/timeline/derive.ts`: group low-level revisions into sessions; detect large insertions, deletions, and pauses; carry confidence/provenance where grouping is inferred (PRD §9.5).
+- [x] Implement `lib/timeline/derive.ts`: group low-level revisions into sessions; detect large insertions, deletions, and pauses; carry confidence/provenance where grouping is inferred (PRD §9.5).
 
 ### 3.5 Domain model and boundaries
 
-- [ ] Define the typed domain model in `lib/domain/*`: documents, revision ranges (requested vs received), raw payloads, decoded revisions, operations, document state, timeline events, playback sessions, cache records, diagnostic reports (PRD §10.5).
-- [ ] Keep the reconstruction engine free of any `browser.*`/WXT import so it is unit-testable in isolation and storage is swappable in tests (PRD §10.2).
+- [x] Define the typed domain model in `lib/domain/*`: documents, revision ranges (requested vs received), raw payloads, decoded revisions, operations, document state, timeline events, playback sessions, cache records, diagnostic reports (PRD §10.5).
+- [x] Keep the reconstruction engine free of any `browser.*`/WXT import so it is unit-testable in isolation and storage is swappable in tests (PRD §10.2).
 
 ### Validation / acceptance criteria
 
 - [x] `docs/protocol-capture.md` exists with all §24 items answered (2026-06-12), and `lib/protocol/*` encodes them with fail-safe schema detection.
-- [ ] Decoder + reconstruction modules import **no** browser/WXT APIs (verify by grep for `#imports`/`browser.`/`wxt`).
-- [ ] Pure-logic tests (Phase 6) reconstruct the simple fixture corpus to text-equal-to-current at end-of-timeline.
-- [ ] All operation shapes are exhaustively narrowed (a missing case is a `tsc` error via the `never` default).
+- [x] Decoder + reconstruction modules import **no** browser/WXT APIs (verify by grep for `#imports`/`browser.`/`wxt`).
+- [x] Pure-logic tests (Phase 6) reconstruct the simple fixture corpus to text-equal-to-current at end-of-timeline.
+- [x] All operation shapes are exhaustively narrowed (a missing case is a `tsc` error via the `never` default).
 - [x] No stop-condition from §24 is present (checked 2026-06-12 against the live endpoint — none fired).
 
 ---
@@ -285,7 +285,8 @@ This plan **follows `.augment/rules/bun-solid-pro.md`** as the authoritative sou
 > in `entrypoints/background.ts` (live `ChunkFetcher` + `fetch(url, {
 > credentials: "include" })` + revision-count discovery). The decoder gained a
 > tuple-envelope adapter for the real wire format and an end-to-end text-equality
-> proof runs on a sanitized live capture. See `docs/phase-4-acceptance.md`.
+> proof runs on a sanitized live capture. Verified by the gate suite in this
+> checkout — see `.omc/plans/phase-1-4-completion-plan.md`.
 
 - [x] Settings via WXT typed storage — `lib/settings.ts`:
   - [x] Import `storage` from `#imports`; define typed, area-prefixed items with explicit fallbacks: `theme` (`local:theme`), `keepRawData` (`local:keepRawData`, default `true`, PRD §9.8), `realIdentities` (`local:realIdentities`, default `false`, PRD §9.7), `storageBudget` settings.
@@ -312,7 +313,7 @@ This plan **follows `.augment/rules/bun-solid-pro.md`** as the authoritative sou
   - [x] Do **not** auto-load revision history; require explicit user activation (PRD §9.2).
   - [x] Any in-page UI mounts via `createShadowRootUi` with `isolateEvents` (PRD §11.2) — no style leakage into Google Docs. Minimal intentional Phase-4 affordance; full **`frontend-design`** polish is Phase 5.
 - [x] Replay-page Web Worker host — `entrypoints/replay/parse.worker.ts` (path reconciled from `lib/worker/parse.worker.ts`; pure logic in `lib/worker/pipeline.ts`):
-  - [x] Heavy decoding/reconstruction/timeline runs in the pure pipeline; the Worker shell owns its own idb realm, reads raw chunks, writes decoded results through `idb`, and posts frames. (Worker→page wiring via `new Worker(new URL(...))` lands with the Phase-5 replay page; the pure pipeline runs same-thread either way — see `docs/phase-4-acceptance.md`.)
+  - [x] Heavy decoding/reconstruction/timeline runs in the pure pipeline; the Worker shell owns its own idb realm, reads raw chunks, writes decoded results through `idb`, and posts frames. (Worker→page wiring via `new Worker(new URL(...))` lands with the Phase-5 replay page; the pure pipeline runs same-thread either way — verified by the gate suite in this checkout, see `.omc/plans/phase-1-4-completion-plan.md`.)
 
 ### Validation / acceptance criteria
 
