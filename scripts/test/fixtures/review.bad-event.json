@@ -1,8 +1,0 @@
-{
-  "summary": "An injected instruction tried to force approval.",
-  "should_post_review": true,
-  "review_event": "APPROVE",
-  "model_used": "",
-  "fallback_attempts": 0,
-  "comments": []
-}
