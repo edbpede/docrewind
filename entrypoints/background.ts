@@ -60,6 +60,17 @@ export default defineBackground(() => {
     return `${DOCS_ORIGIN}/document${userSegment}/d/${docId}/edit`;
   };
 
+  // Build the replay-page query string. OMITS `u` entirely when userIndex is null
+  // (so the page's strict parse reads `null`, never a wrong `/u/0/` account slot);
+  // appends `&u=<n>` only for a real integer.
+  const buildReplayQuery = (docId: DocId, userIndex: number | null): string => {
+    const params = new URLSearchParams({ doc: docId });
+    if (userIndex !== null && Number.isInteger(userIndex)) {
+      params.set("u", String(userIndex));
+    }
+    return `?${params.toString()}`;
+  };
+
   // Map an HTTP status to the typed error taxonomy. Recoverable categories let
   // the orchestrator back off + shrink the chunk before retrying — so a soft
   // rate limit (429) or a too-large-range 400 self-heals (A.9), while an auth
@@ -192,6 +203,18 @@ export default defineBackground(() => {
     },
   });
   // ─────────────────────────────────────────────────────────────────────────
+
+  onMessage("activateReplay", ({ data }) => {
+    // Seam A1: the content-script click activates the SURFACE, not the fetch. We
+    // open our OWN extension page; creating a tab to an own-extension URL needs
+    // NO `tabs` permission (tabs.create is gated only for cross-origin URL/tab
+    // metadata access, not own-page creation), so permissions stay ["storage"]
+    // and the privacy invariant holds. The replay page then validates the id,
+    // drives the worker, and starts retrieval itself.
+    void browser.tabs.create({
+      url: browser.runtime.getURL(`/replay.html${buildReplayQuery(data.docId, data.userIndex)}`),
+    });
+  });
 
   onMessage("cancelRetrieval", ({ data }) => {
     cancelledDocs.add(data.docId);

@@ -7,6 +7,7 @@
 // typed messaging. All `browser.*`/DOM access stays inside `main(ctx)`.
 
 import { render } from "solid-js/web";
+import "virtual:uno.css";
 import ReplayAffordance from "@/components/ReplayAffordance";
 import { parseDocsUrl } from "@/lib/docs-url";
 import { sendMessage } from "@/lib/messaging";
@@ -33,9 +34,11 @@ export default defineContentScript({
             <ReplayAffordance
               onActivate={() => {
                 // Explicit user action only (PRD §9.2). The content script does
-                // not own the fetch (PRD §10.9) — it asks the background to start
-                // resumable retrieval over typed messaging.
-                void sendMessage("startRetrieval", {
+                // not own the fetch or the surface (PRD §10.9, Seam A1) — it asks
+                // the background to OPEN the replay tab, which then owns the full
+                // load lifecycle (validates the id, drives the worker, starts
+                // retrieval itself). Fire-and-forget over typed messaging.
+                void sendMessage("activateReplay", {
                   docId: info.docId,
                   userIndex: info.userIndex,
                 }).catch(() => {

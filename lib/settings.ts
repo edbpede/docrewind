@@ -11,6 +11,14 @@ import { storage } from "#imports";
 /** Visual theme preference. `system` follows the OS setting. */
 export type Theme = "light" | "dark" | "system";
 
+/**
+ * Diagnostics verbosity (PRD §10.8). `default` records only what decoding needs;
+ * `structural` additionally records length-only structural notes. Both stay
+ * privacy-safe (never verbatim text). Phase 5 ships the setting toggle only —
+ * diagnostic-report rendering is deferred to Phase 6.
+ */
+export type DiagnosticsMode = "default" | "structural";
+
 /** Per-document and global byte budgets for the bulk cache (PRD §9.8). */
 export interface StorageBudget {
   readonly perDocumentBytes: number;
@@ -70,4 +78,9 @@ export const storageBudget = storage.defineItem<StorageBudget>("local:storageBud
   fallback: DEFAULT_STORAGE_BUDGET,
   version: 2,
   migrations: STORAGE_BUDGET_MIGRATIONS,
+});
+
+/** Diagnostics verbosity mode (PRD §10.8). Default records the minimum. */
+export const diagnosticsMode = storage.defineItem<DiagnosticsMode>("local:diagnosticsMode", {
+  fallback: "default",
 });
