@@ -32,17 +32,27 @@ fail() {
   status=1
 }
 
-# Resolve a single .output zip matching a glob, or exit loudly if none exists.
+# Resolve the single .output zip matching a glob. Exit loudly on ZERO matches
+# (artifacts not built) or MORE THAN ONE (stale version-stamped zips coexist
+# because .output was not cleared) so the audit can never silently inspect an
+# older build than the one being released.
 find_zip() {
-  local pat="$1" hit
+  local pat="$1" matches count
   # shellcheck disable=SC2086
-  hit="$(ls .output/$pat 2>/dev/null | head -1 || true)"
-  if [ -z "$hit" ]; then
+  matches="$(ls -1 .output/$pat 2>/dev/null || true)"
+  if [ -z "$matches" ]; then
     echo "FAIL: no artifact matching .output/$pat." >&2
     echo "      Run 'bun run zip' and 'bun run zip:firefox' before this audit." >&2
     exit 1
   fi
-  printf '%s\n' "$hit"
+  count="$(printf '%s\n' "$matches" | wc -l | tr -d '[:space:]')"
+  if [ "$count" -ne 1 ]; then
+    echo "FAIL: $count artifacts match .output/$pat (expected exactly 1):" >&2
+    printf '        %s\n' $matches >&2
+    echo "      Clear stale builds (e.g. 'rm -f .output/*.zip') and rebuild before this audit." >&2
+    exit 1
+  fi
+  printf '%s\n' "$matches"
 }
 
 # Audit one extension manifest extracted from its shipped zip.
@@ -72,6 +82,12 @@ audit_manifest() {
       fail "$kind manifest declares remote-code-adjacent key '$key'"
     fi
   done
+  # Firefox self-hosted updates live at the NESTED gecko.update_url path, which
+  # is functionally equivalent to a top-level update_url but invisible to the
+  # has() check above. Reject it too.
+  if [ "$(jq '(.browser_specific_settings.gecko // {}) | has("update_url")' "$m")" = "true" ]; then
+    fail "$kind manifest declares remote-code-adjacent key 'browser_specific_settings.gecko.update_url'"
+  fi
   # A CSP, if present, must not whitelist a remote (http/https) code origin.
   if [ "$(jq 'has("content_security_policy")' "$m")" = "true" ]; then
     if jq -r '.content_security_policy | tostring' "$m" | grep -qiE 'https?://'; then

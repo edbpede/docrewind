@@ -66,14 +66,24 @@ hash_build() {
   bun run zip >>"$work/$tag-build.log" 2>&1
   bun run zip:firefox >>"$work/$tag-build.log" 2>&1
 
-  local kind zip ex
+  local kind zip ex n
   for kind in chrome firefox; do
-    zip="$(ls .output/*-"$kind".zip 2>/dev/null | head -1 || true)"
-    if [ -z "$zip" ]; then
+    # Require EXACTLY one match: the preceding `rm -f .output/*.zip` plus WXT's
+    # version-templated naming ({{name}}-{{version}}-{{browser}}.zip) normally
+    # yields one zip per browser, but assert it rather than silently hashing
+    # whichever sorts first if a stray second zip ever coexists.
+    n="$(ls .output/*-"$kind".zip 2>/dev/null | wc -l | tr -d '[:space:]')"
+    if [ "$n" -eq 0 ]; then
       echo "FAIL: build '$tag' produced no .output/*-$kind.zip." >&2
       cat "$work/$tag-build.log" >&2
       exit 1
     fi
+    if [ "$n" -ne 1 ]; then
+      echo "FAIL: build '$tag' produced $n .output/*-$kind.zip files; expected exactly 1:" >&2
+      ls .output/*-"$kind".zip >&2
+      exit 1
+    fi
+    zip="$(ls .output/*-"$kind".zip)"
     ex="$work/$tag-$kind"
     mkdir -p "$ex"
     unzip -q -o "$zip" -d "$ex"

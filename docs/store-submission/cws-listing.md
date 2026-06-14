@@ -37,8 +37,9 @@ ships inside the package. The build:
 - declares no `content_security_policy` that whitelists a remote origin, no
   `externally_connectable`, and no `update_url` pointing at third-party code;
 - makes network requests to **`docs.google.com` only** — enforced at runtime
-  (`e2e/network-isolation.spec.ts`) and statically
-  (`scripts/check-no-foreign-hosts.sh`).
+  across the exercised flow (`e2e/network-isolation.spec.ts`) and, as
+  defense-in-depth, statically over the primary source dirs `lib/` +
+  `entrypoints/` (`scripts/check-no-foreign-hosts.sh`).
 
 ## Data use
 

@@ -29,6 +29,19 @@ shopt -s nullglob
 zips=(.output/*.zip)
 shopt -u nullglob
 
+# Pin the hash-line order under a fixed locale so SHA256SUMS is byte-for-byte
+# reproducible regardless of the caller's LC_COLLATE (matches the determinism
+# norm in verify-reproducible-build.sh, which uses `LC_ALL=C sort`). `sha256sum
+# -c` is order-insensitive, but a stable order keeps the artifact reproducible.
+# Uses a read-loop rather than `mapfile` for bash 3.2 (stock macOS) portability.
+if [ "${#zips[@]}" -gt 0 ]; then
+  sorted_zips=()
+  while IFS= read -r zip; do
+    sorted_zips+=("$zip")
+  done < <(printf '%s\n' "${zips[@]}" | LC_ALL=C sort)
+  zips=("${sorted_zips[@]}")
+fi
+
 if [ "${#zips[@]}" -eq 0 ]; then
   echo "FAIL: no .output/*.zip artifacts found." >&2
   echo "      Run 'bun run zip' and 'bun run zip:firefox' before generating checksums." >&2
