@@ -5,6 +5,11 @@ import { defineConfig } from "wxt";
 // All permission/identity facts live here so the privacy invariant
 // (host_permissions = docs.google.com only; permissions = storage only)
 // is enforced at config time.
+//
+// Build determinism (Phase 7): the UnoCSS theme-variable ordering that would
+// otherwise make back-to-back builds non-reproducible is normalized in
+// uno.config.ts via a `post` SourceCodeTransformer — it must run before Vite
+// hashes the CSS asset, which a Vite plugin here cannot do. See uno.config.ts.
 export default defineConfig({
   modules: ["@wxt-dev/module-solid", "@wxt-dev/unocss"],
   // Build BOTH browsers as MV3 (Firefox would otherwise default to MV2).

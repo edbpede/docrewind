@@ -15,12 +15,60 @@
 // neutralizes timeline/scrubber/progress transitions at the CSS layer, and the
 // App separately caps the JS auto-advance cadence.
 
-import { defineConfig, presetWind4 } from "unocss";
+import { defineConfig, presetWind4, type SourceCodeTransformer } from "unocss";
+
+// Build-determinism transformer (Phase 7 / docs/RELEASE.md).
+//
+// presetWind4 emits its `:root,:host { … }` theme-variable block (theme layer)
+// and its `*,::before… { --un-* }` registered-property block (properties layer)
+// in extraction-ENCOUNTER order — `Array.from(Set/Map)`, unsorted
+// (@unocss/preset-wind4/dist/index.mjs:503,20). WXT runs one Vite build over
+// several entrypoints, so the order keys are first touched varies run-to-run,
+// permuting those blocks. That changes the CSS bytes AND the Vite asset `[hash]`
+// (assigned inside renderChunk at @unocss/vite index.mjs:595), which cascades
+// into the sibling JS/HTML that embed the hashed name — so back-to-back builds
+// would not be per-file content-identical.
+//
+// UnoCSS runs config `transformers` (enforce:"post") over each generated layer's
+// CSS at @unocss/vite index.mjs:586-590, immediately BEFORE that CSS is handed to
+// vite:css-post for hashing. Sorting the declarations of any innermost pure-`--`
+// block here makes the emitted bytes — and therefore the filename hash —
+// deterministic. Safe because each custom property is emitted exactly once
+// (Set/Map dedup), so declaration order within a single rule has no cascade
+// effect; the `--`-only guard leaves every non-var rule untouched.
+const sortUnoVarBlocks: SourceCodeTransformer = {
+  name: "docrewind:sort-uno-var-blocks",
+  enforce: "post",
+  // The generated layer CSS is passed to transformers under a synthetic id
+  // ending in `-unocss-hash.css` (@unocss/vite index.mjs:584); match it so this
+  // runs on generated CSS (the default extraction filter would skip it).
+  idFilter: (id) => id.endsWith("-unocss-hash.css"),
+  transform(code) {
+    const css = code.toString();
+    const blockRe = /\{([^{}]*)\}/g;
+    let changed = false;
+    const next = css.replace(blockRe, (whole, body: string) => {
+      const decls = body
+        .split(";")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (decls.length < 2 || !decls.every((d) => d.startsWith("--"))) return whole;
+      const sorted = [...decls].sort();
+      if (sorted.every((d, i) => d === decls[i])) return whole; // already ordered
+      changed = true;
+      return `{${sorted.join(";")};}`;
+    });
+    if (changed) code.overwrite(0, code.original.length, next);
+  },
+};
 
 export default defineConfig({
   // `dark: "class"` pins class-based dark mode (Wind4's default, pinned so the
   // `.dark` toggle — not the OS media query — is the single source of truth).
   presets: [presetWind4({ reset: true, dark: "class" })],
+
+  // Deterministic CSS variable ordering — see sortUnoVarBlocks above.
+  transformers: [sortUnoVarBlocks],
 
   theme: {
     colors: {
