@@ -16,7 +16,8 @@ describe("ReplayAffordance", () => {
   it("renders a button and does NOT activate on mount", () => {
     const onActivate = vi.fn();
     const { getByRole } = renderTL(() => <ReplayAffordance onActivate={onActivate} />);
-    expect(getByRole("button").textContent).toBe("Replay revisions");
+    // The label pairs an icon glyph with text (§9.11), so assert containment.
+    expect(getByRole("button").textContent).toContain("Replay revisions");
     expect(onActivate).not.toHaveBeenCalled(); // no auto-load (PRD §9.2)
   });
 
@@ -49,18 +50,17 @@ describe("content-script trigger wiring", () => {
     removeAllListeners();
   });
 
-  it("a click sends a typed startRetrieval message", async () => {
+  it("a click sends a typed activateReplay message", async () => {
     let received: { docId: string; userIndex: number | null } | null = null;
-    onMessage("startRetrieval", ({ data }) => {
+    onMessage("activateReplay", ({ data }) => {
       received = { docId: data.docId, userIndex: data.userIndex };
-      return { ok: true };
     });
 
     const docId = asDocId("docCONTENT");
     const { getByRole } = renderTL(() => (
       <ReplayAffordance
         onActivate={() => {
-          void sendMessage("startRetrieval", { docId, userIndex: 1 });
+          void sendMessage("activateReplay", { docId, userIndex: 1 });
         }}
       />
     ));

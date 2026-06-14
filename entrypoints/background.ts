@@ -33,9 +33,28 @@ import { buildRevisionsLoadUrl } from "@/lib/protocol/endpoints";
 import { fail, ok, type Result, type RetrievalError, retrievalError } from "@/lib/retrieval/errors";
 import { type CancellationToken, runRetrieval } from "@/lib/retrieval/orchestrator";
 import type { ChunkFetcher, ChunkRequest } from "@/lib/retrieval/transport";
+import {
+  beginStorageLease,
+  endStorageLease,
+  getPendingDestructiveStorageClears,
+  getPendingStorageMaintenance,
+  hasActiveStorageLease,
+  refreshStorageLease,
+  removePendingDestructiveStorageClear,
+  removePendingStorageMaintenance,
+  STORAGE_LEASE_REFRESH_MS,
+} from "@/lib/settings";
+import {
+  createStorageMaintenanceCoordinator,
+  refreshCacheMeta,
+  type StorageMaintenanceRequest,
+} from "@/lib/storage-maintenance";
 
 export default defineBackground(() => {
   const store = createIdbStore();
+  const maintenance = createStorageMaintenanceCoordinator(store, {
+    canRunScope: async (docId) => !(await hasActiveStorageLease(docId)),
+  });
 
   // Per-document cancellation flags for in-flight retrievals.
   const cancelledDocs = new Set<string>();
@@ -44,6 +63,68 @@ export default defineBackground(() => {
   // and stops — preventing two concurrent runs from racing the IDB store when
   // MV3 dispatches overlapping messages (handlers are not serialized).
   const runEpochByDoc = new Map<string, number>();
+
+  const cancelDocumentRun = (docId: DocId): void => {
+    cancelledDocs.add(docId);
+    runEpochByDoc.set(docId, (runEpochByDoc.get(docId) ?? 0) + 1);
+  };
+
+  const cancelAllDocumentRuns = (): void => {
+    for (const docId of runEpochByDoc.keys()) {
+      cancelDocumentRun(docId as DocId);
+    }
+  };
+
+  async function requestDestructiveClear(
+    request:
+      | { readonly kind: "document"; readonly docId: DocId; readonly id?: string }
+      | { readonly kind: "all"; readonly id?: string },
+  ) {
+    const blockedScope = request.kind === "all" ? null : request.docId;
+    if (request.kind === "all") {
+      cancelAllDocumentRuns();
+    } else {
+      cancelDocumentRun(request.docId);
+    }
+    const hasDurableLease = await hasActiveStorageLease(blockedScope);
+    const isPersisted = request.id !== undefined;
+    if (isPersisted && (hasDurableLease || maintenance.hasActiveLease(blockedScope))) {
+      return { status: "deferred" as const, reclaimedBytes: 0 };
+    }
+    if (request.kind === "all") {
+      return maintenance.requestDestructiveClear({ kind: "all" });
+    }
+    return maintenance.requestDestructiveClear({ kind: "document", docId: request.docId });
+  }
+
+  async function requestStorageMaintenance(
+    request: StorageMaintenanceRequest & { readonly id?: string },
+  ) {
+    const hasDurableLease = await hasActiveStorageLease(request.docId);
+    const isPersisted = request.id !== undefined;
+    if (isPersisted && (hasDurableLease || maintenance.hasActiveLease(request.docId))) {
+      return { status: "deferred" as const, reclaimedBytes: 0 };
+    }
+    return maintenance.request(request);
+  }
+
+  async function drainPersistedRequests(): Promise<void> {
+    for (const request of await getPendingDestructiveStorageClears()) {
+      const ack = await requestDestructiveClear(request);
+      if (ack.status === "completed") {
+        await removePendingDestructiveStorageClear(request.id);
+      }
+    }
+
+    for (const request of await getPendingStorageMaintenance()) {
+      const ack = await requestStorageMaintenance(request);
+      if (ack.status === "completed") {
+        await removePendingStorageMaintenance(request.id);
+      }
+    }
+  }
+
+  void drainPersistedRequests();
 
   // ── LIVE §24 transport adapters ──────────────────────────────────────────
   const DOCS_ORIGIN = "https://docs.google.com";
@@ -58,6 +139,17 @@ export default defineBackground(() => {
   const buildEditUrl = (docId: DocId, userIndex: number | null): string => {
     const userSegment = userIndex !== null ? `/u/${userIndex}` : "";
     return `${DOCS_ORIGIN}/document${userSegment}/d/${docId}/edit`;
+  };
+
+  // Build the replay-page query string. OMITS `u` entirely when userIndex is null
+  // (so the page's strict parse reads `null`, never a wrong `/u/0/` account slot);
+  // appends `&u=<n>` only for a real integer.
+  const buildReplayQuery = (docId: DocId, userIndex: number | null): string => {
+    const params = new URLSearchParams({ doc: docId });
+    if (userIndex !== null && Number.isInteger(userIndex)) {
+      params.set("u", String(userIndex));
+    }
+    return `?${params.toString()}`;
   };
 
   // Map an HTTP status to the typed error taxonomy. Recoverable categories let
@@ -193,14 +285,74 @@ export default defineBackground(() => {
   });
   // ─────────────────────────────────────────────────────────────────────────
 
+  onMessage("activateReplay", ({ data }) => {
+    // Seam A1: the content-script click activates the SURFACE, not the fetch. We
+    // open our OWN extension page; creating a tab to an own-extension URL needs
+    // NO `tabs` permission (tabs.create is gated only for cross-origin URL/tab
+    // metadata access, not own-page creation), so permissions stay ["storage"]
+    // and the privacy invariant holds. The replay page then validates the id,
+    // drives the worker, and starts retrieval itself.
+    void browser.tabs.create({
+      url: browser.runtime.getURL(`/replay.html${buildReplayQuery(data.docId, data.userIndex)}`),
+    });
+  });
+
   onMessage("cancelRetrieval", ({ data }) => {
-    cancelledDocs.add(data.docId);
     // Bump the epoch too: a later `startRetrieval` clears `cancelledDocs`, but
     // the in-flight run is pinned to its own epoch and still observes the bump.
-    runEpochByDoc.set(data.docId, (runEpochByDoc.get(data.docId) ?? 0) + 1);
+    cancelDocumentRun(data.docId);
+  });
+
+  onMessage("beginDecodeLease", async ({ data }) => {
+    await beginStorageLease(data.docId);
+    maintenance.beginDecodeLease(data.docId);
+  });
+
+  onMessage("refreshDecodeLease", async ({ data }) => {
+    await refreshStorageLease(data.docId);
+  });
+
+  onMessage("endDecodeLease", async ({ data }) => {
+    await endStorageLease(data.docId);
+    const ack = await maintenance.endDecodeLease(data.docId);
+    await drainPersistedRequests();
+    return ack;
+  });
+
+  onMessage("requestStorageMaintenance", async ({ data }) => {
+    const ack = await requestStorageMaintenance(data);
+    if (ack.status === "completed" && data.id !== undefined) {
+      await removePendingStorageMaintenance(data.id);
+    }
+    return ack;
+  });
+
+  onMessage("clearDocumentCache", async ({ data }) => {
+    const ack = await requestDestructiveClear({ ...data, kind: "document" });
+    if (ack.status === "completed" && data.id !== undefined) {
+      await removePendingDestructiveStorageClear(data.id);
+    }
+    return ack;
+  });
+
+  onMessage("clearAllCaches", async ({ data }) => {
+    const ack = await requestDestructiveClear({ ...data, kind: "all" });
+    if (ack.status === "completed" && data.id !== undefined) {
+      await removePendingDestructiveStorageClear(data.id);
+    }
+    return ack;
   });
 
   onMessage("startRetrieval", async ({ data }) => {
+    // Best-effort in-memory raw lease. MV3 may restart this service worker and
+    // lose it, so all maintenance requests are idempotent and replay terminal
+    // paths retry cleanup; while this worker is alive, raw pruning waits until
+    // retrieval and page decode have both released their leases.
+    await beginStorageLease(data.docId);
+    maintenance.beginDecodeLease(data.docId);
+    const leaseRefresh = setInterval(() => {
+      void refreshStorageLease(data.docId).catch(() => {});
+    }, STORAGE_LEASE_REFRESH_MS);
     cancelledDocs.delete(data.docId);
     // Claim a fresh epoch; any earlier run for this docId is now stale and will
     // self-cancel on its next `isCancelled()` check.
@@ -209,24 +361,37 @@ export default defineBackground(() => {
     const cancellation: CancellationToken = {
       isCancelled: () => cancelledDocs.has(data.docId) || runEpochByDoc.get(data.docId) !== epoch,
     };
-    const result = await runRetrieval(
-      {
-        fetcher: liveFetcher,
-        discovery: createLiveDiscovery(data.userIndex),
-        store,
-        sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-        now: () => Date.now(),
-      },
-      { docId: data.docId, userIndex: data.userIndex, cancellation },
-    );
-    // Drop our epoch entry if still current (a newer start would have replaced
-    // it), and clear any cancel flag this run consumed — keeps both maps bounded.
-    if (runEpochByDoc.get(data.docId) === epoch) {
-      runEpochByDoc.delete(data.docId);
-      cancelledDocs.delete(data.docId);
+    try {
+      const result = await runRetrieval(
+        {
+          fetcher: liveFetcher,
+          discovery: createLiveDiscovery(data.userIndex),
+          store,
+          sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+          now: () => Date.now(),
+        },
+        { docId: data.docId, userIndex: data.userIndex, cancellation },
+      );
+      // Drop our epoch entry if still current (a newer start would have replaced
+      // it), and clear any cancel flag this run consumed — keeps both maps bounded.
+      if (runEpochByDoc.get(data.docId) === epoch) {
+        runEpochByDoc.delete(data.docId);
+        cancelledDocs.delete(data.docId);
+      }
+      if (result.ok) {
+        await refreshCacheMeta(store, data.docId, {
+          now: Date.now(),
+          reconstructionStatus: "partial",
+        });
+      }
+      // The error is content-free by construction — never log raw bodies (§13.7).
+      return result.ok ? { ok: true } : { ok: false, error: result.error };
+    } finally {
+      clearInterval(leaseRefresh);
+      await endStorageLease(data.docId);
+      await maintenance.endDecodeLease(data.docId);
+      await drainPersistedRequests();
     }
-    // The error is content-free by construction — never log raw bodies (§13.7).
-    return result.ok ? { ok: true } : { ok: false, error: result.error };
   });
 
   onMessage("getCheckpoint", ({ data }) => store.readCheckpoint(data.docId));

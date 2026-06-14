@@ -19,10 +19,17 @@ import type {
   RevisionId,
   TimelineEvent,
 } from "./domain/model";
-import type { RetrievalCheckpoint, RevisionStore, StoredSnapshot, UsageEstimate } from "./store";
+import type {
+  ActiveReplayPublication,
+  ReplayPublication,
+  RetrievalCheckpoint,
+  RevisionStore,
+  StoredSnapshot,
+  UsageEstimate,
+} from "./store";
 
 const DB_NAME = "docrewind";
-const DB_VERSION = 1;
+const DB_VERSION = 4;
 
 /** A raw chunk row: the composite `[docId,start,end]` key fields + the payload. */
 interface RawChunkRecord {
@@ -48,6 +55,14 @@ interface TimelineRecord {
   readonly parserVersion: number;
   readonly events: readonly TimelineEvent[];
 }
+interface ReplayPublicationRecord {
+  readonly docId: DocId;
+  readonly publicationId: string;
+  readonly publication: ReplayPublication;
+}
+interface ActiveReplayPublicationRecord extends ActiveReplayPublication {
+  readonly docId: DocId;
+}
 
 interface DocRewindDB extends DBSchema {
   rawChunks: {
@@ -58,31 +73,69 @@ interface DocRewindDB extends DBSchema {
   decoded: { key: string; value: DecodedRecord; indexes: { "by-doc": string } };
   snapshots: { key: string; value: SnapshotsRecord; indexes: { "by-doc": string } };
   timeline: { key: string; value: TimelineRecord; indexes: { "by-doc": string } };
+  replayPublications: {
+    key: [string, string];
+    value: ReplayPublicationRecord;
+    indexes: { "by-doc": string };
+  };
+  activeReplayPublications: {
+    key: string;
+    value: ActiveReplayPublicationRecord;
+  };
   cacheMeta: { key: string; value: CacheRecord; indexes: { "by-last-accessed": number } };
   checkpoints: { key: string; value: RetrievalCheckpoint };
 }
 
 function openDocRewindDb(name: string): Promise<IDBPDatabase<DocRewindDB>> {
   return openDB<DocRewindDB>(name, DB_VERSION, {
-    upgrade(db) {
-      const rawChunks = db.createObjectStore("rawChunks", {
-        keyPath: ["docId", "start", "end"],
-      });
-      rawChunks.createIndex("by-doc", "docId");
+    upgrade(db, oldVersion) {
+      if (!db.objectStoreNames.contains("rawChunks")) {
+        const rawChunks = db.createObjectStore("rawChunks", {
+          keyPath: ["docId", "start", "end"],
+        });
+        rawChunks.createIndex("by-doc", "docId");
+      }
 
-      const decoded = db.createObjectStore("decoded", { keyPath: "docId" });
-      decoded.createIndex("by-doc", "docId");
+      if (!db.objectStoreNames.contains("decoded")) {
+        const decoded = db.createObjectStore("decoded", { keyPath: "docId" });
+        decoded.createIndex("by-doc", "docId");
+      }
 
-      const snapshots = db.createObjectStore("snapshots", { keyPath: "docId" });
-      snapshots.createIndex("by-doc", "docId");
+      if (!db.objectStoreNames.contains("snapshots")) {
+        const snapshots = db.createObjectStore("snapshots", { keyPath: "docId" });
+        snapshots.createIndex("by-doc", "docId");
+      }
 
-      const timeline = db.createObjectStore("timeline", { keyPath: "docId" });
-      timeline.createIndex("by-doc", "docId");
+      if (!db.objectStoreNames.contains("timeline")) {
+        const timeline = db.createObjectStore("timeline", { keyPath: "docId" });
+        timeline.createIndex("by-doc", "docId");
+      }
 
-      const cacheMeta = db.createObjectStore("cacheMeta", { keyPath: "docId" });
-      cacheMeta.createIndex("by-last-accessed", "lastAccessedAt");
+      if (db.objectStoreNames.contains("replayPublications") && oldVersion < 3) {
+        // v2 keyed replay publications only by docId. Recreate the store rather
+        // than migrating those single-slot rows into authoritative replay truth.
+        db.deleteObjectStore("replayPublications");
+      }
 
-      db.createObjectStore("checkpoints", { keyPath: "docId" });
+      if (!db.objectStoreNames.contains("replayPublications")) {
+        const replayPublications = db.createObjectStore("replayPublications", {
+          keyPath: ["docId", "publicationId"],
+        });
+        replayPublications.createIndex("by-doc", "docId");
+      }
+
+      if (!db.objectStoreNames.contains("activeReplayPublications")) {
+        db.createObjectStore("activeReplayPublications", { keyPath: "docId" });
+      }
+
+      if (!db.objectStoreNames.contains("cacheMeta")) {
+        const cacheMeta = db.createObjectStore("cacheMeta", { keyPath: "docId" });
+        cacheMeta.createIndex("by-last-accessed", "lastAccessedAt");
+      }
+
+      if (!db.objectStoreNames.contains("checkpoints")) {
+        db.createObjectStore("checkpoints", { keyPath: "docId" });
+      }
     },
   });
 }
@@ -97,7 +150,7 @@ export function isQuotaExceededError(err: unknown): boolean {
 }
 
 /** Best-effort byte size of a raw chunk's opaque body (length only, never content). */
-function estimateRawBytes(payload: RawPayload): number {
+function estimatePayloadBytes(payload: RawPayload): number {
   try {
     const serialized = JSON.stringify(payload.body);
     return typeof serialized === "string" ? serialized.length : 0;
@@ -160,7 +213,7 @@ export function createIdbStore(options: IdbStoreOptions = {}): RevisionStore {
     const meta = await d.get("cacheMeta", docId);
     if (meta === undefined) return;
     // Raw was discarded — mark for re-fetch (PRD §9.8).
-    await d.put("cacheMeta", { ...meta, rawRetained: false });
+    await d.put("cacheMeta", { ...meta, estimatedBytes: 0, rawRetained: false });
   }
 
   async function saveRawChunk(chunk: RawPayload): Promise<void> {
@@ -191,6 +244,71 @@ export function createIdbStore(options: IdbStoreOptions = {}): RevisionStore {
       .slice()
       .sort((a, b) => a.start - b.start || a.end - b.end)
       .map((r) => r.payload);
+  }
+
+  async function estimateRawBytes(docId: DocId): Promise<number> {
+    const d = await db();
+    const records = await d.getAllFromIndex("rawChunks", "by-doc", docId);
+    return records.reduce((total, record) => total + estimatePayloadBytes(record.payload), 0);
+  }
+
+  async function saveReplayPublication(
+    docId: DocId,
+    publication: ReplayPublication,
+  ): Promise<void> {
+    const d = await db();
+    const currentPublication: ReplayPublication = { ...publication, parserVersion };
+    await d.put("replayPublications", {
+      docId,
+      publicationId: currentPublication.publicationId,
+      publication: currentPublication,
+    });
+  }
+
+  async function getReplayPublication(
+    docId: DocId,
+    expectedPublicationId: string,
+  ): Promise<ReplayPublication | null> {
+    const d = await db();
+    const rec = await d.get("replayPublications", [docId, expectedPublicationId]);
+    if (
+      rec === undefined ||
+      rec.publication.parserVersion < parserVersion ||
+      rec.publication.publicationId !== expectedPublicationId
+    ) {
+      return null;
+    }
+    return rec.publication;
+  }
+
+  async function setActiveReplayPublication(docId: DocId, publicationId: string): Promise<void> {
+    const d = await db();
+    await d.put("activeReplayPublications", {
+      docId,
+      publicationId,
+      parserVersion,
+      activatedAt: Date.now(),
+    });
+  }
+
+  async function getActiveReplayPublication(docId: DocId): Promise<ReplayPublication | null> {
+    const d = await db();
+    const active = await d.get("activeReplayPublications", docId);
+    if (active === undefined || active.parserVersion < parserVersion) {
+      return null;
+    }
+    return getReplayPublication(docId, active.publicationId);
+  }
+
+  async function deleteReplayPublication(docId: DocId, publicationId: string): Promise<void> {
+    const d = await db();
+    const tx = d.transaction(["replayPublications", "activeReplayPublications"], "readwrite");
+    await tx.objectStore("replayPublications").delete([docId, publicationId]);
+    const active = await tx.objectStore("activeReplayPublications").get(docId);
+    if (active?.publicationId === publicationId) {
+      await tx.objectStore("activeReplayPublications").delete(docId);
+    }
+    await tx.done;
   }
 
   async function saveDecoded(docId: DocId, revisions: readonly DecodedRevision[]): Promise<void> {
@@ -264,10 +382,62 @@ export function createIdbStore(options: IdbStoreOptions = {}): RevisionStore {
     let reclaimed = 0;
     const tx = d.transaction("rawChunks", "readwrite");
     for (const r of records) {
-      reclaimed += estimateRawBytes(r.payload);
+      reclaimed += estimatePayloadBytes(r.payload);
       await tx.store.delete([r.docId, r.start, r.end]);
     }
     await tx.done;
+    if (reclaimed > 0) {
+      await flagRawDiscarded(docId);
+    }
+    return reclaimed;
+  }
+
+  async function deleteRawAll(): Promise<number> {
+    const d = await db();
+    const records = await d.getAll("rawChunks");
+    const reclaimed = records.reduce(
+      (total, record) => total + estimatePayloadBytes(record.payload),
+      0,
+    );
+    const tx = d.transaction(["rawChunks", "cacheMeta"], "readwrite");
+    const raw = tx.objectStore("rawChunks");
+    const metaStore = tx.objectStore("cacheMeta");
+    await raw.clear();
+    const metas = await metaStore.getAll();
+    await Promise.all(
+      metas.map((meta) => metaStore.put({ ...meta, estimatedBytes: 0, rawRetained: false })),
+    );
+    await tx.done;
+    return reclaimed;
+  }
+
+  async function hasCompleteActivePublication(docId: DocId): Promise<boolean> {
+    const d = await db();
+    const meta = await d.get("cacheMeta", docId);
+    return (
+      meta?.reconstructionStatus === "complete" &&
+      (await getActiveReplayPublication(docId)) !== null
+    );
+  }
+
+  async function pruneRawToCap(docId: DocId, capBytes: number): Promise<number> {
+    if (!(await hasCompleteActivePublication(docId))) {
+      return 0;
+    }
+    const target = Math.max(0, Math.floor(capBytes));
+    const retained = await estimateRawBytes(docId);
+    return retained > target ? deleteRawForDoc(docId) : 0;
+  }
+
+  async function pruneRawToCapAll(capBytes: number): Promise<number> {
+    const d = await db();
+    const rawDocs = (await d.getAll("rawChunks")).map((record) => record.docId);
+    const metaDocs = (await d.getAll("cacheMeta")).map((record) => record.docId);
+    const docs = new Set<DocId>([...rawDocs, ...metaDocs]);
+    let reclaimed = 0;
+    for (const docId of docs) {
+      reclaimed += await pruneRawToCap(docId, capBytes);
+    }
     return reclaimed;
   }
 
@@ -279,12 +449,13 @@ export function createIdbStore(options: IdbStoreOptions = {}): RevisionStore {
     let reclaimed = 0;
     for (const meta of docsByAge) {
       if (usage <= targetBytes) break;
+      if (meta.reconstructionStatus !== "complete") continue;
+      if ((await getActiveReplayPublication(meta.docId)) === null) continue;
       // Drop RAW chunks first (re-fetchable); preserve decoded/snapshots/timeline.
       const freed = await deleteRawForDoc(meta.docId);
       if (freed > 0) {
         reclaimed += freed;
         usage -= freed;
-        await flagRawDiscarded(meta.docId);
       }
     }
     return reclaimed;
@@ -294,23 +465,44 @@ export function createIdbStore(options: IdbStoreOptions = {}): RevisionStore {
     const d = await db();
     await deleteRawForDoc(docId);
     const tx = d.transaction(
-      ["decoded", "snapshots", "timeline", "cacheMeta", "checkpoints"],
+      [
+        "decoded",
+        "snapshots",
+        "timeline",
+        "replayPublications",
+        "activeReplayPublications",
+        "cacheMeta",
+        "checkpoints",
+      ],
       "readwrite",
     );
+    const publicationStore = tx.objectStore("replayPublications");
+    const publicationKeys = await publicationStore.index("by-doc").getAllKeys(docId);
     await Promise.all([
       tx.objectStore("decoded").delete(docId),
       tx.objectStore("snapshots").delete(docId),
       tx.objectStore("timeline").delete(docId),
+      ...publicationKeys.map((key) => publicationStore.delete(key as [string, string])),
+      tx.objectStore("activeReplayPublications").delete(docId),
       tx.objectStore("cacheMeta").delete(docId),
       tx.objectStore("checkpoints").delete(docId),
-      tx.done,
     ]);
+    await tx.done;
   }
 
   async function deleteAll(): Promise<void> {
     const d = await db();
     const tx = d.transaction(
-      ["rawChunks", "decoded", "snapshots", "timeline", "cacheMeta", "checkpoints"],
+      [
+        "rawChunks",
+        "decoded",
+        "snapshots",
+        "timeline",
+        "replayPublications",
+        "activeReplayPublications",
+        "cacheMeta",
+        "checkpoints",
+      ],
       "readwrite",
     );
     await Promise.all([
@@ -318,6 +510,8 @@ export function createIdbStore(options: IdbStoreOptions = {}): RevisionStore {
       tx.objectStore("decoded").clear(),
       tx.objectStore("snapshots").clear(),
       tx.objectStore("timeline").clear(),
+      tx.objectStore("replayPublications").clear(),
+      tx.objectStore("activeReplayPublications").clear(),
       tx.objectStore("cacheMeta").clear(),
       tx.objectStore("checkpoints").clear(),
       tx.done,
@@ -327,6 +521,16 @@ export function createIdbStore(options: IdbStoreOptions = {}): RevisionStore {
   return {
     saveRawChunk,
     getRawChunks,
+    estimateRawBytes,
+    deleteRawForDoc,
+    deleteRawAll,
+    pruneRawToCap,
+    pruneRawToCapAll,
+    saveReplayPublication,
+    getReplayPublication,
+    setActiveReplayPublication,
+    getActiveReplayPublication,
+    deleteReplayPublication,
     saveDecoded,
     getDecoded,
     saveSnapshots,

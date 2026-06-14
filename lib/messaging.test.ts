@@ -54,4 +54,55 @@ describe("messaging ProtocolMap", () => {
     });
     expect(phase).toBe("fetching");
   });
+
+  it("round-trips guarded storage maintenance messages", async () => {
+    const docId = asDocId("docMAINT");
+    onMessage("beginDecodeLease", ({ data }) => {
+      expect(data.docId).toBe(docId);
+    });
+    onMessage("refreshDecodeLease", ({ data }) => {
+      expect(data.docId).toBe(docId);
+    });
+    onMessage("endDecodeLease", ({ data }) => ({
+      status: "completed",
+      reclaimedBytes: data.docId === docId ? 1 : 0,
+    }));
+    onMessage("requestStorageMaintenance", ({ data }) => ({
+      status: data.docId === docId ? "deferred" : "completed",
+      reclaimedBytes: data.keepRawData ? 0 : 2,
+    }));
+
+    await sendMessage("beginDecodeLease", { docId });
+    await sendMessage("refreshDecodeLease", { docId });
+    expect(await sendMessage("endDecodeLease", { docId })).toEqual({
+      status: "completed",
+      reclaimedBytes: 1,
+    });
+    expect(
+      await sendMessage("requestStorageMaintenance", {
+        docId,
+        keepRawData: false,
+        budget: { perDocumentBytes: 1, globalCapBytes: 2 },
+        reconstructionStatus: "partial",
+      }),
+    ).toEqual({ status: "deferred", reclaimedBytes: 2 });
+  });
+
+  it("round-trips destructive cache clear messages", async () => {
+    const docId = asDocId("docCLEAR");
+    onMessage("clearDocumentCache", ({ data }) => ({
+      status: data.docId === docId ? "completed" : "failed",
+      reclaimedBytes: 0,
+    }));
+    onMessage("clearAllCaches", () => ({ status: "deferred", reclaimedBytes: 0 }));
+
+    expect(await sendMessage("clearDocumentCache", { docId })).toEqual({
+      status: "completed",
+      reclaimedBytes: 0,
+    });
+    expect(await sendMessage("clearAllCaches", {})).toEqual({
+      status: "deferred",
+      reclaimedBytes: 0,
+    });
+  });
 });
