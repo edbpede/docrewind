@@ -1,0 +1,7 @@
+{
+  "recommendation": "APPROVE",
+  "summary": "Reviewed the changed lines; no correctness or security concerns.",
+  "comments": [],
+  "model_used": "",
+  "fallback_attempts": 0
+}

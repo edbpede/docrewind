@@ -1,10 +1,10 @@
-# AI PR Review — low-noise inline reviewer (Goose + NanoGPT, Option B).
+# AI PR Review — low-noise inline reviewer (Goose + NanoGPT, two-lane + synthesizer).
 #
 # SECURITY: runs on pull_request_target so it can post on forked PRs with the
 # base-repo token + secrets. It therefore must NEVER execute untrusted PR code.
 # The PR head is NEVER checked out: this job checks out the BASE repo (trusted)
 # and treats the PR purely as DATA, fetched via the `gh pr diff` API call. The
-# scripts and recipe that run come from the base tree, so a fork cannot swap them
+# scripts and recipes that run come from the base tree, so a fork cannot swap them
 # to exfiltrate secrets. Do not add any run-step that invokes a package manager
 # or build tool, and do not check out `pull_request.head` —
 # scripts/check-pr-review-workflow.sh fails CI on either. The review is
@@ -44,7 +44,7 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
         run: gh pr diff "$PR" --repo "$GITHUB_REPOSITORY" > diff.patch
 
-      - name: Run review (Goose + NanoGPT, tiered fallback, single COMMENT)
+      - name: Run review (Goose + NanoGPT, two lanes + synthesizer, single COMMENT)
         env:
           GOOSE_PROVIDER: openai
           OPENAI_API_KEY: ${{ secrets.NANOGPT_API_KEY }}

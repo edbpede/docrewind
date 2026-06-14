@@ -1,0 +1,35 @@
+{
+  "recommendation": "REQUEST_CHANGES",
+  "summary": "Found a likely null dereference on a changed line.",
+  "comments": [
+    {
+      "path": "src/a.ts",
+      "line": 2,
+      "side": "RIGHT",
+      "body": "new2 may be undefined here; guard before use.",
+      "severity": "high",
+      "category": "correctness",
+      "confidence": "high"
+    },
+    {
+      "path": "src/a.ts",
+      "line": 999,
+      "side": "RIGHT",
+      "body": "Bogus off-diff anchor that must be dropped.",
+      "severity": "high",
+      "category": "correctness",
+      "confidence": "high"
+    },
+    {
+      "path": "src/a.ts",
+      "line": 3,
+      "side": "RIGHT",
+      "body": "Minor style nit, low confidence.",
+      "severity": "low",
+      "category": "maintainability",
+      "confidence": "medium"
+    }
+  ],
+  "model_used": "",
+  "fallback_attempts": 0
+}

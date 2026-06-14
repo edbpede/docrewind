@@ -1,26 +1,41 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
-# review.sh — deterministic "hands" of the Goose + NanoGPT PR reviewer.
+# review.sh — deterministic "hands" of the two-lane Goose + NanoGPT PR reviewer.
 #
-# Goose (the brain) reads the diff and emits one structured review object; this
-# script validates it, filters its comments to valid diff anchors, and posts a
-# single COMMENT review via `gh api`. The model is never given tools, so this
-# shell is the only thing that touches GitHub.
+# Two review lanes (code-review + architect) each read the diff in their own
+# clean, tool-less `goose run` context, in parallel, and emit a distinct
+# structured artifact. A third tool-less LLM synthesizer then authors the
+# narrative summary and curates a cross-lane-merged inline comment set. This
+# script keeps every safety-critical signal deterministic: it alone computes the
+# verdict, emits the BLOCK banner + architecture watchlist, re-validates every
+# model-proposed anchor against the real diff, and hard-codes the posted GitHub
+# event to COMMENT. The models are never given tools, so this shell is the only
+# thing that touches GitHub.
 #
 # Pipeline:
-#   gate A : tiered goose fallback loop -> schema-valid review.json
-#   gate B : anchor pre-filter (hunk-lines.awk + jq) -> payload.json
-#            422-tolerant single-review POST
+#   precompute : indented diff (YAML-injection-safe) + valid_lines.tsv (anchors)
+#   stage 1    : code-review lane  ┐ parallel, tiered goose fallback (gate A)
+#                architect lane    ┘ -> two filtered/partitioned artifacts
+#   verdict    : scripts/synthesize.jq computes the authoritative recommendation
+#   stage 2    : LLM synthesizer (sequential) -> narrative + curated comments,
+#                whose anchors are re-validated (gate B, anchor-only mode);
+#                on synthesizer failure, deterministic synthesize.jq fallback
+#   assemble   : deterministic body (verdict/banner/watchlist/caveats) + payload
+#                -> 422-tolerant single COMMENT POST
 #
 # Every stage is env-overridable so it can be exercised with stub `goose`/`gh`
-# binaries on PATH (see scripts/test/run-pr-review-tests.sh). Live posting needs
+# binaries on PATH (see scripts/test/run-pr-review-tests.sh) and a pure jq unit
+# test for the deterministic core (scripts/synthesize.jq). Live posting needs
 # REPO / PR / HEAD_SHA / GH_TOKEN and a real NANOGPT_API_KEY (CI only).
 
 set -euo pipefail
 
 # --- configuration (env-overridable) ----------------------------------------
-RECIPE="${RECIPE:-.goose/recipe.yaml}"
+CODE_RECIPE="${CODE_RECIPE:-.goose/recipe.code-review.yaml}"
+ARCH_RECIPE="${ARCH_RECIPE:-.goose/recipe.architect.yaml}"
+SYNTH_RECIPE="${SYNTH_RECIPE:-.goose/recipe.synthesize.yaml}"
+SYNTH_JQ="${SYNTH_JQ:-scripts/synthesize.jq}"
 DIFF_FILE="${DIFF_FILE:-diff.patch}"
 WORKDIR="${WORKDIR:-.}"
 AWK_SCRIPT="${AWK_SCRIPT:-scripts/hunk-lines.awk}"
@@ -30,18 +45,35 @@ GOOSE_TIMEOUT="${GOOSE_TIMEOUT:-300}"
 POST_RETRY_MAX="${POST_RETRY_MAX:-5}"
 SKIP_POST="${SKIP_POST:-0}"   # tests set 1 to stop after building payload.json
 
-# Priority-ordered model tiers; REVIEW_MODELS overrides for tests.
-DEFAULT_MODELS="deepseek/deepseek-v4-pro-cheaper:thinking xiaomi/mimo-v2.5-pro:thinking minimax/minimax-m3:thinking"
-REVIEW_MODELS="${REVIEW_MODELS:-$DEFAULT_MODELS}"
+# Priority-ordered model tiers (space-separated); *_MODELS override for tests.
+DEFAULT_CODE_MODELS="deepseek/deepseek-v4-pro-cheaper:thinking xiaomi/mimo-v2.5-pro:thinking minimax/minimax-m3:thinking"
+DEFAULT_ARCH_MODELS="deepseek/deepseek-v4-pro-cheaper:thinking minimax/minimax-m3:thinking"
+DEFAULT_SYNTH_MODELS="deepseek/deepseek-v4-pro-cheaper:thinking minimax/minimax-m3:thinking"
+CODE_REVIEW_MODELS="${CODE_REVIEW_MODELS:-$DEFAULT_CODE_MODELS}"
+ARCHITECT_MODELS="${ARCHITECT_MODELS:-$DEFAULT_ARCH_MODELS}"
+SYNTH_MODELS="${SYNTH_MODELS:-$DEFAULT_SYNTH_MODELS}"
 
 mkdir -p "$WORKDIR"
-RAW_OUT="$WORKDIR/raw.out"
-GOOSE_ERR="$WORKDIR/goose.err"
+
+# --- shared, NON-stage-namespaced work files ---------------------------------
+# These are pure functions of the diff, computed serially BEFORE fan-out, then
+# read read-only by both lanes and the synthesizer re-validation. valid_lines
+# is deliberately shared (never stage-prefixed): it is the single anchor source.
 INDENTED_DIFF="$WORKDIR/diff.indented.patch"
-CLEANED="$WORKDIR/cleaned.out"
-REVIEW_JSON="$WORKDIR/review.json"
 VALID_TSV="$WORKDIR/valid_lines.tsv"
-FILTERED_JSON="$WORKDIR/filtered.json"
+EMPTY_JSON="$WORKDIR/empty.json"
+# Per-stage artifacts (the raw.out / goose.err / cleaned.out per-attempt files
+# live inside run_stage as "$WORKDIR/<stage>.*" so concurrent lanes never race).
+CODE_JSON="$WORKDIR/code-review.review.json"
+ARCH_JSON="$WORKDIR/architect.review.json"
+SYNTH_JSON="$WORKDIR/synth.review.json"
+CODE_FILTERED="$WORKDIR/code-review.filtered.json"
+ARCH_FILTERED="$WORKDIR/architect.filtered.json"     # partitioned (inline + watchlist)
+SYNTH_FILTERED="$WORKDIR/synth.filtered.json"         # anchor-re-validated
+FINDINGS_JSON="$WORKDIR/synth.findings.json"
+FINDINGS_INDENTED="$WORKDIR/synth.findings.indented.json"
+SYNTH_FALLBACK_JSON="$WORKDIR/synth.fallback.json"
+BODY_FILE="$WORKDIR/body.md"
 PAYLOAD="$WORKDIR/payload.json"
 POST_ERR="$WORKDIR/post.err"
 
@@ -61,120 +93,224 @@ log() { echo "$@" >&2; }
 # 1) whole-output parse  (production path: response.json_schema -> clean JSON)
 # 2) jq brace-scan        (fallback: last top-level object after prose/reasoning)
 # A bad extraction is rejected by gate A and degrades to the next tier, never a
-# wrong post. Limitation: the scan can mis-balance on braces inside a comment
-# body code block — acceptable because (1) is the primary path under the schema.
+# wrong post. `cleaned` is stage-namespaced by the caller so parallel lanes do
+# not race on a shared scratch file.
 extract_json() {
-  raw="$1"; out="$2"
-  sed "s/${ESC}\[[0-9;]*[a-zA-Z]//g" "$raw" > "$CLEANED" 2>/dev/null || cp "$raw" "$CLEANED"
-  if jq -ce . "$CLEANED" > "$out" 2>/dev/null && [ -s "$out" ]; then
+  raw="$1"; out="$2"; cleaned="$3"
+  sed "s/${ESC}\[[0-9;]*[a-zA-Z]//g" "$raw" > "$cleaned" 2>/dev/null || cp "$raw" "$cleaned"
+  if jq -ce . "$cleaned" > "$out" 2>/dev/null && [ -s "$out" ]; then
     return 0
   fi
-  if jq -Rsc '[scan("\\{(?:[^{}]|\\{(?:[^{}]|\\{[^{}]*\\})*\\})*\\}")] | last // empty' "$CLEANED" 2>/dev/null \
+  if jq -Rsc '[scan("\\{(?:[^{}]|\\{(?:[^{}]|\\{[^{}]*\\})*\\})*\\}")] | last // empty' "$cleaned" 2>/dev/null \
        | jq -ce 'fromjson' > "$out" 2>/dev/null && [ -s "$out" ]; then
     return 0
   fi
   return 1
 }
 
-# --- gate A: schema sanity (type + COMMENT-only) -----------------------------
+# --- gate A: stage-aware schema sanity ---------------------------------------
+# The COMMENT-only guarantee is no longer asserted here (the recipes dropped
+# review_event/should_post_review); it now lives solely in build_payload's
+# hard-coded event literal.
 validate_gate_a() {
-  jq -e '
-    .review_event == "COMMENT"
-    and (.summary | type == "string")
-    and (.comments | type == "array")
-    and (.should_post_review | type == "boolean")
-  ' "$1" >/dev/null 2>&1
+  case "$1" in
+    code-review)
+      jq -e '(.recommendation | type == "string")
+        and (.summary | type == "string")
+        and (.comments | type == "array")' "$2" >/dev/null 2>&1 ;;
+    architect)
+      jq -e '(.architectural_status | type == "string")
+        and (.summary | type == "string")
+        and (.concerns | type == "array")' "$2" >/dev/null 2>&1 ;;
+    synth)
+      jq -e '(.summary | type == "string")
+        and (.comments | type == "array")' "$2" >/dev/null 2>&1 ;;
+    *) return 1 ;;
+  esac
 }
 
-# --- tiered fallback loop -> review.json -------------------------------------
-run_review() {
+# --- generalized tiered fallback loop (one clean goose context per attempt) ---
+# run_stage <stage> <recipe> <models_var_name> <param_key> <param_file> <out_json>
+# Returns 0 on the first tier that yields schema-valid JSON, 1 if all fail. Safe
+# to run as a background job: every per-attempt file is "$WORKDIR/<stage>.*".
+run_stage() {
+  stage="$1"; recipe="$2"; models_var="$3"; param_key="$4"; param_file="$5"; out_json="$6"
+  models="${!models_var}"
+  raw="$WORKDIR/$stage.raw.out"
+  gerr="$WORKDIR/$stage.goose.err"
+  cleaned="$WORKDIR/$stage.cleaned.out"
   attempt=0; ok=0; host_fail=0; auth_fail=0
-  # goose renders --params into the recipe YAML, so a multi-line diff injected
-  # raw into the `prompt:` block scalar breaks YAML ("could not find expected
-  # ':'"). Indenting every line by 2 spaces keeps all substituted lines at or
-  # above the block indent, so they cannot break out — this is also the YAML
-  # injection defense for untrusted diff content. awk still reads the ORIGINAL
-  # diff for anchors, so line numbers are unaffected.
-  sed 's/^/  /' "$DIFF_FILE" > "$INDENTED_DIFF" 2>/dev/null || cp "$DIFF_FILE" "$INDENTED_DIFF"
-  for model in $REVIEW_MODELS; do
+  for model in $models; do
     attempt=$((attempt + 1))
-    : > "$GOOSE_ERR"; : > "$RAW_OUT"
-    rc=0
+    : > "$gerr"; : > "$raw"; rc=0
     # A recipe run ignores GOOSE_MODEL/GOOSE_PROVIDER env, so the tier model is
     # passed via the explicit --model/--provider flags. --quiet keeps stdout to
     # the model response; --no-session avoids writing session state in CI.
     run_with_timeout \
-      goose run --recipe "$RECIPE" --params diff="$INDENTED_DIFF" \
+      goose run --recipe "$recipe" --params "$param_key=$param_file" \
       --provider "${GOOSE_PROVIDER:-openai}" --model "$model" \
       --quiet --no-session \
-      > "$RAW_OUT" 2> "$GOOSE_ERR" || rc=$?
+      > "$raw" 2> "$gerr" || rc=$?
     # goose can exit 0 even on provider/auth errors (the error text lands on
     # stdout), so a tier "succeeds" only if it yields schema-valid JSON — never
     # by exit code alone.
-    if extract_json "$RAW_OUT" "$REVIEW_JSON" && validate_gate_a "$REVIEW_JSON"; then
+    if extract_json "$raw" "$out_json" "$cleaned" && validate_gate_a "$stage" "$out_json"; then
       jq --arg m "$model" --argjson a "$((attempt - 1))" \
-         '.model_used = $m | .fallback_attempts = $a' "$REVIEW_JSON" > "$REVIEW_JSON.tmp" \
-         && mv "$REVIEW_JSON.tmp" "$REVIEW_JSON"
-      log "tier $attempt ($model): accepted (fallback_attempts=$((attempt - 1)))"
+         '.model_used = $m | .fallback_attempts = $a' "$out_json" > "$out_json.tmp" \
+         && mv "$out_json.tmp" "$out_json"
+      log "stage=$stage tier=$attempt ($model): accepted (fallback_attempts=$((attempt - 1)))"
       ok=1; break
     fi
     # Diagnose this tier from BOTH streams (rc is unreliable; errors may be on
     # stdout). host/auth signatures repeated across tiers indicate a config bug
     # rather than model flakiness.
     if grep -qiE '404|no route|invalid url|unknown host|could not resolve|connection refused|name or service not known' \
-          "$GOOSE_ERR" "$RAW_OUT" 2>/dev/null; then host_fail=$((host_fail + 1)); fi
+          "$gerr" "$raw" 2>/dev/null; then host_fail=$((host_fail + 1)); fi
     if grep -qiE '401|403|unauthorized|forbidden|authentication failed|invalid session|invalid api key' \
-          "$GOOSE_ERR" "$RAW_OUT" 2>/dev/null; then auth_fail=$((auth_fail + 1)); fi
-    log "tier $attempt ($model): no valid review (rc=$rc): $({ tail -c 300 "$RAW_OUT"; cat "$GOOSE_ERR"; } 2>/dev/null | tr '\n' ' ' | cut -c1-280)"
+          "$gerr" "$raw" 2>/dev/null; then auth_fail=$((auth_fail + 1)); fi
+    log "stage=$stage tier=$attempt ($model): failed (rc=$rc): $({ tail -c 300 "$raw"; cat "$gerr"; } 2>/dev/null | tr '\n' ' ' | cut -c1-280)"
   done
   if [ "$ok" -ne 1 ]; then
     if [ "$auth_fail" -ge 2 ]; then
-      log "::error::all tiers failed authentication — likely a missing/invalid NANOGPT_API_KEY secret"
+      log "::error::stage=$stage all tiers failed authentication — likely a missing/invalid NANOGPT_API_KEY secret"
     elif [ "$host_fail" -ge 2 ]; then
-      log "::error::all tiers failed identically — likely OPENAI_HOST/provider misconfig, not model flakiness"
+      log "::error::stage=$stage all tiers failed identically — likely OPENAI_HOST/provider misconfig, not model flakiness"
     fi
-    log "all tiers failed"
+    log "stage=$stage: all tiers failed"
     return 1
   fi
   return 0
 }
 
-# --- gate B part 1: anchor pre-filter ----------------------------------------
-# Drop comments that are not high-confidence or whose (path,line,side) — and
-# (path,start_line,start_side) for ranges — is not a real diff anchor.
+# --- gate B: anchor filter (parameterized by array key + mode) ---------------
+# anchor_filter <in_json> <array_key> <out_json> [mode]
+#   mode=full   (default): keep only confidence=="high" findings on a valid anchor
+#   mode=anchor          : keep findings on a valid anchor REGARDLESS of confidence
+# The anchor-only mode re-validates synthesizer comments, which are
+# {path,line,side,body} with NO confidence field — the full predicate's
+# confidence=="high" clause would otherwise drop every curated comment.
 anchor_filter() {
-  awk -f "$AWK_SCRIPT" "$DIFF_FILE" > "$VALID_TSV"
-  jq --rawfile valid "$VALID_TSV" '
+  in_json="$1"; akey="$2"; out_json="$3"; mode="${4:-full}"
+  jq --rawfile valid "$VALID_TSV" --arg akey "$akey" --arg mode "$mode" '
     def key(p; s; l): p + "\t" + s + "\t" + (l | tostring);
     ( $valid | split("\n") | map(select(length > 0)) ) as $rows
     | ( reduce $rows[] as $r ({}; .[$r] = true) ) as $set
-    | .comments |= map(select(
-        .confidence == "high"
+    | .[$akey] |= map(select(
+        ( ($mode == "anchor") or (.confidence == "high") )
         and ($set[key(.path; .side; .line)] == true)
         and ( (has("start_line") | not)
               or ($set[key(.path; (.start_side // .side); .start_line)] == true) )
       ))
-  ' "$REVIEW_JSON" > "$FILTERED_JSON"
+  ' "$in_json" > "$out_json"
 }
 
-# --- gate B part 2: build the single-review payload --------------------------
+# --- architect partition: inline candidates vs non-anchorable watchlist ------
+# Anchored, high-confidence concerns become candidate inline comments; every
+# other WATCH/BLOCK concern (low confidence OR unanchorable OR off-diff anchor)
+# is preserved as a deterministic watchlist item — a blocker is never dropped.
+partition_architect() {
+  in_json="$1"; out_json="$2"
+  jq --rawfile valid "$VALID_TSV" '
+    def key(p; s; l): p + "\t" + s + "\t" + (l | tostring);
+    ( $valid | split("\n") | map(select(length > 0)) ) as $rows
+    | ( reduce $rows[] as $r ({}; .[$r] = true) ) as $set
+    | def passes:
+        (.confidence == "high")
+        and (has("path") and has("line") and has("side"))
+        and ($set[key(.path; .side; .line)] == true)
+        and ( (has("start_line") | not)
+              or ($set[key(.path; (.start_side // .side); .start_line)] == true) );
+      ( .concerns // [] ) as $all
+    | { architectural_status,
+        summary,
+        inline_concerns:    [ $all[] | select(passes) ],
+        watchlist_concerns: [ $all[] | select(passes | not)
+                              | select(.status == "WATCH" or .status == "BLOCK") ],
+        model_used: (.model_used // ""),
+        fallback_attempts: (.fallback_attempts // 0) }
+  ' "$in_json" > "$out_json"
+}
+
+# --- synthesize.jq driver (verdict / watchlist / fallback) -------------------
+# Reads the two filtered lane artifacts (or {} when a lane is unavailable) and
+# the availability flags. verdict/watchlist print raw strings; fallback prints a
+# {summary, comments[]} object.
+synth_jq() {
+  mode="$1"; raw_flag="$2"   # raw_flag: "r" for -nr (verdict/watchlist), "" for -n (fallback)
+  jq -n${raw_flag:+r} --arg mode "$mode" \
+    --arg code_avail "$CODE_AVAIL" --arg arch_avail "$ARCH_AVAIL" \
+    --slurpfile code "$CODE_FOR_JQ" --slurpfile arch "$ARCH_FOR_JQ" \
+    -f "$SYNTH_JQ"
+}
+
+# --- build the synthesizer input (all lanes' filtered findings + verdict) -----
+build_findings() {
+  jq -n --arg final "$FINAL_REC" \
+        --arg cav "$CODE_AVAIL" --arg aav "$ARCH_AVAIL" \
+        --slurpfile code "$CODE_FOR_JQ" --slurpfile arch "$ARCH_FOR_JQ" '
+    ($code[0] // {}) as $c | ($arch[0] // {}) as $a
+    | { final_recommendation: $final,
+        code_available: ($cav == "1"),
+        architect_available: ($aav == "1"),
+        code_recommendation: ($c.recommendation // null),
+        architectural_status: ($a.architectural_status // null),
+        code_summary: ($c.summary // null),
+        architect_summary: ($a.summary // null),
+        code_comments: ($c.comments // []),
+        architect_inline: ($a.inline_concerns // []),
+        architect_watchlist: ($a.watchlist_concerns // []) }
+  ' > "$FINDINGS_JSON"
+  # Indent for YAML-block-scalar safety, exactly like the diff (defends the
+  # synthesizer prompt against a multi-line param breaking the recipe YAML).
+  sed 's/^/  /' "$FINDINGS_JSON" > "$FINDINGS_INDENTED" 2>/dev/null || cp "$FINDINGS_JSON" "$FINDINGS_INDENTED"
+}
+
+# --- deterministic body assembly (script around model prose) -----------------
+# The verdict line, BLOCK banner, advisory disclaimer, watchlist, and partial
+# caveats are emitted here REGARDLESS of the synthesizer, with exactly one
+# MARKER. A blank summary degrades to a neutral non-empty note.
+build_body() {
+  body_summary="$1"
+  : > "$BODY_FILE"
+  printf '%s\n\n' "$MARKER" >> "$BODY_FILE"
+  printf '**Final recommendation:** %s\n\n' "$FINAL_REC" >> "$BODY_FILE"
+  if [ "$ARCH_STATUS" = "BLOCK" ]; then
+    printf '> ⚠️ **ARCHITECT BLOCK** — the architecture lane flagged a blocking design concern.\n\n' >> "$BODY_FILE"
+  fi
+  # Strip any MARKER the model prose may embed, so the body keeps EXACTLY ONE
+  # marker (the literal at the top). The marker is not yet used as an edit anchor,
+  # but this keeps the one-marker invariant robust against adversarial summaries.
+  clean_summary="${body_summary//"$MARKER"/}"
+  s=$(printf '%s' "$clean_summary" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+  if [ -z "$s" ]; then s="No concerns found in the changed lines."; fi
+  printf '%s\n\n' "$s" >> "$BODY_FILE"
+  printf '_The recommendation above is authoritative; this narrative is advisory._\n' >> "$BODY_FILE"
+  if [ -n "$WATCHLIST_MD" ]; then
+    printf '\n%s\n' "$WATCHLIST_MD" >> "$BODY_FILE"
+  fi
+  if [ -n "$CAVEAT" ]; then
+    printf '\n%s\n' "$CAVEAT" >> "$BODY_FILE"
+  fi
+}
+
+# --- build the single-review payload (the SOLE owner of the COMMENT event) ----
+# Receives the pre-assembled body file and the curated/re-validated comments
+# (same {summary,comments} intermediate from both the synth and fallback paths).
 build_payload() {
-  jq --arg commit "${HEAD_SHA:-}" --arg marker "$MARKER" \
-     --arg empty "No concerns found in the changed lines." '
-    # The summary is ALWAYS posted, so guarantee a non-empty body: fall back to a
-    # neutral "no concerns" note when the model returns a blank/whitespace summary.
-    ( (.summary // "") | gsub("^\\s+|\\s+$"; "") ) as $s
-    | {
+  comments_json="$1"
+  jq -n --arg commit "${HEAD_SHA:-}" --rawfile body "$BODY_FILE" \
+        --argjson comments "$comments_json" '
+    {
       commit_id: $commit,
       event: "COMMENT",
-      body: ($marker + "\n\n" + (if $s == "" then $empty else $s end)),
-      comments: ( (.comments // []) | map(
+      body: ($body | sub("[[:space:]]+$"; "")),
+      comments: ( ($comments // []) | map(
           { path, line, side, body }
           + ( if has("start_line") then { start_line } else {} end )
           + ( if has("start_side") then { start_side } else {} end )
       ) )
     }
-  ' "$FILTERED_JSON" > "$PAYLOAD"
+  ' > "$PAYLOAD"
 }
 
 # --- 422-tolerant single POST ------------------------------------------------
@@ -235,17 +371,81 @@ main() {
     post_review; return $?
   fi
 
-  run_review || exit 1
-  anchor_filter
-  build_payload
+  # --- serial precompute (pure functions of the diff; shared read-only) -------
+  # Indent every diff line by 2 spaces so a substituted multi-line diff cannot
+  # break out of the recipe's YAML block scalar (this is also the YAML-injection
+  # defense for untrusted diff content). awk reads the ORIGINAL diff for anchors,
+  # so line numbers are unaffected.
+  sed 's/^/  /' "$DIFF_FILE" > "$INDENTED_DIFF" 2>/dev/null || cp "$DIFF_FILE" "$INDENTED_DIFF"
+  awk -f "$AWK_SCRIPT" "$DIFF_FILE" > "$VALID_TSV"
+  echo '{}' > "$EMPTY_JSON"
 
-  # Always post one COMMENT review: the summary body plus any high-confidence
-  # inline comments that survived the anchor filter. The model's
-  # should_post_review flag is intentionally ignored — every PR gets a short
-  # summary so it is always visible that the reviewer ran. build_payload
-  # guarantees a non-empty body even when the model returns no findings.
+  # --- stage 1: two review lanes in parallel, set -e-safe ---------------------
+  run_stage code-review "$CODE_RECIPE" CODE_REVIEW_MODELS diff "$INDENTED_DIFF" "$CODE_JSON" & pid_c=$!
+  run_stage architect   "$ARCH_RECIPE" ARCHITECT_MODELS   diff "$INDENTED_DIFF" "$ARCH_JSON" & pid_a=$!
+  set +e; wait "$pid_c"; rc_c=$?; wait "$pid_a"; rc_a=$?; set -e
+
+  CODE_AVAIL=0; ARCH_AVAIL=0
+  [ "$rc_c" -eq 0 ] && CODE_AVAIL=1
+  [ "$rc_a" -eq 0 ] && ARCH_AVAIL=1
+  if [ "$CODE_AVAIL" -eq 0 ] && [ "$ARCH_AVAIL" -eq 0 ]; then
+    log "::error::both review lanes failed across all tiers — nothing to post"
+    exit 1
+  fi
+
+  # --- filter / partition each available lane ---------------------------------
+  if [ "$CODE_AVAIL" -eq 1 ]; then
+    anchor_filter "$CODE_JSON" comments "$CODE_FILTERED" full
+    CODE_FOR_JQ="$CODE_FILTERED"
+  else
+    CODE_FOR_JQ="$EMPTY_JSON"
+    log "stage=code-review unavailable — partial review"
+  fi
+  if [ "$ARCH_AVAIL" -eq 1 ]; then
+    partition_architect "$ARCH_JSON" "$ARCH_FILTERED"
+    ARCH_FOR_JQ="$ARCH_FILTERED"
+  else
+    ARCH_FOR_JQ="$EMPTY_JSON"
+    log "stage=architect unavailable — partial review"
+  fi
+
+  # --- deterministic verdict + watchlist (authoritative; pre-synthesizer) -----
+  FINAL_REC=$(synth_jq verdict r)
+  WATCHLIST_MD=$(synth_jq watchlist r)
+  ARCH_STATUS=$(jq -r '.architectural_status // ""' "$ARCH_FOR_JQ" 2>/dev/null || echo "")
+  # At most one lane can be unavailable here (both-unavailable exited above).
+  CAVEAT=""
+  [ "$CODE_AVAIL" -ne 1 ] && CAVEAT="⚠️ code-review lane unavailable — partial review."
+  [ "$ARCH_AVAIL" -ne 1 ] && CAVEAT="⚠️ architect lane unavailable — partial review."
+
+  # --- stage 2: LLM synthesizer (sequential, after both lanes) ----------------
+  build_findings
+  synth_ok=0
+  if run_stage synth "$SYNTH_RECIPE" SYNTH_MODELS findings "$FINDINGS_INDENTED" "$SYNTH_JSON"; then
+    # Re-validate every synthesizer-proposed anchor (gate B, anchor-only mode):
+    # any comment whose (path,line,side) is not a real diff line is dropped.
+    anchor_filter "$SYNTH_JSON" comments "$SYNTH_FILTERED" anchor
+    synth_ok=1
+  fi
+
+  if [ "$synth_ok" -eq 1 ]; then
+    body_summary=$(jq -r '.summary // ""' "$SYNTH_FILTERED")
+    comments_json=$(jq -c '.comments // []' "$SYNTH_FILTERED")
+    log "stage=synth: LLM synthesis used (curated comments=$(jq '.comments | length' "$SYNTH_FILTERED"))"
+  else
+    # Deterministic fallback: templated summary + exact-anchor dedup/merge.
+    synth_jq fallback "" > "$SYNTH_FALLBACK_JSON"
+    body_summary=$(jq -r '.summary // ""' "$SYNTH_FALLBACK_JSON")
+    comments_json=$(jq -c '.comments // []' "$SYNTH_FALLBACK_JSON")
+    log "stage=synth: synthesizer unavailable — deterministic fallback (merged comments=$(jq '.comments | length' "$SYNTH_FALLBACK_JSON"))"
+  fi
+
+  # --- assemble body + single payload (one build_payload for both paths) ------
+  build_body "$body_summary"
+  build_payload "$comments_json"
+
   ncomments=$(jq '.comments | length' "$PAYLOAD" 2>/dev/null || echo 0)
-  log "posting review (inline comments=${ncomments:-0})"
+  log "posting review (recommendation=$FINAL_REC inline comments=${ncomments:-0} path=$([ "$synth_ok" -eq 1 ] && echo synth || echo fallback))"
 
   [ "$SKIP_POST" = "1" ] && { log "SKIP_POST set; payload at $PAYLOAD"; return 0; }
   post_review
