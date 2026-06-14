@@ -48,10 +48,11 @@ Extract both the rebuilt zip and the submitted zip and compare their **contents*
 meaningful; compare the extracted files):
 
 ```bash
-mkdir -p built submitted && rm -rf -- built/* submitted/*
-unzip -q .output/docrewind-<version>-firefox.zip -d built
-unzip -q /path/to/submitted-docrewind-<version>-firefox.zip -d submitted
-diff -r built submitted        # expect: no differences in file contents
+work="$(mktemp -d)"            # fresh, empty dir each run (no stale artifacts, no cwd clobber)
+unzip -q .output/docrewind-<version>-firefox.zip -d "$work/built"
+unzip -q /path/to/submitted-docrewind-<version>-firefox.zip -d "$work/submitted"
+diff -r "$work/built" "$work/submitted"   # expect: no differences in file contents
+# rm -rf -- "$work"            # optional: remove the temp dir afterward
 ```
 
 The repository also ships `scripts/verify-reproducible-build.sh`, which builds
