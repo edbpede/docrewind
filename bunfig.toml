@@ -20,6 +20,13 @@ exact = true
 # and NEGATIVELY by the ignore list below. Bun has no inclusion-side key, so when changing
 # the `test:coverage` paths, also decide here whether the affected tier is gated (leave it
 # out) or excluded (add it to coveragePathIgnorePatterns). Keep the two lists in agreement.
+# Failure modes & escape hatch: a NEW file added inside the gated tier (./lib/decoder or
+# ./lib/reconstruction) is subject to the per-file floor from its first commit — there is no
+# aggregate grace, so a partially-covered helper fails the build even when overall coverage is
+# well above 85%. Bun 1.3.14 has NO per-file threshold-override key (no coverageThresholdOverrides
+# or per-path map). To legitimately exempt a file that cannot meet the floor (thin adapter,
+# generated, or scaffolding), add its specific path glob to `coveragePathIgnorePatterns` below
+# with a one-line justification — do NOT lower the global `coverageThreshold`.
 [test]
 coverageSkipTestFiles = true
 coveragePathIgnorePatterns = [

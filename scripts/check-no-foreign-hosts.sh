@@ -22,6 +22,10 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 scan_dirs=(lib entrypoints)
+# Single allowed host = the confirmed minimal footprint (PRD §12 / CONSTRAINTS.md
+# §4: never `<all_urls>` or broader), matching the manifest's lone
+# `*://docs.google.com/*` permission. Adding a host is a deliberate doc+manifest
+# decision, not a lint workaround. Keep in sync with e2e/network-isolation.spec.ts.
 allowed_host="docs.google.com"
 status=0
 

@@ -18,6 +18,10 @@ import { E2E_SMOKE_DOC, expect, installGoogleFulfiller, test } from "./fixtures"
 test.setTimeout(60_000);
 
 // Hosts allowed to receive a public network request: only Google Docs.
+// Single-host is the confirmed minimal footprint (PRD §12 / CONSTRAINTS.md §4:
+// "Never `<all_urls>` or broader access") and matches the manifest's lone
+// `*://docs.google.com/*` permission. Adding a host is a deliberate decision
+// requiring a doc update + manifest change — not a CI workaround. Do not broaden.
 const ALLOWED_PUBLIC_HOSTS = new Set(["docs.google.com"]);
 
 // Schemes that are first-party / local and never leave the machine.
