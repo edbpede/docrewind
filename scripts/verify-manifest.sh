@@ -48,7 +48,7 @@ find_zip() {
   count="$(printf '%s\n' "$matches" | wc -l | tr -d '[:space:]')"
   if [ "$count" -ne 1 ]; then
     echo "FAIL: $count artifacts match .output/$pat (expected exactly 1):" >&2
-    printf '        %s\n' $matches >&2
+    printf '%s\n' "$matches" | sed 's/^/        /' >&2
     echo "      Clear stale builds (e.g. 'rm -f .output/*.zip') and rebuild before this audit." >&2
     exit 1
   fi

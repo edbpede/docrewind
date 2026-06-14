@@ -72,7 +72,7 @@ hash_build() {
     # version-templated naming ({{name}}-{{version}}-{{browser}}.zip) normally
     # yields one zip per browser, but assert it rather than silently hashing
     # whichever sorts first if a stray second zip ever coexists.
-    n="$(ls .output/*-"$kind".zip 2>/dev/null | wc -l | tr -d '[:space:]')"
+    n="$(ls .output/*-"$kind".zip 2>/dev/null | wc -l | tr -d '[:space:]' || true)"
     if [ "$n" -eq 0 ]; then
       echo "FAIL: build '$tag' produced no .output/*-$kind.zip." >&2
       cat "$work/$tag-build.log" >&2

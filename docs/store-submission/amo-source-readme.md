@@ -48,7 +48,7 @@ Extract both the rebuilt zip and the submitted zip and compare their **contents*
 meaningful; compare the extracted files):
 
 ```bash
-rm -rf built submitted && mkdir -p built submitted
+mkdir -p built submitted && rm -rf -- built/* submitted/*
 unzip -q .output/docrewind-<version>-firefox.zip -d built
 unzip -q /path/to/submitted-docrewind-<version>-firefox.zip -d submitted
 diff -r built submitted        # expect: no differences in file contents
