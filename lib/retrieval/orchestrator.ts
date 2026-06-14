@@ -136,6 +136,10 @@ export async function runRetrieval(
       if (span === null) break; // nextStart <= upperBound guarantees this is non-null
       const result = await deps.fetcher.fetchChunk({ docId, span, userIndex: request.userIndex });
 
+      if (cancellation.isCancelled()) {
+        return fail(retrievalError("cancellation"));
+      }
+
       if (result.ok) {
         // Persist raw + advance the resume cursor past the ACTUALLY-received
         // end, so a transport that narrows the range can't leave a silent gap
@@ -149,6 +153,9 @@ export async function runRetrieval(
           return fail(retrievalError("unsupported-format"));
         }
         await deps.store.saveRawChunk(result.value);
+        if (cancellation.isCancelled()) {
+          return fail(retrievalError("cancellation"));
+        }
         chunksFetched += 1;
         nextStart = unsafeAsRevisionId(receivedEnd + 1);
         await deps.store.writeCheckpoint({

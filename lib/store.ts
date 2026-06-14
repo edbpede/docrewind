@@ -16,11 +16,14 @@
 // are partitioned by owner and MUST stay partitioned:
 //
 //   • background / orchestrator  →  owns writes to `rawChunks` + `checkpoints`
-//   • replay-page parse worker   →  reads `rawChunks`; owns writes to
-//                                    `decoded` / `snapshots` / `timeline`
+//   • replay page                →  reads `rawChunks`, verifies the active run,
+//                                    then owns replay publication rows and the
+//                                    doc-scoped active publication pointer
 //
-// `CheckpointStore` (below) is the orchestrator's write surface; the worker uses
-// the read + derived-write methods. Readers (the replay UI) may read anything.
+// `CheckpointStore` (below) is the orchestrator's write surface; replay decode
+// uses the raw read + replay-publication methods only after page-side run
+// verification.
+// Readers (the replay UI) may read anything.
 
 import type {
   CacheRecord,
@@ -41,6 +44,34 @@ import type { DocumentModel } from "./reconstruction/model";
 export interface StoredSnapshot {
   readonly appliedCount: number;
   readonly model: DocumentModel;
+}
+
+/**
+ * One atomic replay artifact for a decoded document. Replay rendering reads this
+ * single record only; the legacy split decoded/snapshot/timeline stores remain
+ * compatibility surfaces and are not authoritative for replay load.
+ */
+export interface ReplayPublication {
+  /** Unique per replay attempt / document epoch; never a bare page-local run id. */
+  readonly publicationId: string;
+  /** Decode-pipeline version that produced this publication. */
+  readonly parserVersion: number;
+  readonly revisions: readonly DecodedRevision[];
+  readonly snapshots: readonly StoredSnapshot[];
+  readonly timeline: readonly TimelineEvent[];
+  readonly publishedAt: number;
+}
+
+/**
+ * The doc-scoped replay publication pointer. Replay loading follows this
+ * pointer first and then reads the exact publication row it names; it never
+ * guesses "latest" by document.
+ */
+export interface ActiveReplayPublication {
+  readonly publicationId: string;
+  /** Decode-pipeline version in force when this pointer was promoted. */
+  readonly parserVersion: number;
+  readonly activatedAt: number;
 }
 
 /**
@@ -74,8 +105,59 @@ export interface RevisionStore {
   saveRawChunk(chunk: RawPayload): Promise<void>;
   /** All raw chunks held for a document, ascending by received range. */
   getRawChunks(docId: DocId): Promise<readonly RawPayload[]>;
+  /**
+   * Best-effort byte estimate for one document's retained raw chunks. Uses
+   * lengths only; never exposes or logs raw content.
+   */
+  estimateRawBytes(docId: DocId): Promise<number>;
+  /**
+   * Remove only raw chunks for one document, preserving derived replay data but
+   * invalidating the retrieval checkpoint. Without raw coverage, any future
+   * document-growth retrieval must restart from revision 1 rather than resume
+   * from a now-unbacked cursor. Returns best-effort reclaimed bytes.
+   */
+  deleteRawForDoc(docId: DocId): Promise<number>;
+  /**
+   * Remove only raw chunks for every document, preserving derived data and
+   * invalidating retrieval checkpoints. Returns best-effort reclaimed bytes.
+   */
+  deleteRawAll(): Promise<number>;
+  /**
+   * Coarse per-document raw budget enforcement. If the retained raw bytes for
+   * `docId` exceed `capBytes`, drops all raw for that document (derived data is
+   * preserved) and returns reclaimed bytes.
+   */
+  pruneRawToCap(docId: DocId, capBytes: number): Promise<number>;
+  /**
+   * Apply the coarse per-document raw cap to every document known to the store.
+   * Used by the generic Options page where no current docId is available.
+   */
+  pruneRawToCapAll(capBytes: number): Promise<number>;
 
-  // --- Decoded data (owner: worker) ---------------------------------------
+  // --- Atomic replay publication (owner: replay page after active-run proof) -
+  /** Persist one full replay artifact as a single publication record. */
+  saveReplayPublication(docId: DocId, publication: ReplayPublication): Promise<void>;
+  /**
+   * Read the replay publication only when its unique attempt id matches. A miss,
+   * stale parser version, or id mismatch returns null rather than falling back to
+   * legacy split stores.
+   */
+  getReplayPublication(
+    docId: DocId,
+    expectedPublicationId: string,
+  ): Promise<ReplayPublication | null>;
+  /** Promote one publication id as the document's active replay pointer. */
+  setActiveReplayPublication(docId: DocId, publicationId: string): Promise<void>;
+  /**
+   * Resolve the active replay pointer and then read that exact publication. A
+   * missing pointer, stale parser version, dangling row, or stale publication
+   * returns null. No latest-row scan is allowed.
+   */
+  getActiveReplayPublication(docId: DocId): Promise<ReplayPublication | null>;
+  /** Delete one replay publication; clears the active pointer if it named it. */
+  deleteReplayPublication(docId: DocId, publicationId: string): Promise<void>;
+
+  // --- Legacy split decoded data (compatibility / explicit consumption only) -
   saveDecoded(docId: DocId, revisions: readonly DecodedRevision[]): Promise<void>;
   getDecoded(docId: DocId): Promise<readonly DecodedRevision[]>;
   saveSnapshots(docId: DocId, snapshots: readonly StoredSnapshot[]): Promise<void>;
@@ -92,6 +174,8 @@ export interface RevisionStore {
   // --- Resumable-retrieval checkpoints (owner: background/orchestrator) ----
   readCheckpoint(docId: DocId): Promise<RetrievalCheckpoint | null>;
   writeCheckpoint(checkpoint: RetrievalCheckpoint): Promise<void>;
+  /** Delete one retrieval checkpoint. Used when retained raw coverage is discarded. */
+  deleteCheckpoint(docId: DocId): Promise<void>;
 
   // --- Maintenance --------------------------------------------------------
   /** Coarse usage/quota figures for the LRU/quota path. */

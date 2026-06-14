@@ -15,7 +15,14 @@ import type {
   RevisionId,
   TimelineEvent,
 } from "./domain/model";
-import type { RetrievalCheckpoint, RevisionStore, StoredSnapshot, UsageEstimate } from "./store";
+import type {
+  ActiveReplayPublication,
+  ReplayPublication,
+  RetrievalCheckpoint,
+  RevisionStore,
+  StoredSnapshot,
+  UsageEstimate,
+} from "./store";
 
 interface VersionedDecoded {
   readonly parserVersion: number;
@@ -40,6 +47,8 @@ export interface MemoryBackend {
   readonly decoded: Map<string, VersionedDecoded>;
   readonly snapshots: Map<string, VersionedSnapshots>;
   readonly timeline: Map<string, VersionedTimeline>;
+  readonly replayPublications: Map<string, ReplayPublication>;
+  readonly activeReplayPublications: Map<string, ActiveReplayPublication>;
   readonly cacheMeta: Map<string, CacheRecord>;
   readonly checkpoints: Map<string, RetrievalCheckpoint>;
 }
@@ -51,6 +60,8 @@ export function createMemoryBackend(): MemoryBackend {
     decoded: new Map(),
     snapshots: new Map(),
     timeline: new Map(),
+    replayPublications: new Map(),
+    activeReplayPublications: new Map(),
     cacheMeta: new Map(),
     checkpoints: new Map(),
   };
@@ -58,6 +69,10 @@ export function createMemoryBackend(): MemoryBackend {
 
 function rangeKey(start: RevisionId, end: RevisionId): string {
   return `${start}:${end}`;
+}
+
+function publicationKey(docId: DocId, publicationId: string): string {
+  return `${docId}\u0000${publicationId}`;
 }
 
 /**
@@ -70,7 +85,7 @@ function cloneValue<T>(value: T): T {
   return structuredClone(value);
 }
 
-function estimateRawBytes(payload: RawPayload): number {
+function estimatePayloadBytes(payload: RawPayload): number {
   try {
     const serialized = JSON.stringify(payload.body);
     return typeof serialized === "string" ? serialized.length : 0;
@@ -122,6 +137,66 @@ export function createMemoryStore(options: MemoryStoreOptions = {}): RevisionSto
           a.range.received.end - b.range.received.end,
       )
       .map(cloneValue);
+  }
+
+  async function estimateRawBytes(docId: DocId): Promise<number> {
+    const perDoc = backend.rawChunks.get(docId);
+    if (perDoc === undefined) return 0;
+    let total = 0;
+    for (const payload of perDoc.values()) {
+      total += estimatePayloadBytes(payload);
+    }
+    return total;
+  }
+
+  async function saveReplayPublication(
+    docId: DocId,
+    publication: ReplayPublication,
+  ): Promise<void> {
+    backend.replayPublications.set(
+      publicationKey(docId, publication.publicationId),
+      cloneValue({ ...publication, parserVersion }),
+    );
+  }
+
+  async function getReplayPublication(
+    docId: DocId,
+    expectedPublicationId: string,
+  ): Promise<ReplayPublication | null> {
+    const publication = backend.replayPublications.get(
+      publicationKey(docId, expectedPublicationId),
+    );
+    if (
+      publication === undefined ||
+      publication.parserVersion < parserVersion ||
+      publication.publicationId !== expectedPublicationId
+    ) {
+      return null;
+    }
+    return cloneValue(publication);
+  }
+
+  async function setActiveReplayPublication(docId: DocId, publicationId: string): Promise<void> {
+    backend.activeReplayPublications.set(docId, {
+      publicationId,
+      parserVersion,
+      activatedAt: Date.now(),
+    });
+  }
+
+  async function getActiveReplayPublication(docId: DocId): Promise<ReplayPublication | null> {
+    const active = backend.activeReplayPublications.get(docId);
+    if (active === undefined || active.parserVersion < parserVersion) {
+      return null;
+    }
+    return getReplayPublication(docId, active.publicationId);
+  }
+
+  async function deleteReplayPublication(docId: DocId, publicationId: string): Promise<void> {
+    backend.replayPublications.delete(publicationKey(docId, publicationId));
+    if (backend.activeReplayPublications.get(docId)?.publicationId === publicationId) {
+      backend.activeReplayPublications.delete(docId);
+    }
   }
 
   async function saveDecoded(docId: DocId, revisions: readonly DecodedRevision[]): Promise<void> {
@@ -178,14 +253,68 @@ export function createMemoryStore(options: MemoryStoreOptions = {}): RevisionSto
     backend.checkpoints.set(checkpoint.docId, cloneValue(checkpoint));
   }
 
-  function deleteRawForDoc(docId: DocId): number {
+  async function deleteCheckpoint(docId: DocId): Promise<void> {
+    backend.checkpoints.delete(docId);
+  }
+
+  async function deleteRawForDoc(docId: DocId): Promise<number> {
     const perDoc = backend.rawChunks.get(docId);
-    if (perDoc === undefined) return 0;
     let reclaimed = 0;
-    for (const payload of perDoc.values()) {
-      reclaimed += estimateRawBytes(payload);
+    if (perDoc !== undefined) {
+      for (const payload of perDoc.values()) {
+        reclaimed += estimatePayloadBytes(payload);
+      }
+      backend.rawChunks.delete(docId);
     }
-    backend.rawChunks.delete(docId);
+    const meta = backend.cacheMeta.get(docId);
+    if (meta !== undefined) {
+      backend.cacheMeta.set(docId, { ...meta, estimatedBytes: 0, rawRetained: false });
+    }
+    backend.checkpoints.delete(docId);
+    return reclaimed;
+  }
+
+  async function deleteRawAll(): Promise<number> {
+    let reclaimed = 0;
+    for (const perDoc of backend.rawChunks.values()) {
+      for (const payload of perDoc.values()) {
+        reclaimed += estimatePayloadBytes(payload);
+      }
+    }
+    backend.rawChunks.clear();
+    backend.checkpoints.clear();
+    for (const meta of backend.cacheMeta.values()) {
+      backend.cacheMeta.set(meta.docId, { ...meta, estimatedBytes: 0, rawRetained: false });
+    }
+    return reclaimed;
+  }
+
+  async function hasCompleteActivePublication(docId: DocId): Promise<boolean> {
+    const meta = backend.cacheMeta.get(docId);
+    return (
+      meta?.reconstructionStatus === "complete" &&
+      (await getActiveReplayPublication(docId)) !== null
+    );
+  }
+
+  async function pruneRawToCap(docId: DocId, capBytes: number): Promise<number> {
+    if (!(await hasCompleteActivePublication(docId))) {
+      return 0;
+    }
+    const target = Math.max(0, Math.floor(capBytes));
+    const retained = await estimateRawBytes(docId);
+    return retained > target ? deleteRawForDoc(docId) : 0;
+  }
+
+  async function pruneRawToCapAll(capBytes: number): Promise<number> {
+    const docs = new Set<DocId>([
+      ...backend.rawChunks.keys(),
+      ...backend.cacheMeta.keys(),
+    ] as DocId[]);
+    let reclaimed = 0;
+    for (const docId of docs) {
+      reclaimed += await pruneRawToCap(docId, capBytes);
+    }
     return reclaimed;
   }
 
@@ -198,11 +327,12 @@ export function createMemoryStore(options: MemoryStoreOptions = {}): RevisionSto
     let reclaimed = 0;
     for (const meta of docsByAge) {
       if (usage <= targetBytes) break;
-      const freed = deleteRawForDoc(meta.docId);
+      if (meta.reconstructionStatus !== "complete") continue;
+      if ((await getActiveReplayPublication(meta.docId)) === null) continue;
+      const freed = await deleteRawForDoc(meta.docId);
       if (freed > 0) {
         reclaimed += freed;
         usage -= freed;
-        backend.cacheMeta.set(meta.docId, { ...meta, rawRetained: false });
       }
     }
     return reclaimed;
@@ -213,6 +343,13 @@ export function createMemoryStore(options: MemoryStoreOptions = {}): RevisionSto
     backend.decoded.delete(docId);
     backend.snapshots.delete(docId);
     backend.timeline.delete(docId);
+    const prefix = `${docId}\u0000`;
+    for (const key of backend.replayPublications.keys()) {
+      if (key.startsWith(prefix)) {
+        backend.replayPublications.delete(key);
+      }
+    }
+    backend.activeReplayPublications.delete(docId);
     backend.cacheMeta.delete(docId);
     backend.checkpoints.delete(docId);
   }
@@ -222,6 +359,8 @@ export function createMemoryStore(options: MemoryStoreOptions = {}): RevisionSto
     backend.decoded.clear();
     backend.snapshots.clear();
     backend.timeline.clear();
+    backend.replayPublications.clear();
+    backend.activeReplayPublications.clear();
     backend.cacheMeta.clear();
     backend.checkpoints.clear();
   }
@@ -229,6 +368,16 @@ export function createMemoryStore(options: MemoryStoreOptions = {}): RevisionSto
   return {
     saveRawChunk,
     getRawChunks,
+    estimateRawBytes,
+    deleteRawForDoc,
+    deleteRawAll,
+    pruneRawToCap,
+    pruneRawToCapAll,
+    saveReplayPublication,
+    getReplayPublication,
+    setActiveReplayPublication,
+    getActiveReplayPublication,
+    deleteReplayPublication,
     saveDecoded,
     getDecoded,
     saveSnapshots,
@@ -240,6 +389,7 @@ export function createMemoryStore(options: MemoryStoreOptions = {}): RevisionSto
     touch,
     readCheckpoint,
     writeCheckpoint,
+    deleteCheckpoint,
     estimateUsage,
     pruneLRU,
     deleteDocument,
