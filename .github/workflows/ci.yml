@@ -44,6 +44,12 @@ jobs:
       - name: Lint & format check
         run: bunx biome ci .
 
+      # Static network-isolation guard (Phase 6 WI-5 / PRD §17): defense-in-depth
+      # static lint complementing the runtime e2e audit. Exits non-zero if any
+      # source line names a non-Google network target; CI gates on that exit code.
+      - name: Network-isolation static guard
+        run: bash scripts/check-no-foreign-hosts.sh
+
       - name: Pure-logic tests (Bun)
         run: bun run test:logic
 
