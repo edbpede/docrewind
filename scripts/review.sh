@@ -431,11 +431,11 @@ upload_transcript() {
   if [ -n "$TIMEOUT_BIN" ]; then
     url=$("$TIMEOUT_BIN" "$PRIVATEBIN_TIMEOUT" "$PRIVATEBIN_BIN" --config "$PRIVATEBIN_CONFIG" \
           ${PRIVATEBIN_BIN_NAME:+--bin "$PRIVATEBIN_BIN_NAME"} \
-          create --expire "$PRIVATEBIN_EXPIRE" --formatter markdown < "$TRANSCRIPT_FILE" 2> "$PB_ERR")
+          create --expire "$PRIVATEBIN_EXPIRE" < "$TRANSCRIPT_FILE" 2> "$PB_ERR")
   else
     url=$("$PRIVATEBIN_BIN" --config "$PRIVATEBIN_CONFIG" \
           ${PRIVATEBIN_BIN_NAME:+--bin "$PRIVATEBIN_BIN_NAME"} \
-          create --expire "$PRIVATEBIN_EXPIRE" --formatter markdown < "$TRANSCRIPT_FILE" 2> "$PB_ERR")
+          create --expire "$PRIVATEBIN_EXPIRE" < "$TRANSCRIPT_FILE" 2> "$PB_ERR")
   fi
   rc=$?
   set -e
