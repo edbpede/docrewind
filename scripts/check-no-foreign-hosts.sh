@@ -57,8 +57,23 @@ if [ -n "$foreign_urls" ]; then
   status=1
 fi
 
-# Rule 2 — non-fetch network egress APIs.
-egress_hits="$(grep -rEn 'XMLHttpRequest|WebSocket|EventSource|sendBeacon|importScripts\(' "${files[@]}" || true)"
+# Rule 2 — non-fetch network egress APIs in non-comment code lines. Mirrors
+# rule 1's comment-strip so a doc comment merely naming a banned API (e.g.
+# "// not using XMLHttpRequest because…") is exempt while code uses still fail.
+egress_hits=""
+for f in "${files[@]}"; do
+  lineno=0
+  while IFS= read -r line; do
+    lineno=$((lineno + 1))
+    trimmed="${line#"${line%%[![:space:]]*}"}"
+    case "$trimmed" in
+      //*|\**|/\**) continue ;;
+    esac
+    if printf '%s\n' "$line" | grep -qE 'XMLHttpRequest|WebSocket|EventSource|sendBeacon|importScripts\('; then
+      egress_hits+="$f:$lineno:$line"$'\n'
+    fi
+  done < "$f"
+done
 if [ -n "$egress_hits" ]; then
   echo "FAIL: non-fetch network egress API used in production code:"
   printf '%s\n' "$egress_hits"

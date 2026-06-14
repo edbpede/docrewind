@@ -112,8 +112,14 @@ export async function installGoogleFulfiller(context: BrowserContext): Promise<G
       });
       return;
     }
-    // Unmodeled first-party sub-resource: keep it offline + deterministic.
-    await route.fulfill({ status: 200, contentType: "text/plain", body: "" });
+    // Fail loud on any UNMODELLED docs.google.com path. The real flow hits only
+    // `…/d/{id}/edit` and `…/revisions/load` (see background.ts buildEditUrl /
+    // buildRevisionsLoadUrl), so reaching here means a fetcher hit a renamed or
+    // added sub-endpoint. A silent empty-200 here would let a fetcher receive an
+    // empty body while the lower-bounded `chunkCount() > 0` smoke assertion stays
+    // green — the fallback would lie to the fetcher with no sensor. Throwing
+    // aborts the request and surfaces the offending URL so the test fails loudly.
+    throw new Error(`Unmodelled docs.google.com request in E2E fixture: ${route.request().url()}`);
   });
 
   return {
