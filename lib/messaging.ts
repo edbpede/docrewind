@@ -104,6 +104,7 @@ export interface ProtocolMap {
   retrievalProgress(data: RetrievalProgress): void;
   getCheckpoint(data: GetCheckpointMessage): RetrievalCheckpoint | null;
   beginDecodeLease(data: DecodeLeaseMessage): void;
+  refreshDecodeLease(data: DecodeLeaseMessage): void;
   endDecodeLease(data: DecodeLeaseMessage): StorageMaintenanceAck;
   requestStorageMaintenance(data: RequestStorageMaintenanceMessage): StorageMaintenanceAck;
   clearDocumentCache(data: ClearDocumentCacheMessage): StorageMaintenanceAck;

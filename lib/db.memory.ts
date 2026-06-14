@@ -282,8 +282,16 @@ export function createMemoryStore(options: MemoryStoreOptions = {}): RevisionSto
     return reclaimed;
   }
 
+  async function hasCompleteActivePublication(docId: DocId): Promise<boolean> {
+    const meta = backend.cacheMeta.get(docId);
+    return (
+      meta?.reconstructionStatus === "complete" &&
+      (await getActiveReplayPublication(docId)) !== null
+    );
+  }
+
   async function pruneRawToCap(docId: DocId, capBytes: number): Promise<number> {
-    if ((await getActiveReplayPublication(docId)) === null) {
+    if (!(await hasCompleteActivePublication(docId))) {
       return 0;
     }
     const target = Math.max(0, Math.floor(capBytes));
@@ -312,6 +320,7 @@ export function createMemoryStore(options: MemoryStoreOptions = {}): RevisionSto
     let reclaimed = 0;
     for (const meta of docsByAge) {
       if (usage <= targetBytes) break;
+      if (meta.reconstructionStatus !== "complete") continue;
       if ((await getActiveReplayPublication(meta.docId)) === null) continue;
       const freed = await deleteRawForDoc(meta.docId);
       if (freed > 0) {

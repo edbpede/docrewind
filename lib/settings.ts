@@ -88,6 +88,8 @@ export type PendingAllStorageClearInput = Extract<
 >;
 
 const MIB = 1024 * 1024;
+export const STORAGE_LEASE_TTL_MS = 10 * 60 * 1000;
+export const STORAGE_LEASE_REFRESH_MS = 60 * 1000;
 
 /** Default cache budgets: ~50 MB per document, ~500 MB across all documents. */
 export const DEFAULT_STORAGE_BUDGET: StorageBudget = {
@@ -160,6 +162,111 @@ export const pendingDestructiveStorageClears = storage.defineItem<
 >("local:pendingDestructiveStorageClears", {
   fallback: [],
 });
+
+/**
+ * Content-free, durable lease marker for raw-cache maintenance safety. This is
+ * intentionally scoped to doc ids + counts only; it never stores raw content or
+ * reconstructed text. The in-memory coordinator is still the fast path, but this
+ * survives MV3 service-worker restarts so startup retry drains cannot prune raw
+ * chunks while a replay page is still decoding.
+ */
+export interface ActiveStorageLease {
+  readonly id: string;
+  readonly docId: DocId;
+  readonly count: number;
+  readonly updatedAt: number;
+}
+
+export const activeStorageLeases = storage.defineItem<readonly ActiveStorageLease[]>(
+  "local:activeStorageLeases",
+  { fallback: [] },
+);
+
+let storageLeaseMutationQueue: Promise<void> = Promise.resolve();
+
+function enqueueStorageLeaseMutation<T>(mutation: () => Promise<T>): Promise<T> {
+  const run = storageLeaseMutationQueue.then(mutation, mutation);
+  storageLeaseMutationQueue = run.then(
+    () => {},
+    () => {},
+  );
+  return run;
+}
+
+function storageLeaseId(docId: DocId): string {
+  return `storage-lease:${docId}`;
+}
+
+function isFreshLease(lease: ActiveStorageLease, now: number): boolean {
+  return lease.updatedAt > now - STORAGE_LEASE_TTL_MS;
+}
+
+async function getFreshStorageLeases(now = Date.now()): Promise<readonly ActiveStorageLease[]> {
+  const current = await activeStorageLeases.getValue();
+  const fresh = current.filter((lease) => lease.count > 0 && isFreshLease(lease, now));
+  if (fresh.length !== current.length) {
+    await activeStorageLeases.setValue(fresh);
+  }
+  return fresh;
+}
+
+export async function beginStorageLease(docId: DocId, now = Date.now()): Promise<void> {
+  await enqueueStorageLeaseMutation(async () => {
+    const id = storageLeaseId(docId);
+    const current = await getFreshStorageLeases(now);
+    const existing = current.find((lease) => lease.id === id);
+    const next: ActiveStorageLease = {
+      id,
+      docId,
+      count: (existing?.count ?? 0) + 1,
+      updatedAt: now,
+    };
+    await activeStorageLeases.setValue([...current.filter((lease) => lease.id !== id), next]);
+  });
+}
+
+export async function endStorageLease(docId: DocId, now = Date.now()): Promise<void> {
+  await enqueueStorageLeaseMutation(async () => {
+    const id = storageLeaseId(docId);
+    const current = await getFreshStorageLeases(now);
+    const existing = current.find((lease) => lease.id === id);
+    if (existing === undefined) {
+      return;
+    }
+    const remaining = existing.count - 1;
+    await activeStorageLeases.setValue(
+      remaining > 0
+        ? [
+            ...current.filter((lease) => lease.id !== id),
+            { ...existing, count: remaining, updatedAt: now },
+          ]
+        : current.filter((lease) => lease.id !== id),
+    );
+  });
+}
+
+export async function refreshStorageLease(docId: DocId, now = Date.now()): Promise<void> {
+  await enqueueStorageLeaseMutation(async () => {
+    const id = storageLeaseId(docId);
+    const current = await getFreshStorageLeases(now);
+    const existing = current.find((lease) => lease.id === id);
+    if (existing === undefined) {
+      return;
+    }
+    await activeStorageLeases.setValue([
+      ...current.filter((lease) => lease.id !== id),
+      { ...existing, updatedAt: now },
+    ]);
+  });
+}
+
+export async function hasActiveStorageLease(
+  docId: DocId | null,
+  now = Date.now(),
+): Promise<boolean> {
+  const current = await getFreshStorageLeases(now);
+  return docId === null ? current.length > 0 : current.some((lease) => lease.docId === docId);
+}
 
 function pendingMaintenanceId(input: PendingStorageMaintenanceInput): string {
   const scope = input.docId ?? "*";

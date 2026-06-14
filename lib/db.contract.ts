@@ -227,6 +227,17 @@ export function runRevisionStoreContract(
       expect(await bumped.getRawChunks(docA)).toHaveLength(1);
     });
 
+    it("does not prune raw when cache metadata is still partial even with an active publication", async () => {
+      await store.saveRawChunk(rawChunk(docA, 1, 4, "x".repeat(100)));
+      await saveActiveReplayPublication(store, docA, replayPublication("pub-partial-prune"));
+      await store.putCacheMeta(cacheRec(docA, 1, "partial"));
+      const retained = await store.estimateRawBytes(docA);
+
+      expect(await store.pruneRawToCap(docA, retained - 1)).toBe(0);
+      expect(await store.pruneLRU(0)).toBe(0);
+      expect(await store.getRawChunks(docA)).toHaveLength(1);
+    });
+
     it("coarsely applies a per-document raw cap across all documents", async () => {
       await store.saveRawChunk(rawChunk(docA, 1, 4, "x".repeat(100)));
       await store.saveRawChunk(rawChunk(docB, 1, 4, "y".repeat(100)));

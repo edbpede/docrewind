@@ -17,6 +17,7 @@ import { asDocId, asRevisionId } from "@/lib/domain/ids";
 import type { RawPayload } from "@/lib/domain/model";
 import { removeAllListeners, sendMessage } from "@/lib/messaging";
 import {
+  beginStorageLease,
   createPendingDestructiveStorageClear,
   createPendingStorageMaintenanceRequest,
   getPendingDestructiveStorageClears,
@@ -59,6 +60,33 @@ async function saveActivePublication(
     publishedAt: 1,
   });
   await store.setActiveReplayPublication(docId, "pub-active");
+}
+
+async function saveCompleteRawDocument(
+  store: ReturnType<typeof createIdbStore>,
+  docId: ReturnType<typeof asDocId>,
+  body = "raw-body",
+  lastAccessedAt = 1,
+): Promise<void> {
+  await store.saveRawChunk({
+    docId,
+    range: {
+      requested: { start: asRevisionId(1), end: asRevisionId(1) },
+      received: { start: asRevisionId(1), end: asRevisionId(1) },
+    },
+    receivedAt: 0,
+    body,
+  } satisfies RawPayload);
+  await saveActivePublication(store, docId);
+  await store.putCacheMeta({
+    docId,
+    createdAt: 0,
+    lastAccessedAt,
+    parserVersion: PARSER_VERSION,
+    estimatedBytes: 1,
+    reconstructionStatus: "complete",
+    rawRetained: true,
+  });
 }
 
 describe("background retrieval wiring", () => {
@@ -238,6 +266,43 @@ describe("background retrieval wiring", () => {
     });
   });
 
+  it("does not drain persisted maintenance on startup while a durable lease is active", async () => {
+    const docId = asDocId("docPendingLeaseBG");
+    const store = createIdbStore();
+    await store.saveRawChunk({
+      docId,
+      range: {
+        requested: { start: asRevisionId(1), end: asRevisionId(1) },
+        received: { start: asRevisionId(1), end: asRevisionId(1) },
+      },
+      receivedAt: 0,
+      body: "raw-body",
+    } satisfies RawPayload);
+    await saveActivePublication(store, docId);
+    const request = createPendingStorageMaintenanceRequest({
+      docId,
+      keepRawData: false,
+      budget: { perDocumentBytes: 1, globalCapBytes: 1 },
+      reconstructionStatus: "complete",
+      queuedAt: 1,
+    });
+    await upsertPendingStorageMaintenance(request);
+    await beginStorageLease(docId, Date.now());
+
+    runBackground();
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(await store.getRawChunks(docId)).toHaveLength(1);
+    expect(await getPendingStorageMaintenance()).toEqual([request]);
+
+    await sendMessage("endDecodeLease", { docId });
+
+    await vi.waitFor(async () => {
+      expect(await store.getRawChunks(docId)).toEqual([]);
+      expect(await getPendingStorageMaintenance()).toEqual([]);
+    });
+  });
+
   it("drains persisted destructive clear requests on background startup", async () => {
     const docId = asDocId("docPendingClearBG");
     const store = createIdbStore();
@@ -261,6 +326,189 @@ describe("background retrieval wiring", () => {
 
     await vi.waitFor(async () => {
       expect(await store.getRawChunks(docId)).toEqual([]);
+      expect(await getPendingDestructiveStorageClears()).toEqual([]);
+    });
+  });
+
+  it("does not drain persisted destructive clear on startup while a durable lease is active", async () => {
+    const docId = asDocId("docPendingClearLeaseBG");
+    const store = createIdbStore();
+    await store.saveRawChunk({
+      docId,
+      range: {
+        requested: { start: asRevisionId(1), end: asRevisionId(1) },
+        received: { start: asRevisionId(1), end: asRevisionId(1) },
+      },
+      receivedAt: 0,
+      body: "raw-body",
+    } satisfies RawPayload);
+    const request = createPendingDestructiveStorageClear({
+      kind: "document",
+      docId,
+      queuedAt: 1,
+    });
+    await upsertPendingDestructiveStorageClear(request);
+    await beginStorageLease(docId, Date.now());
+
+    runBackground();
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(await store.getRawChunks(docId)).toHaveLength(1);
+    expect(await getPendingDestructiveStorageClears()).toEqual([request]);
+
+    await sendMessage("endDecodeLease", { docId });
+
+    await vi.waitFor(async () => {
+      expect(await store.getRawChunks(docId)).toEqual([]);
+      expect(await getPendingDestructiveStorageClears()).toEqual([]);
+    });
+  });
+
+  it("keeps persisted document maintenance deferred when durable leases outlive the current worker lease", async () => {
+    const docId = asDocId("docDocumentDurableCountMaintenanceBG");
+    const store = createIdbStore();
+    await saveCompleteRawDocument(store, docId);
+    const request = createPendingStorageMaintenanceRequest({
+      docId,
+      keepRawData: false,
+      budget: { perDocumentBytes: 1, globalCapBytes: 1 },
+      reconstructionStatus: "complete",
+      queuedAt: 1,
+    });
+    await upsertPendingStorageMaintenance(request);
+    await beginStorageLease(docId, Date.now());
+
+    runBackground();
+    await sendMessage("beginDecodeLease", { docId });
+    const deferred = await sendMessage("requestStorageMaintenance", request);
+
+    expect(deferred.status).toBe("deferred");
+    expect(await store.getRawChunks(docId)).toHaveLength(1);
+    expect(await getPendingStorageMaintenance()).toEqual([request]);
+
+    await sendMessage("endDecodeLease", { docId });
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(await store.getRawChunks(docId)).toHaveLength(1);
+    expect(await getPendingStorageMaintenance()).toEqual([request]);
+
+    await sendMessage("endDecodeLease", { docId });
+
+    await vi.waitFor(async () => {
+      expect(await store.getRawChunks(docId)).toEqual([]);
+      expect(await getPendingStorageMaintenance()).toEqual([]);
+    });
+  });
+
+  it("keeps persisted document clears deferred when durable leases outlive the current worker lease", async () => {
+    const docId = asDocId("docDocumentDurableCountClearBG");
+    const store = createIdbStore();
+    await saveCompleteRawDocument(store, docId);
+    const request = createPendingDestructiveStorageClear({
+      kind: "document",
+      docId,
+      queuedAt: 1,
+    });
+    await upsertPendingDestructiveStorageClear(request);
+    await beginStorageLease(docId, Date.now());
+
+    runBackground();
+    await sendMessage("beginDecodeLease", { docId });
+    const deferred = await sendMessage("clearDocumentCache", request);
+
+    expect(deferred.status).toBe("deferred");
+    expect(await store.getRawChunks(docId)).toHaveLength(1);
+    expect(await getPendingDestructiveStorageClears()).toEqual([request]);
+
+    await sendMessage("endDecodeLease", { docId });
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(await store.getRawChunks(docId)).toHaveLength(1);
+    expect(await getPendingDestructiveStorageClears()).toEqual([request]);
+
+    await sendMessage("endDecodeLease", { docId });
+
+    await vi.waitFor(async () => {
+      expect(await store.getRawChunks(docId)).toEqual([]);
+      expect(await getPendingDestructiveStorageClears()).toEqual([]);
+    });
+  });
+
+  it("does not run global maintenance while an unrelated durable-only lease remains active", async () => {
+    const durableDoc = asDocId("docGlobalDurableMaintenanceBG");
+    const memoryDoc = asDocId("docGlobalMemoryMaintenanceBG");
+    const store = createIdbStore();
+    await saveCompleteRawDocument(store, durableDoc, "durable-raw", 1);
+    await saveCompleteRawDocument(store, memoryDoc, "memory-raw", 2);
+    const request = createPendingStorageMaintenanceRequest({
+      docId: null,
+      keepRawData: false,
+      budget: { perDocumentBytes: 1, globalCapBytes: 1 },
+      reconstructionStatus: "complete",
+      queuedAt: 1,
+    });
+    await upsertPendingStorageMaintenance(request);
+    await beginStorageLease(durableDoc, Date.now());
+
+    runBackground();
+    await sendMessage("beginDecodeLease", { docId: memoryDoc });
+    const deferred = await sendMessage("requestStorageMaintenance", request);
+
+    expect(deferred.status).toBe("deferred");
+    expect(await store.getRawChunks(durableDoc)).toHaveLength(1);
+    expect(await store.getRawChunks(memoryDoc)).toHaveLength(1);
+    expect(await getPendingStorageMaintenance()).toEqual([request]);
+
+    await sendMessage("endDecodeLease", { docId: memoryDoc });
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(await store.getRawChunks(durableDoc)).toHaveLength(1);
+    expect(await store.getRawChunks(memoryDoc)).toHaveLength(1);
+    expect(await getPendingStorageMaintenance()).toEqual([request]);
+
+    await sendMessage("endDecodeLease", { docId: durableDoc });
+
+    await vi.waitFor(async () => {
+      expect(await store.getRawChunks(durableDoc)).toEqual([]);
+      expect(await store.getRawChunks(memoryDoc)).toEqual([]);
+      expect(await getPendingStorageMaintenance()).toEqual([]);
+    });
+  });
+
+  it("does not run global destructive clear while an unrelated durable-only lease remains active", async () => {
+    const durableDoc = asDocId("docGlobalDurableClearBG");
+    const memoryDoc = asDocId("docGlobalMemoryClearBG");
+    const store = createIdbStore();
+    await saveCompleteRawDocument(store, durableDoc, "durable-raw", 1);
+    await saveCompleteRawDocument(store, memoryDoc, "memory-raw", 2);
+    const request = createPendingDestructiveStorageClear({
+      kind: "all",
+      queuedAt: 1,
+    });
+    await upsertPendingDestructiveStorageClear(request);
+    await beginStorageLease(durableDoc, Date.now());
+
+    runBackground();
+    await sendMessage("beginDecodeLease", { docId: memoryDoc });
+    const deferred = await sendMessage("clearAllCaches", request);
+
+    expect(deferred.status).toBe("deferred");
+    expect(await store.getRawChunks(durableDoc)).toHaveLength(1);
+    expect(await store.getRawChunks(memoryDoc)).toHaveLength(1);
+    expect(await getPendingDestructiveStorageClears()).toEqual([request]);
+
+    await sendMessage("endDecodeLease", { docId: memoryDoc });
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(await store.getRawChunks(durableDoc)).toHaveLength(1);
+    expect(await store.getRawChunks(memoryDoc)).toHaveLength(1);
+    expect(await getPendingDestructiveStorageClears()).toEqual([request]);
+
+    await sendMessage("endDecodeLease", { docId: durableDoc });
+
+    await vi.waitFor(async () => {
+      expect(await store.getRawChunks(durableDoc)).toEqual([]);
+      expect(await store.getRawChunks(memoryDoc)).toEqual([]);
       expect(await getPendingDestructiveStorageClears()).toEqual([]);
     });
   });

@@ -443,6 +443,49 @@ describe("Replay App run gating", () => {
     expect(await nextStore.getReplayPublication(DOC, freshPublicationIds[0] ?? "")).not.toBeNull();
   });
 
+  it("re-reads the current run publication even if another session changes the active pointer", async () => {
+    sendMessageMock.mockResolvedValue({ ok: true });
+    installFakeWorker((request) => ({
+      kind: "done",
+      docId: request.docId,
+      runId: request.runId,
+      revisionCount: 1,
+      revisions: [decodedRevision()],
+      snapshots: [{ appliedCount: 0, model: createModel() }],
+      timeline: [],
+    }));
+    const store = createMemoryStore();
+    const requestedPublicationIds: string[] = [];
+    const getReplayPublication = store.getReplayPublication.bind(store);
+    store.getReplayPublication = async (docId, expectedPublicationId) => {
+      requestedPublicationIds.push(expectedPublicationId);
+      return getReplayPublication(docId, expectedPublicationId);
+    };
+    const saveReplayPublication = store.saveReplayPublication.bind(store);
+    const setActiveReplayPublication = store.setActiveReplayPublication.bind(store);
+    store.setActiveReplayPublication = async (docId, publicationId) => {
+      await setActiveReplayPublication(docId, publicationId);
+      if (publicationId !== "other-session") {
+        await saveReplayPublication(docId, {
+          publicationId: "other-session",
+          parserVersion: PARSER_VERSION,
+          revisions: [decodedRevision()],
+          snapshots: [{ appliedCount: 0, model: createModel() }],
+          timeline: [],
+          publishedAt: 1,
+        });
+        await setActiveReplayPublication(docId, "other-session");
+      }
+    };
+
+    render(() => <App store={store} />);
+    await vi.waitFor(() => expect(screen.getByText("Settings & privacy")).toBeTruthy());
+
+    expect(requestedPublicationIds).toHaveLength(1);
+    expect(requestedPublicationIds[0]).not.toBe("other-session");
+    expect(requestedPublicationIds[0]).toContain(":");
+  });
+
   it("classifies worker unsupported and failed messages as non-replay states", async () => {
     sendMessageMock.mockResolvedValue({ ok: true });
     installFakeWorker((request) => ({

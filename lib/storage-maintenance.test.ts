@@ -158,6 +158,7 @@ describe("storage maintenance", () => {
     const store = createMemoryStore();
     const docId = asDocId("maintDoc");
     await store.saveRawChunk(raw("body"));
+    await saveActivePublication(store, docId, "older-active-publication");
 
     const coordinator = createStorageMaintenanceCoordinator(store);
     const ack = await coordinator.request({
@@ -209,6 +210,7 @@ describe("storage maintenance", () => {
     await store.saveRawChunk({ ...raw("complete"), docId: completeDoc });
     await store.saveRawChunk({ ...raw("partial"), docId: partialDoc });
     await saveActivePublication(store, completeDoc);
+    await saveActivePublication(store, partialDoc, "older-partial-active-publication");
     await refreshCacheMeta(store, completeDoc, { now: 1, reconstructionStatus: "complete" });
     await refreshCacheMeta(store, partialDoc, { now: 2, reconstructionStatus: "partial" });
 

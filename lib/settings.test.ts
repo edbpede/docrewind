@@ -8,15 +8,20 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { fakeBrowser } from "wxt/testing";
 import { asDocId } from "./domain/ids";
 import {
+  activeStorageLeases,
+  beginStorageLease,
   createPendingDestructiveStorageClear,
   createPendingStorageMaintenanceRequest,
   DEFAULT_STORAGE_BUDGET,
+  endStorageLease,
   getPendingDestructiveStorageClears,
   getPendingStorageMaintenance,
+  hasActiveStorageLease,
   keepRawData,
   pendingDestructiveStorageClears,
   pendingStorageMaintenance,
   realIdentities,
+  refreshStorageLease,
   removePendingDestructiveStorageClear,
   removePendingStorageMaintenance,
   STORAGE_BUDGET_MIGRATIONS,
@@ -54,6 +59,10 @@ describe("settings", () => {
 
     it("pending destructive storage clears default to empty", async () => {
       expect(await pendingDestructiveStorageClears.getValue()).toEqual([]);
+    });
+
+    it("active storage leases default to empty", async () => {
+      expect(await activeStorageLeases.getValue()).toEqual([]);
     });
   });
 
@@ -119,6 +128,72 @@ describe("settings", () => {
 
       await removePendingDestructiveStorageClear(second.id);
       expect(await getPendingDestructiveStorageClears()).toEqual([]);
+    });
+
+    it("tracks durable storage leases by document with count and expiry", async () => {
+      const docId = asDocId("docLeaseSettings");
+
+      await beginStorageLease(docId, 1_000);
+      await beginStorageLease(docId, 2_000);
+      await refreshStorageLease(docId, 3_000);
+
+      expect(await hasActiveStorageLease(docId, 4_000)).toBe(true);
+      expect(await hasActiveStorageLease(null, 4_000)).toBe(true);
+      expect(await activeStorageLeases.getValue()).toEqual([
+        {
+          id: "storage-lease:docLeaseSettings",
+          docId,
+          count: 2,
+          updatedAt: 3_000,
+        },
+      ]);
+
+      await endStorageLease(docId, 3_000);
+      expect(await hasActiveStorageLease(docId, 4_000)).toBe(true);
+
+      await endStorageLease(docId, 4_000);
+      expect(await hasActiveStorageLease(docId, 5_000)).toBe(false);
+      expect(await activeStorageLeases.getValue()).toEqual([]);
+    });
+
+    it("serializes overlapping durable storage lease mutations", async () => {
+      const docId = asDocId("docConcurrentLease");
+
+      await Promise.all([
+        beginStorageLease(docId, 1_000),
+        beginStorageLease(docId, 1_001),
+        beginStorageLease(docId, 1_002),
+      ]);
+
+      expect(await activeStorageLeases.getValue()).toEqual([
+        {
+          id: "storage-lease:docConcurrentLease",
+          docId,
+          count: 3,
+          updatedAt: 1_002,
+        },
+      ]);
+
+      await Promise.all([endStorageLease(docId, 2_000), endStorageLease(docId, 2_001)]);
+
+      expect(await activeStorageLeases.getValue()).toEqual([
+        {
+          id: "storage-lease:docConcurrentLease",
+          docId,
+          count: 1,
+          updatedAt: 2_001,
+        },
+      ]);
+      expect(await hasActiveStorageLease(docId, 2_002)).toBe(true);
+    });
+
+    it("expires stale durable storage leases", async () => {
+      const docId = asDocId("docOldLease");
+
+      await beginStorageLease(docId, 1_000);
+
+      expect(await hasActiveStorageLease(docId, 1_000 + 10 * 60 * 1000 + 1)).toBe(false);
+      expect(await activeStorageLeases.getValue()).toEqual([]);
     });
   });
 

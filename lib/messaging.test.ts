@@ -60,6 +60,9 @@ describe("messaging ProtocolMap", () => {
     onMessage("beginDecodeLease", ({ data }) => {
       expect(data.docId).toBe(docId);
     });
+    onMessage("refreshDecodeLease", ({ data }) => {
+      expect(data.docId).toBe(docId);
+    });
     onMessage("endDecodeLease", ({ data }) => ({
       status: "completed",
       reclaimedBytes: data.docId === docId ? 1 : 0,
@@ -70,6 +73,7 @@ describe("messaging ProtocolMap", () => {
     }));
 
     await sendMessage("beginDecodeLease", { docId });
+    await sendMessage("refreshDecodeLease", { docId });
     expect(await sendMessage("endDecodeLease", { docId })).toEqual({
       status: "completed",
       reclaimedBytes: 1,

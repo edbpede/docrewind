@@ -34,16 +34,27 @@ import { fail, ok, type Result, type RetrievalError, retrievalError } from "@/li
 import { type CancellationToken, runRetrieval } from "@/lib/retrieval/orchestrator";
 import type { ChunkFetcher, ChunkRequest } from "@/lib/retrieval/transport";
 import {
+  beginStorageLease,
+  endStorageLease,
   getPendingDestructiveStorageClears,
   getPendingStorageMaintenance,
+  hasActiveStorageLease,
+  refreshStorageLease,
   removePendingDestructiveStorageClear,
   removePendingStorageMaintenance,
+  STORAGE_LEASE_REFRESH_MS,
 } from "@/lib/settings";
-import { createStorageMaintenanceCoordinator, refreshCacheMeta } from "@/lib/storage-maintenance";
+import {
+  createStorageMaintenanceCoordinator,
+  refreshCacheMeta,
+  type StorageMaintenanceRequest,
+} from "@/lib/storage-maintenance";
 
 export default defineBackground(() => {
   const store = createIdbStore();
-  const maintenance = createStorageMaintenanceCoordinator(store);
+  const maintenance = createStorageMaintenanceCoordinator(store, {
+    canRunScope: async (docId) => !(await hasActiveStorageLease(docId)),
+  });
 
   // Per-document cancellation flags for in-flight retrievals.
   const cancelledDocs = new Set<string>();
@@ -65,14 +76,36 @@ export default defineBackground(() => {
   };
 
   async function requestDestructiveClear(
-    request: { readonly kind: "document"; readonly docId: DocId } | { readonly kind: "all" },
+    request:
+      | { readonly kind: "document"; readonly docId: DocId; readonly id?: string }
+      | { readonly kind: "all"; readonly id?: string },
   ) {
+    const blockedScope = request.kind === "all" ? null : request.docId;
     if (request.kind === "all") {
       cancelAllDocumentRuns();
+    } else {
+      cancelDocumentRun(request.docId);
+    }
+    const hasDurableLease = await hasActiveStorageLease(blockedScope);
+    const isPersisted = request.id !== undefined;
+    if (isPersisted && (hasDurableLease || maintenance.hasActiveLease(blockedScope))) {
+      return { status: "deferred" as const, reclaimedBytes: 0 };
+    }
+    if (request.kind === "all") {
       return maintenance.requestDestructiveClear({ kind: "all" });
     }
-    cancelDocumentRun(request.docId);
     return maintenance.requestDestructiveClear({ kind: "document", docId: request.docId });
+  }
+
+  async function requestStorageMaintenance(
+    request: StorageMaintenanceRequest & { readonly id?: string },
+  ) {
+    const hasDurableLease = await hasActiveStorageLease(request.docId);
+    const isPersisted = request.id !== undefined;
+    if (isPersisted && (hasDurableLease || maintenance.hasActiveLease(request.docId))) {
+      return { status: "deferred" as const, reclaimedBytes: 0 };
+    }
+    return maintenance.request(request);
   }
 
   async function drainPersistedRequests(): Promise<void> {
@@ -84,7 +117,7 @@ export default defineBackground(() => {
     }
 
     for (const request of await getPendingStorageMaintenance()) {
-      const ack = await maintenance.request(request);
+      const ack = await requestStorageMaintenance(request);
       if (ack.status === "completed") {
         await removePendingStorageMaintenance(request.id);
       }
@@ -270,18 +303,24 @@ export default defineBackground(() => {
     cancelDocumentRun(data.docId);
   });
 
-  onMessage("beginDecodeLease", ({ data }) => {
+  onMessage("beginDecodeLease", async ({ data }) => {
+    await beginStorageLease(data.docId);
     maintenance.beginDecodeLease(data.docId);
   });
 
+  onMessage("refreshDecodeLease", async ({ data }) => {
+    await refreshStorageLease(data.docId);
+  });
+
   onMessage("endDecodeLease", async ({ data }) => {
+    await endStorageLease(data.docId);
     const ack = await maintenance.endDecodeLease(data.docId);
     await drainPersistedRequests();
     return ack;
   });
 
   onMessage("requestStorageMaintenance", async ({ data }) => {
-    const ack = await maintenance.request(data);
+    const ack = await requestStorageMaintenance(data);
     if (ack.status === "completed" && data.id !== undefined) {
       await removePendingStorageMaintenance(data.id);
     }
@@ -289,7 +328,7 @@ export default defineBackground(() => {
   });
 
   onMessage("clearDocumentCache", async ({ data }) => {
-    const ack = await requestDestructiveClear({ kind: "document", docId: data.docId });
+    const ack = await requestDestructiveClear({ ...data, kind: "document" });
     if (ack.status === "completed" && data.id !== undefined) {
       await removePendingDestructiveStorageClear(data.id);
     }
@@ -297,7 +336,7 @@ export default defineBackground(() => {
   });
 
   onMessage("clearAllCaches", async ({ data }) => {
-    const ack = await requestDestructiveClear({ kind: "all" });
+    const ack = await requestDestructiveClear({ ...data, kind: "all" });
     if (ack.status === "completed" && data.id !== undefined) {
       await removePendingDestructiveStorageClear(data.id);
     }
@@ -309,7 +348,11 @@ export default defineBackground(() => {
     // lose it, so all maintenance requests are idempotent and replay terminal
     // paths retry cleanup; while this worker is alive, raw pruning waits until
     // retrieval and page decode have both released their leases.
+    await beginStorageLease(data.docId);
     maintenance.beginDecodeLease(data.docId);
+    const leaseRefresh = setInterval(() => {
+      void refreshStorageLease(data.docId).catch(() => {});
+    }, STORAGE_LEASE_REFRESH_MS);
     cancelledDocs.delete(data.docId);
     // Claim a fresh epoch; any earlier run for this docId is now stale and will
     // self-cancel on its next `isCancelled()` check.
@@ -344,7 +387,10 @@ export default defineBackground(() => {
       // The error is content-free by construction — never log raw bodies (§13.7).
       return result.ok ? { ok: true } : { ok: false, error: result.error };
     } finally {
+      clearInterval(leaseRefresh);
+      await endStorageLease(data.docId);
       await maintenance.endDecodeLease(data.docId);
+      await drainPersistedRequests();
     }
   });
 

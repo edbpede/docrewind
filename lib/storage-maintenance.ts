@@ -29,6 +29,10 @@ export type DestructiveStorageRequest =
   | { readonly kind: "document"; readonly docId: DocId }
   | { readonly kind: "all" };
 
+export interface StorageMaintenanceCoordinatorOptions {
+  readonly canRunScope?: (docId: DocId | null) => boolean | Promise<boolean>;
+}
+
 /** Refresh LRU/cache metadata using byte counts only; never reads raw content. */
 export async function refreshCacheMeta(
   store: RevisionStore,
@@ -79,6 +83,23 @@ export async function enforceStorageBudgetForAll(
   return reclaimed;
 }
 
+async function canDiscardRawForRequest(
+  store: RevisionStore,
+  docId: DocId,
+  reconstructionStatus: ReconstructionStatus | undefined,
+): Promise<boolean> {
+  if (reconstructionStatus !== undefined && reconstructionStatus !== "complete") {
+    return false;
+  }
+  if (reconstructionStatus === undefined) {
+    const meta = await store.getCacheMeta(docId);
+    if (meta?.reconstructionStatus !== "complete") {
+      return false;
+    }
+  }
+  return (await store.getActiveReplayPublication(docId)) !== null;
+}
+
 /** Execute one raw-cache maintenance request. Callers must already know it is safe. */
 export async function runStorageMaintenance(
   store: RevisionStore,
@@ -110,7 +131,11 @@ export async function runStorageMaintenance(
     await refreshCacheMeta(store, request.docId, refreshOptions);
   }
 
-  const canDiscardRaw = (await store.getActiveReplayPublication(request.docId)) !== null;
+  const canDiscardRaw = await canDiscardRawForRequest(
+    store,
+    request.docId,
+    request.reconstructionStatus,
+  );
 
   if (canDiscardRaw) {
     reclaimed += request.keepRawData
@@ -131,7 +156,10 @@ export async function runStorageMaintenance(
  * terminal paths may safely retry them. The guard's only hard rule while alive:
  * no raw deletion/pruning runs for a doc whose retrieval/decode lease is active.
  */
-export function createStorageMaintenanceCoordinator(store: RevisionStore) {
+export function createStorageMaintenanceCoordinator(
+  store: RevisionStore,
+  options: StorageMaintenanceCoordinatorOptions = {},
+) {
   const activeLeaseCounts = new Map<string, number>();
   const pending = new Map<string, StorageMaintenanceRequest>();
   const pendingDestructive = new Map<string, DestructiveStorageRequest>();
@@ -142,6 +170,8 @@ export function createStorageMaintenanceCoordinator(store: RevisionStore) {
   const isScopeBlocked = (docId: DocId | null): boolean =>
     docId === null ? activeLeaseCounts.size > 0 : (activeLeaseCounts.get(docId) ?? 0) > 0;
   const isBlocked = (request: StorageMaintenanceRequest): boolean => isScopeBlocked(request.docId);
+  const canRunScope = async (docId: DocId | null): Promise<boolean> =>
+    options.canRunScope === undefined ? true : await options.canRunScope(docId);
 
   async function runDestructiveStorage(request: DestructiveStorageRequest): Promise<void> {
     if (request.kind === "all") {
@@ -157,7 +187,7 @@ export function createStorageMaintenanceCoordinator(store: RevisionStore) {
 
     for (const [key, request] of [...pendingDestructive.entries()]) {
       const blockedScope = request.kind === "all" ? null : request.docId;
-      if (isScopeBlocked(blockedScope)) {
+      if (isScopeBlocked(blockedScope) || !(await canRunScope(blockedScope))) {
         continue;
       }
       try {
@@ -169,7 +199,7 @@ export function createStorageMaintenanceCoordinator(store: RevisionStore) {
     }
 
     for (const [key, request] of [...pending.entries()]) {
-      if (isBlocked(request)) {
+      if (isBlocked(request) || !(await canRunScope(request.docId))) {
         continue;
       }
       try {
@@ -190,6 +220,10 @@ export function createStorageMaintenanceCoordinator(store: RevisionStore) {
   }
 
   return {
+    hasActiveLease(docId: DocId | null): boolean {
+      return isScopeBlocked(docId);
+    },
+
     beginDecodeLease(docId: DocId): void {
       activeLeaseCounts.set(docId, (activeLeaseCounts.get(docId) ?? 0) + 1);
     },
@@ -205,7 +239,7 @@ export function createStorageMaintenanceCoordinator(store: RevisionStore) {
     },
 
     async request(request: StorageMaintenanceRequest): Promise<StorageMaintenanceResult> {
-      if (isBlocked(request)) {
+      if (isBlocked(request) || !(await canRunScope(request.docId))) {
         pending.set(requestKey(request), request);
         return { status: "deferred", reclaimedBytes: 0 };
       }
@@ -221,7 +255,7 @@ export function createStorageMaintenanceCoordinator(store: RevisionStore) {
       request: DestructiveStorageRequest,
     ): Promise<StorageMaintenanceResult> {
       const blockedScope = request.kind === "all" ? null : request.docId;
-      if (isScopeBlocked(blockedScope)) {
+      if (isScopeBlocked(blockedScope) || !(await canRunScope(blockedScope))) {
         pendingDestructive.set(destructiveKey(request), request);
         return { status: "deferred", reclaimedBytes: 0 };
       }

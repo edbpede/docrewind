@@ -51,6 +51,7 @@ import {
   keepRawData,
   realIdentities,
   removePendingStorageMaintenance,
+  STORAGE_LEASE_REFRESH_MS,
   storageBudget,
   upsertPendingStorageMaintenance,
 } from "@/lib/settings";
@@ -280,7 +281,7 @@ const ReplaySurface: Component<{
           }
           return undefined;
         }
-        const result = await loadReplayData(props.store, docId);
+        const result = await loadReplayData(props.store, docId, publicationId);
         if (result.kind !== "ok") {
           if (isActiveRun(runId)) {
             setNonReplayState("missing-publication");
@@ -315,6 +316,7 @@ const ReplaySurface: Component<{
   let activeRunId = 0;
   const pageSessionId = createPageSessionId();
   const leasedRunIds = new Set<number>();
+  const leaseRefreshTimers = new Map<number, ReturnType<typeof setInterval>>();
 
   function isActiveRun(runId: number): boolean {
     return activeRunId === runId;
@@ -327,11 +329,20 @@ const ReplaySurface: Component<{
   function beginPageLease(runId: number): void {
     leasedRunIds.add(runId);
     void sendMessage("beginDecodeLease", { docId: props.docId }).catch(() => {});
+    const timer = setInterval(() => {
+      void sendMessage("refreshDecodeLease", { docId: props.docId }).catch(() => {});
+    }, STORAGE_LEASE_REFRESH_MS);
+    leaseRefreshTimers.set(runId, timer);
   }
 
   async function releasePageLease(runId: number): Promise<void> {
     if (!leasedRunIds.delete(runId)) {
       return;
+    }
+    const timer = leaseRefreshTimers.get(runId);
+    if (timer !== undefined) {
+      clearInterval(timer);
+      leaseRefreshTimers.delete(runId);
     }
     await sendMessage("endDecodeLease", { docId: props.docId }).catch(() => {});
   }
