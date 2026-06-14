@@ -105,6 +105,36 @@ describe("loadReplayData", () => {
     expect(result.data.replayIndex.snapshots.has(0)).toBe(true);
   });
 
+  test("resolves the active replay publication without an expected id", async () => {
+    const store = createMemoryStore();
+    await store.saveReplayPublication(DOC, {
+      publicationId: "pub-old",
+      parserVersion: PARSER_VERSION,
+      revisions: [revision(1)],
+      snapshots: [snapshot(0, createModel())],
+      timeline: [],
+      publishedAt: 1,
+    });
+    await store.saveReplayPublication(DOC, {
+      publicationId: "pub-current",
+      parserVersion: PARSER_VERSION,
+      revisions: [revision(2)],
+      snapshots: [snapshot(0, createModel())],
+      timeline: [],
+      publishedAt: 2,
+    });
+    await store.setActiveReplayPublication(DOC, "pub-current");
+
+    const result = await loadReplayData(store, DOC);
+
+    expect(result.kind).toBe("ok");
+    if (result.kind !== "ok") {
+      throw new Error("expected replay data");
+    }
+    expect(result.data.revisions[0]?.revisionId).toBe(asRevisionId(2));
+    expect(await store.getReplayPublication(DOC, "pub-old")).not.toBeNull();
+  });
+
   test("ignores legacy split stores when no matching publication exists", async () => {
     const store = createMemoryStore();
     await store.saveDecoded(DOC, [revision(1)]);
@@ -138,7 +168,25 @@ describe("loadReplayData", () => {
     expect(data).toEqual({ kind: "missing-publication" });
   });
 
-  test("a late stale publication cannot overwrite the active publication", async () => {
+  test("fails closed when the active pointer is missing or dangling", async () => {
+    const store = createMemoryStore();
+    await store.saveReplayPublication(DOC, {
+      publicationId: "pub-unpointed",
+      parserVersion: PARSER_VERSION,
+      revisions: [revision(1)],
+      snapshots: [snapshot(0, createModel())],
+      timeline: [],
+      publishedAt: 1,
+    });
+
+    expect(await loadReplayData(store, DOC)).toEqual({ kind: "missing-publication" });
+
+    await store.setActiveReplayPublication(DOC, "missing-row");
+
+    expect(await loadReplayData(store, DOC)).toEqual({ kind: "missing-publication" });
+  });
+
+  test("a stale publication cannot overwrite the active publication", async () => {
     const store = createMemoryStore();
     await publishDerivedData(
       store,
@@ -146,23 +194,66 @@ describe("loadReplayData", () => {
       { revisions: [revision(2)], snapshots: [snapshot(0, createModel())], timeline: [] },
       { publicationId: "pub-current", now: () => 2 },
     );
-    await publishDerivedData(
+    let stillCurrent = true;
+    const saveReplayPublication = store.saveReplayPublication.bind(store);
+    store.saveReplayPublication = async (docId, publication) => {
+      await saveReplayPublication(docId, publication);
+      stillCurrent = false;
+    };
+    const published = await publishDerivedData(
       store,
       DOC,
       { revisions: [revision(1)], snapshots: [snapshot(0, createModel())], timeline: [] },
-      { publicationId: "pub-stale", now: () => 1 },
+      { publicationId: "pub-stale", shouldPublish: () => stillCurrent, now: () => 1 },
     );
 
-    const current = await loadReplayData(store, DOC, "pub-current");
-    const stale = await loadReplayData(store, DOC, "pub-stale");
+    const active = await loadReplayData(store, DOC);
 
-    expect(current.kind).toBe("ok");
-    expect(stale.kind).toBe("ok");
-    if (current.kind !== "ok" || stale.kind !== "ok") {
-      throw new Error("expected both publications to exist under exact ids");
+    expect(published).toBe(false);
+    expect(await store.getReplayPublication(DOC, "pub-stale")).toBeNull();
+    expect(active.kind).toBe("ok");
+    if (active.kind !== "ok") {
+      throw new Error("expected active replay data");
     }
-    expect(current.data.revisions[0]?.revisionId).toBe(asRevisionId(2));
-    expect(stale.data.revisions[0]?.revisionId).toBe(asRevisionId(1));
+    expect(active.data.revisions[0]?.revisionId).toBe(asRevisionId(2));
+  });
+
+  test("stale rollback does not clear a newer active publication", async () => {
+    const store = createMemoryStore();
+    await store.saveReplayPublication(DOC, {
+      publicationId: "pub-newer",
+      parserVersion: PARSER_VERSION,
+      revisions: [revision(3)],
+      snapshots: [snapshot(0, createModel())],
+      timeline: [],
+      publishedAt: 3,
+    });
+    let stillCurrent = true;
+    const setActiveReplayPublication = store.setActiveReplayPublication.bind(store);
+    store.setActiveReplayPublication = async (docId, publicationId) => {
+      await setActiveReplayPublication(docId, publicationId);
+      if (publicationId === "pub-stale") {
+        await setActiveReplayPublication(docId, "pub-newer");
+        stillCurrent = false;
+      }
+    };
+
+    const published = await publishDerivedData(
+      store,
+      DOC,
+      { revisions: [revision(1)], snapshots: [snapshot(0, createModel())], timeline: [] },
+      { publicationId: "pub-stale", shouldPublish: () => stillCurrent, now: () => 1 },
+    );
+
+    const active = await loadReplayData(store, DOC);
+
+    expect(published).toBe(false);
+    expect(await store.getReplayPublication(DOC, "pub-stale")).toBeNull();
+    expect(active.kind).toBe("ok");
+    if (active.kind !== "ok") {
+      throw new Error("expected active replay data");
+    }
+    expect(active.data.revisions[0]?.revisionId).toBe(asRevisionId(3));
   });
 });
 
@@ -184,6 +275,7 @@ describe("runPipelineSameThread", () => {
 
     expect(outcome.kind).toBe("published");
     expect(await store.getReplayPublication(DOC, "pub-pipeline")).not.toBeNull();
+    expect(await store.getActiveReplayPublication(DOC)).not.toBeNull();
     expect(await store.getDecoded(DOC)).toEqual([]);
     const data = await loadOk("pub-pipeline", store);
     expect(data.revisions.length).toBeGreaterThan(0);

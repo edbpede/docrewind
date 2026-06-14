@@ -12,6 +12,7 @@ import { runRevisionStoreContract, type StoreHarness } from "./db.contract";
 import { createMemoryBackend, createMemoryStore } from "./db.memory";
 import { asDocId, asRevisionId } from "./domain/ids";
 import { createModel } from "./reconstruction/model";
+import { loadReplayData } from "./replay/load";
 
 // --- Mocked navigator.storage (estimate/persist) ----------------------------
 let mockUsage = 0;
@@ -68,6 +69,7 @@ describe("idb schema", () => {
     );
     const db = await openDB(name);
     expect([...db.objectStoreNames].sort()).toEqual([
+      "activeReplayPublications",
       "cacheMeta",
       "checkpoints",
       "decoded",
@@ -123,6 +125,46 @@ describe("idb schema", () => {
       publishedAt: 2,
     });
     expect(await store.getReplayPublication(docId, "fresh-pub")).not.toBeNull();
+  });
+
+  it("v4 upgrade creates active pointers without promoting legacy replay rows", async () => {
+    const name = `docrewind-schema-upgrade-v4-${dbCounter++}`;
+    const docId = asDocId("legacyV3Doc");
+    const oldDb = await openDB(name, 3, {
+      upgrade(db) {
+        const replayPublications = db.createObjectStore("replayPublications", {
+          keyPath: ["docId", "publicationId"],
+        });
+        replayPublications.createIndex("by-doc", "docId");
+      },
+    });
+    await oldDb.put("replayPublications", {
+      docId,
+      publicationId: "legacy-v3-pub",
+      publication: {
+        publicationId: "legacy-v3-pub",
+        parserVersion: 1,
+        revisions: [
+          {
+            revisionId: asRevisionId(1),
+            userId: null,
+            sessionId: null,
+            time: null,
+            operations: [],
+          },
+        ],
+        snapshots: [{ appliedCount: 0, model: createModel() }],
+        timeline: [],
+        publishedAt: 1,
+      },
+    });
+    oldDb.close();
+
+    const store = createIdbStore({ name, parserVersion: 1 });
+
+    expect(await store.getReplayPublication(docId, "legacy-v3-pub")).not.toBeNull();
+    expect(await store.getActiveReplayPublication(docId)).toBeNull();
+    expect(await loadReplayData(store, docId)).toEqual({ kind: "missing-publication" });
   });
 });
 

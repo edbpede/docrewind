@@ -115,6 +115,8 @@ export const strings = {
     themeDark: "Dark",
     keepRawLabel: "Keep raw data for re-decoding",
     realIdentitiesLabel: "Show real account identities",
+    perDocumentCapLabel: "Per-document cap (MB)",
+    globalCapLabel: "Global cap (MB)",
     diagnosticsDefault: "Default",
     diagnosticsStructural: "Structural",
   },

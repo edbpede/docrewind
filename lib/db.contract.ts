@@ -69,6 +69,15 @@ function replayPublication(publicationId: string, revisions = [decodedRev(1)]): 
   };
 }
 
+async function saveActiveReplayPublication(
+  store: RevisionStore,
+  docId: DocId,
+  publication: ReplayPublication,
+): Promise<void> {
+  await store.saveReplayPublication(docId, publication);
+  await store.setActiveReplayPublication(docId, publication.publicationId);
+}
+
 function cacheRec(
   docId: DocId,
   lastAccessedAt: number,
@@ -177,7 +186,7 @@ export function runRevisionStoreContract(
     it("coarsely prunes one document when its raw bytes exceed the per-document cap", async () => {
       await store.saveRawChunk(rawChunk(docA, 1, 4, "x".repeat(100)));
       await store.saveRawChunk(rawChunk(docB, 1, 4, "y"));
-      await store.saveReplayPublication(docA, replayPublication("pub-prune-one"));
+      await saveActiveReplayPublication(store, docA, replayPublication("pub-prune-one"));
       await store.putCacheMeta(cacheRec(docA, 1));
       await store.putCacheMeta(cacheRec(docB, 2));
 
@@ -191,10 +200,38 @@ export function runRevisionStoreContract(
       expect((await store.getCacheMeta(docA))?.rawRetained).toBe(false);
     });
 
+    it("does not prune raw by cache metadata or dangling pointers alone", async () => {
+      await store.saveRawChunk(rawChunk(docA, 1, 4, "x".repeat(100)));
+      await store.saveReplayPublication(docA, replayPublication("pub-unpointed"));
+      await store.putCacheMeta(cacheRec(docA, 1));
+
+      const retained = await store.estimateRawBytes(docA);
+
+      expect(await store.pruneRawToCap(docA, retained - 1)).toBe(0);
+      expect(await store.getRawChunks(docA)).toHaveLength(1);
+
+      await store.setActiveReplayPublication(docA, "dangling");
+
+      expect(await store.pruneRawToCap(docA, retained - 1)).toBe(0);
+      expect(await store.getRawChunks(docA)).toHaveLength(1);
+    });
+
+    it("does not prune raw when the active pointer is parser-stale", async () => {
+      await store.saveRawChunk(rawChunk(docA, 1, 4, "x".repeat(100)));
+      await saveActiveReplayPublication(store, docA, replayPublication("pub-parser-stale-prune"));
+      await store.putCacheMeta(cacheRec(docA, 1));
+      const bumped = harness.reopen(2);
+      const retained = await bumped.estimateRawBytes(docA);
+
+      expect(await bumped.pruneRawToCap(docA, retained - 1)).toBe(0);
+      expect(await bumped.getRawChunks(docA)).toHaveLength(1);
+    });
+
     it("coarsely applies a per-document raw cap across all documents", async () => {
       await store.saveRawChunk(rawChunk(docA, 1, 4, "x".repeat(100)));
       await store.saveRawChunk(rawChunk(docB, 1, 4, "y".repeat(100)));
-      await store.saveReplayPublication(docA, replayPublication("pub-prune-all"));
+      await saveActiveReplayPublication(store, docA, replayPublication("pub-prune-all-a"));
+      await saveActiveReplayPublication(store, docB, replayPublication("pub-prune-all-b"));
       await store.putCacheMeta(cacheRec(docA, 1));
       await store.putCacheMeta(cacheRec(docB, 2));
 
@@ -204,7 +241,8 @@ export function runRevisionStoreContract(
       expect(reclaimed).toBeGreaterThan(0);
       expect(await store.getRawChunks(docA)).toEqual([]);
       expect(await store.getRawChunks(docB)).toEqual([]);
-      expect(await store.getReplayPublication(docA, "pub-prune-all")).not.toBeNull();
+      expect(await store.getReplayPublication(docA, "pub-prune-all-a")).not.toBeNull();
+      expect(await store.getReplayPublication(docB, "pub-prune-all-b")).not.toBeNull();
       expect((await store.getCacheMeta(docA))?.rawRetained).toBe(false);
       expect((await store.getCacheMeta(docB))?.rawRetained).toBe(false);
     });
@@ -246,16 +284,44 @@ export function runRevisionStoreContract(
       ]);
     });
 
-    it("prunes only stale replay publications for the scoped document", async () => {
+    it("resolves the active replay publication without deleting other generations", async () => {
       await store.saveReplayPublication(docA, replayPublication("pub-old"));
       await store.saveReplayPublication(docA, replayPublication("pub-current"));
       await store.saveReplayPublication(docB, replayPublication("pub-other"));
 
-      await store.pruneReplayPublicationsExcept(docA, "pub-current");
+      await store.setActiveReplayPublication(docA, "pub-current");
 
-      expect(await store.getReplayPublication(docA, "pub-old")).toBeNull();
+      expect((await store.getActiveReplayPublication(docA))?.publicationId).toBe("pub-current");
+      expect(await store.getReplayPublication(docA, "pub-old")).not.toBeNull();
       expect(await store.getReplayPublication(docA, "pub-current")).not.toBeNull();
       expect(await store.getReplayPublication(docB, "pub-other")).not.toBeNull();
+    });
+
+    it("fails active replay lookup closed for missing, dangling, and parser-stale pointers", async () => {
+      expect(await store.getActiveReplayPublication(docA)).toBeNull();
+
+      await store.setActiveReplayPublication(docA, "dangling");
+      expect(await store.getActiveReplayPublication(docA)).toBeNull();
+
+      await saveActiveReplayPublication(store, docA, replayPublication("pub-parser-stale"));
+      const bumped = harness.reopen(2);
+      expect(await bumped.getActiveReplayPublication(docA)).toBeNull();
+    });
+
+    it("deletes one replay publication and clears the pointer only when it named that row", async () => {
+      await store.saveReplayPublication(docA, replayPublication("pub-old"));
+      await store.saveReplayPublication(docA, replayPublication("pub-current"));
+      await store.setActiveReplayPublication(docA, "pub-current");
+
+      await store.deleteReplayPublication(docA, "pub-old");
+
+      expect(await store.getReplayPublication(docA, "pub-old")).toBeNull();
+      expect((await store.getActiveReplayPublication(docA))?.publicationId).toBe("pub-current");
+
+      await store.deleteReplayPublication(docA, "pub-current");
+
+      expect(await store.getReplayPublication(docA, "pub-current")).toBeNull();
+      expect(await store.getActiveReplayPublication(docA)).toBeNull();
     });
 
     it("value-isolates replay publications across store boundaries", async () => {
@@ -276,6 +342,7 @@ export function runRevisionStoreContract(
       expect(await store.getSnapshots(docB)).toEqual([]);
       expect(await store.getTimeline(docB)).toEqual([]);
       expect(await store.getReplayPublication(docB, "missing")).toBeNull();
+      expect(await store.getActiveReplayPublication(docB)).toBeNull();
       expect(await store.getCacheMeta(docB)).toBeNull();
       expect(await store.readCheckpoint(docB)).toBeNull();
     });
@@ -307,13 +374,14 @@ export function runRevisionStoreContract(
       await store.saveDecoded(docA, [decodedRev(1)]);
       await store.saveSnapshots(docA, [snapshot(1)]);
       await store.saveTimeline(docA, [largeEdit(1)]);
-      await store.saveReplayPublication(docA, replayPublication("pub-parser"));
+      await saveActiveReplayPublication(store, docA, replayPublication("pub-parser"));
 
       const bumped = harness.reopen(2); // parser version 1 -> 2
       expect(await bumped.getDecoded(docA)).toEqual([]);
       expect(await bumped.getSnapshots(docA)).toEqual([]);
       expect(await bumped.getTimeline(docA)).toEqual([]);
       expect(await bumped.getReplayPublication(docA, "pub-parser")).toBeNull();
+      expect(await bumped.getActiveReplayPublication(docA)).toBeNull();
       // Raw is re-decodable and must survive the bump.
       expect((await bumped.getRawChunks(docA)).map((c) => c.body)).toEqual(["raw"]);
     });
@@ -324,7 +392,7 @@ export function runRevisionStoreContract(
       await store.saveRawChunk(rawChunk(docB, 1, 4, body));
       await store.saveDecoded(docA, [decodedRev(1)]);
       await store.saveDecoded(docB, [decodedRev(1)]);
-      await store.saveReplayPublication(docA, replayPublication("pub-lru"));
+      await saveActiveReplayPublication(store, docA, replayPublication("pub-lru"));
       await store.putCacheMeta(cacheRec(docA, 1)); // older
       await store.putCacheMeta(cacheRec(docB, 2)); // newer
 
@@ -347,7 +415,7 @@ export function runRevisionStoreContract(
     it("deleteDocument removes every record for one document", async () => {
       await store.saveRawChunk(rawChunk(docA, 1, 4, "raw"));
       await store.saveDecoded(docA, [decodedRev(1)]);
-      await store.saveReplayPublication(docA, replayPublication("pub-delete-doc"));
+      await saveActiveReplayPublication(store, docA, replayPublication("pub-delete-doc"));
       await store.putCacheMeta(cacheRec(docA, 1));
       await store.writeCheckpoint({
         docId: docA,
@@ -363,6 +431,7 @@ export function runRevisionStoreContract(
       expect(await store.getRawChunks(docA)).toEqual([]);
       expect(await store.getDecoded(docA)).toEqual([]);
       expect(await store.getReplayPublication(docA, "pub-delete-doc")).toBeNull();
+      expect(await store.getActiveReplayPublication(docA)).toBeNull();
       expect(await store.getCacheMeta(docA)).toBeNull();
       expect(await store.readCheckpoint(docA)).toBeNull();
       // The other document is untouched.
@@ -372,11 +441,12 @@ export function runRevisionStoreContract(
     it("deleteAll clears every document", async () => {
       await store.saveRawChunk(rawChunk(docA, 1, 4, "a"));
       await store.saveRawChunk(rawChunk(docB, 1, 4, "b"));
-      await store.saveReplayPublication(docA, replayPublication("pub-delete-all"));
+      await saveActiveReplayPublication(store, docA, replayPublication("pub-delete-all"));
       await store.deleteAll();
       expect(await store.getRawChunks(docA)).toEqual([]);
       expect(await store.getRawChunks(docB)).toEqual([]);
       expect(await store.getReplayPublication(docA, "pub-delete-all")).toBeNull();
+      expect(await store.getActiveReplayPublication(docA)).toBeNull();
     });
   });
 }

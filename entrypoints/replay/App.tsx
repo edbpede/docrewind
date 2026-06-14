@@ -82,7 +82,6 @@ type WorkerDecodeMessage =
 const POLL_MS = 750;
 const STALL_POLLS = 16; // ~12s with no checkpoint advance
 const NO_CHECKPOINT_MS = 20_000; // no first checkpoint at all
-const RUN_TIMEOUT_MS = 45_000; // total wall-clock bound for one retrieval attempt
 const TICK_MS = 120; // playback frame budget (throttled)
 const TICK_MS_REDUCED = 320; // calmer cadence under reduced motion
 let pageSessionSequence = 0;
@@ -255,7 +254,8 @@ const ReplaySurface: Component<{
   const [showRealIdentities] = createResource(() => realIdentities.getValue());
 
   // Decode runs only AFTER retrieval completes (the worker reads raw chunks).
-  // Either path writes one replay publication; we then re-read exactly that id.
+  // Either path writes one replay publication; replay reads resolve through the
+  // document's active publication pointer so remounts do not need this page's id.
   const [loaded, { mutate: mutateLoaded }] = createResource(
     () => {
       const runId = retrievalDoneRunId();
@@ -268,20 +268,24 @@ const ReplaySurface: Component<{
       try {
         const outcome = await decode(docId, runId, publicationId);
         if (outcome.kind !== "published") {
+          if (outcome.kind === "empty") {
+            const existing = await loadReplayData(props.store, docId);
+            if (existing.kind === "ok") {
+              reconstructionStatus = "complete";
+              return existing.data;
+            }
+          }
           if (outcome.kind !== "stale" && isActiveRun(runId)) {
             setNonReplayState(outcome.kind);
           }
           return undefined;
         }
-        const result = await loadReplayData(props.store, docId, publicationId);
+        const result = await loadReplayData(props.store, docId);
         if (result.kind !== "ok") {
           if (isActiveRun(runId)) {
             setNonReplayState("missing-publication");
           }
           return undefined;
-        }
-        if (isActiveRun(runId)) {
-          await props.store.pruneReplayPublicationsExcept(docId, publicationId).catch(() => {});
         }
         reconstructionStatus = "complete";
         return result.data;
@@ -452,7 +456,7 @@ const ReplaySurface: Component<{
 
   // ── Retrieval flow: fire start, poll the checkpoint, detect stalls ──────────
   let pollTimer: ReturnType<typeof setInterval> | undefined;
-  let runTimeoutTimer: ReturnType<typeof setTimeout> | undefined;
+  let watchdogTimer: ReturnType<typeof setInterval> | undefined;
 
   function stopRunTimers(runId?: number): void {
     if (runId !== undefined && !isActiveRun(runId)) {
@@ -462,9 +466,9 @@ const ReplaySurface: Component<{
       clearInterval(pollTimer);
       pollTimer = undefined;
     }
-    if (runTimeoutTimer !== undefined) {
-      clearTimeout(runTimeoutTimer);
-      runTimeoutTimer = undefined;
+    if (watchdogTimer !== undefined) {
+      clearInterval(watchdogTimer);
+      watchdogTimer = undefined;
     }
   }
   onCleanup(stopRunTimers);
@@ -523,17 +527,26 @@ const ReplaySurface: Component<{
       });
 
     const startedAt = Date.now();
-    let lastNextStart = -1;
+    let lastProgressAt = startedAt;
+    let lastNextStart: number | null = null;
+    let checkpointSeen = false;
     let stallCount = 0;
     let pollInFlight = false;
 
     stopRunTimers();
-    runTimeoutTimer = setTimeout(() => {
+    watchdogTimer = setInterval(() => {
       if (!isActiveRun(runId)) {
         return;
       }
-      failRun(runId, "endpoint-unavailable");
-    }, RUN_TIMEOUT_MS);
+      const elapsedWithoutProgress = Date.now() - (checkpointSeen ? lastProgressAt : startedAt);
+      if (!checkpointSeen && elapsedWithoutProgress > NO_CHECKPOINT_MS) {
+        failRun(runId, "endpoint-unavailable");
+        return;
+      }
+      if (checkpointSeen && elapsedWithoutProgress > STALL_POLLS * POLL_MS) {
+        failRun(runId, "network-failure");
+      }
+    }, POLL_MS);
     pollTimer = setInterval(() => {
       if (pollInFlight) {
         return;
@@ -566,6 +579,7 @@ const ReplaySurface: Component<{
 
           setPct(checkpointPct(next, Number(checkpoint.upperBound)));
           setPhase("fetching");
+          checkpointSeen = true;
           if (next === lastNextStart) {
             stallCount += 1;
             if (stallCount >= STALL_POLLS) {
@@ -574,6 +588,7 @@ const ReplaySurface: Component<{
           } else {
             stallCount = 0;
             lastNextStart = next;
+            lastProgressAt = Date.now();
           }
         } catch {
           failRun(runId, "network-failure");

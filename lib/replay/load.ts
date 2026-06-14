@@ -65,31 +65,42 @@ export function rebuildReplayIndex(
   return { revisions: decoded, cadence: SNAPSHOT_CADENCE, snapshots: map };
 }
 
-/** Read one matching atomic replay publication and rebuild its replay index. */
+function replayDataFromPublication(publication: ReplayPublication): ReplayData {
+  return {
+    revisions: publication.revisions,
+    timeline: publication.timeline,
+    replayIndex: rebuildReplayIndex(publication.revisions, publication.snapshots),
+  };
+}
+
+/**
+ * Read replay data and rebuild its replay index. By default this resolves the
+ * document's explicit active-publication pointer; an expected id keeps the
+ * exact-id legacy/test path available without falling back to latest-row scans.
+ */
 export async function loadReplayData(
   store: RevisionStore,
   docId: DocId,
-  expectedPublicationId: string,
+  expectedPublicationId?: string,
 ): Promise<ReplayLoadResult> {
-  const publication = await store.getReplayPublication(docId, expectedPublicationId);
+  const publication =
+    expectedPublicationId === undefined
+      ? await store.getActiveReplayPublication(docId)
+      : await store.getReplayPublication(docId, expectedPublicationId);
   if (publication === null) {
     return { kind: "missing-publication" };
   }
   return {
     kind: "ok",
-    data: {
-      revisions: publication.revisions,
-      timeline: publication.timeline,
-      replayIndex: rebuildReplayIndex(publication.revisions, publication.snapshots),
-    },
+    data: replayDataFromPublication(publication),
   };
 }
 
 /**
- * Persist the full replay artifact as one atomic publication after the caller
- * has proven the producing run is still current. The gate is checked immediately
- * before the single store write so stale same-thread work cannot publish after a
- * retry.
+ * Persist the full replay artifact, then promote it to the document's active
+ * publication only while the caller still owns the current run. A stale row may
+ * be saved transiently if ownership flips during the async write, but stale rows
+ * are rolled back and never remain reachable through active-pointer loading.
  */
 export async function publishDerivedData(
   store: RevisionStore,
@@ -108,7 +119,16 @@ export async function publishDerivedData(
     publishedAt: options.now?.() ?? Date.now(),
   };
   await store.saveReplayPublication(docId, publication);
-  return shouldPublish();
+  if (!shouldPublish()) {
+    await store.deleteReplayPublication(docId, publication.publicationId);
+    return false;
+  }
+  await store.setActiveReplayPublication(docId, publication.publicationId);
+  if (!shouldPublish()) {
+    await store.deleteReplayPublication(docId, publication.publicationId);
+    return false;
+  }
+  return true;
 }
 
 /**

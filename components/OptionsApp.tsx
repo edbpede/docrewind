@@ -223,7 +223,7 @@ const OptionsApp: Component = () => {
           </label>
 
           <label class="flex items-center justify-between gap-3">
-            <span>Per-document cap (MB)</span>
+            <span>{strings.options.perDocumentCapLabel}</span>
             <input
               type="number"
               min={1}
@@ -234,7 +234,7 @@ const OptionsApp: Component = () => {
           </label>
 
           <label class="flex items-center justify-between gap-3">
-            <span>Global cap (MB)</span>
+            <span>{strings.options.globalCapLabel}</span>
             <input
               type="number"
               min={1}

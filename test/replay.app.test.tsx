@@ -189,7 +189,7 @@ describe("Replay App run gating", () => {
     expect(screen.queryByText("Settings & privacy")).toBeNull();
   });
 
-  it("uses an overall run timeout even when checkpoint reads hang", async () => {
+  it("fails when no first checkpoint can be observed", async () => {
     sendMessageMock.mockImplementation((type: string) => {
       if (type === "startRetrieval") {
         return new Promise<RetrievalAck>(() => {});
@@ -203,13 +203,13 @@ describe("Replay App run gating", () => {
     store.readCheckpoint = vi.fn(() => new Promise<never>(() => {}));
 
     render(() => <App store={store} useWorker={false} />);
-    await vi.advanceTimersByTimeAsync(45_100);
+    await vi.advanceTimersByTimeAsync(20_800);
 
     await vi.waitFor(() => expect(screen.getByText("Retrieval unavailable")).toBeTruthy());
     expect(screen.queryByText("Settings & privacy")).toBeNull();
   });
 
-  it("keeps a timed-out run terminal when its start ack arrives late", async () => {
+  it("keeps a no-first-checkpoint failure terminal when its start ack arrives late", async () => {
     let resolveStart: (ack: RetrievalAck) => void = () => {};
     sendMessageMock.mockImplementation((type: string) => {
       if (type === "startRetrieval") {
@@ -226,7 +226,7 @@ describe("Replay App run gating", () => {
     store.readCheckpoint = vi.fn(() => new Promise<never>(() => {}));
 
     render(() => <App store={store} useWorker={false} />);
-    await vi.advanceTimersByTimeAsync(45_100);
+    await vi.advanceTimersByTimeAsync(20_800);
     await vi.waitFor(() => expect(screen.getByText("Retrieval unavailable")).toBeTruthy());
 
     resolveStart({ ok: true });
@@ -236,7 +236,7 @@ describe("Replay App run gating", () => {
     expect(screen.queryByText("Settings & privacy")).toBeNull();
   });
 
-  it("does not let a stale completed checkpoint bypass the current run timeout", async () => {
+  it("does not let a stale completed checkpoint bypass the no-progress watchdog", async () => {
     sendMessageMock.mockImplementation((type: string) => {
       if (type === "startRetrieval") {
         return new Promise<RetrievalAck>(() => {});
@@ -256,9 +256,63 @@ describe("Replay App run gating", () => {
     });
 
     render(() => <App store={store} useWorker={false} />);
-    await vi.advanceTimersByTimeAsync(45_100);
+    await vi.advanceTimersByTimeAsync(20_800);
 
     await vi.waitFor(() => expect(screen.getByText("Retrieval unavailable")).toBeTruthy());
+    expect(screen.queryByText("Settings & privacy")).toBeNull();
+  });
+
+  it("does not fail after 45s while checkpoint nextStart keeps advancing", async () => {
+    sendMessageMock.mockImplementation((type: string) => {
+      if (type === "startRetrieval") {
+        return new Promise<RetrievalAck>(() => {});
+      }
+      return Promise.resolve(undefined);
+    });
+    const store = createMemoryStore();
+    let nextStart = 1;
+    store.readCheckpoint = vi.fn(async () => {
+      nextStart += 1;
+      return {
+        docId: DOC,
+        upperBound: asRevisionId(1000),
+        nextStart: asRevisionId(nextStart),
+        completed: false,
+        updatedAt: Date.now(),
+      };
+    });
+
+    render(() => <App store={store} useWorker={false} />);
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(screen.getByText(/Fetching revisions/)).toBeTruthy();
+    expect(screen.queryByText("Retrieval unavailable")).toBeNull();
+    expect(screen.queryByText("Network problem")).toBeNull();
+  });
+
+  it("fails when checkpoint nextStart stops advancing", async () => {
+    sendMessageMock.mockImplementation((type: string) => {
+      if (type === "startRetrieval") {
+        return new Promise<RetrievalAck>(() => {});
+      }
+      if (type === "endDecodeLease" || type === "requestStorageMaintenance") {
+        return Promise.resolve({ status: "completed", reclaimedBytes: 0 });
+      }
+      return Promise.resolve(undefined);
+    });
+    const store = createMemoryStore();
+    store.readCheckpoint = vi.fn(async () => ({
+      docId: DOC,
+      upperBound: asRevisionId(100),
+      nextStart: asRevisionId(2),
+      completed: false,
+      updatedAt: Date.now(),
+    }));
+
+    render(() => <App store={store} useWorker={false} />);
+    await vi.advanceTimersByTimeAsync(13_000);
+
+    await vi.waitFor(() => expect(screen.getByText("Network problem")).toBeTruthy());
     expect(screen.queryByText("Settings & privacy")).toBeNull();
   });
 
@@ -307,6 +361,33 @@ describe("Replay App run gating", () => {
     await vi.waitFor(() => expect(screen.getByText("No replay data")).toBeTruthy());
 
     expect(screen.queryByText("old")).toBeNull();
+  });
+
+  it("loads a promoted active publication after remount when raw chunks are gone", async () => {
+    sendMessageMock.mockResolvedValue({ ok: true });
+    const store = createMemoryStore();
+    await store.saveReplayPublication(DOC, {
+      publicationId: "pub-durable",
+      parserVersion: PARSER_VERSION,
+      revisions: [decodedRevision()],
+      snapshots: [{ appliedCount: 0, model: createModel() }],
+      timeline: [],
+      publishedAt: 1,
+    });
+    await store.setActiveReplayPublication(DOC, "pub-durable");
+    let publishWritesAfterRemount = 0;
+    const saveReplayPublication = store.saveReplayPublication.bind(store);
+    store.saveReplayPublication = async (docId, publication) => {
+      publishWritesAfterRemount += 1;
+      await saveReplayPublication(docId, publication);
+    };
+
+    render(() => <App store={store} useWorker={false} />);
+
+    await vi.waitFor(() => expect(screen.getByText("Settings & privacy")).toBeTruthy());
+    expect(await store.getRawChunks(DOC)).toEqual([]);
+    expect((await store.getActiveReplayPublication(DOC))?.publicationId).toBe("pub-durable");
+    expect(publishWritesAfterRemount).toBe(0);
   });
 
   it("publishes worker-derived data only when the worker result runId matches the active run", async () => {

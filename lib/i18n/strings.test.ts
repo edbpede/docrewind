@@ -56,7 +56,10 @@ describe("strings catalog", () => {
     expect(strings.privacy.bannerTitle.length).toBeGreaterThan(0);
     expect(strings.privacy.approximationNote.length).toBeGreaterThan(0);
     expect(strings.controls.play.length).toBeGreaterThan(0);
+    expect(strings.timeline.label).toBe("Revision timeline");
     expect(strings.options.title.length).toBeGreaterThan(0);
+    expect(strings.options.perDocumentCapLabel).toBe("Per-document cap (MB)");
+    expect(strings.options.globalCapLabel).toBe("Global cap (MB)");
   });
 
   it("interpolates parameterized accessors", () => {

@@ -16,6 +16,7 @@ import type {
   TimelineEvent,
 } from "./domain/model";
 import type {
+  ActiveReplayPublication,
   ReplayPublication,
   RetrievalCheckpoint,
   RevisionStore,
@@ -47,6 +48,7 @@ export interface MemoryBackend {
   readonly snapshots: Map<string, VersionedSnapshots>;
   readonly timeline: Map<string, VersionedTimeline>;
   readonly replayPublications: Map<string, ReplayPublication>;
+  readonly activeReplayPublications: Map<string, ActiveReplayPublication>;
   readonly cacheMeta: Map<string, CacheRecord>;
   readonly checkpoints: Map<string, RetrievalCheckpoint>;
 }
@@ -59,6 +61,7 @@ export function createMemoryBackend(): MemoryBackend {
     snapshots: new Map(),
     timeline: new Map(),
     replayPublications: new Map(),
+    activeReplayPublications: new Map(),
     cacheMeta: new Map(),
     checkpoints: new Map(),
   };
@@ -173,16 +176,26 @@ export function createMemoryStore(options: MemoryStoreOptions = {}): RevisionSto
     return cloneValue(publication);
   }
 
-  async function pruneReplayPublicationsExcept(
-    docId: DocId,
-    keepPublicationId: string,
-  ): Promise<void> {
-    const prefix = `${docId}\u0000`;
-    const keepKey = publicationKey(docId, keepPublicationId);
-    for (const key of backend.replayPublications.keys()) {
-      if (key.startsWith(prefix) && key !== keepKey) {
-        backend.replayPublications.delete(key);
-      }
+  async function setActiveReplayPublication(docId: DocId, publicationId: string): Promise<void> {
+    backend.activeReplayPublications.set(docId, {
+      publicationId,
+      parserVersion,
+      activatedAt: Date.now(),
+    });
+  }
+
+  async function getActiveReplayPublication(docId: DocId): Promise<ReplayPublication | null> {
+    const active = backend.activeReplayPublications.get(docId);
+    if (active === undefined || active.parserVersion < parserVersion) {
+      return null;
+    }
+    return getReplayPublication(docId, active.publicationId);
+  }
+
+  async function deleteReplayPublication(docId: DocId, publicationId: string): Promise<void> {
+    backend.replayPublications.delete(publicationKey(docId, publicationId));
+    if (backend.activeReplayPublications.get(docId)?.publicationId === publicationId) {
+      backend.activeReplayPublications.delete(docId);
     }
   }
 
@@ -270,8 +283,7 @@ export function createMemoryStore(options: MemoryStoreOptions = {}): RevisionSto
   }
 
   async function pruneRawToCap(docId: DocId, capBytes: number): Promise<number> {
-    const meta = backend.cacheMeta.get(docId);
-    if (meta?.reconstructionStatus !== "complete") {
+    if ((await getActiveReplayPublication(docId)) === null) {
       return 0;
     }
     const target = Math.max(0, Math.floor(capBytes));
@@ -300,7 +312,7 @@ export function createMemoryStore(options: MemoryStoreOptions = {}): RevisionSto
     let reclaimed = 0;
     for (const meta of docsByAge) {
       if (usage <= targetBytes) break;
-      if (meta.reconstructionStatus !== "complete") continue;
+      if ((await getActiveReplayPublication(meta.docId)) === null) continue;
       const freed = await deleteRawForDoc(meta.docId);
       if (freed > 0) {
         reclaimed += freed;
@@ -321,6 +333,7 @@ export function createMemoryStore(options: MemoryStoreOptions = {}): RevisionSto
         backend.replayPublications.delete(key);
       }
     }
+    backend.activeReplayPublications.delete(docId);
     backend.cacheMeta.delete(docId);
     backend.checkpoints.delete(docId);
   }
@@ -331,6 +344,7 @@ export function createMemoryStore(options: MemoryStoreOptions = {}): RevisionSto
     backend.snapshots.clear();
     backend.timeline.clear();
     backend.replayPublications.clear();
+    backend.activeReplayPublications.clear();
     backend.cacheMeta.clear();
     backend.checkpoints.clear();
   }
@@ -345,7 +359,9 @@ export function createMemoryStore(options: MemoryStoreOptions = {}): RevisionSto
     pruneRawToCapAll,
     saveReplayPublication,
     getReplayPublication,
-    pruneReplayPublicationsExcept,
+    setActiveReplayPublication,
+    getActiveReplayPublication,
+    deleteReplayPublication,
     saveDecoded,
     getDecoded,
     saveSnapshots,

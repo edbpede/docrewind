@@ -12,7 +12,7 @@
 
 import type { Component } from "solid-js";
 import { createMemo, For, Show } from "solid-js";
-import { revisionOf } from "@/lib/i18n/strings";
+import { revisionOf, strings } from "@/lib/i18n/strings";
 
 /** A timeline event projected onto the applied-count axis for rendering. */
 export interface TimelineMarker {
@@ -100,7 +100,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       class="tl-track"
       role="slider"
       tabIndex={0}
-      aria-label="Revision timeline"
+      aria-label={strings.timeline.label}
       aria-valuemin={0}
       aria-valuemax={props.max}
       aria-valuenow={props.currentIndex}

@@ -3,7 +3,8 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { createMemoryStore } from "./db.memory";
 import { PARSER_VERSION } from "./decoder/version";
 import { asDocId, asRevisionId } from "./domain/ids";
-import type { RawPayload } from "./domain/model";
+import type { DocId, RawPayload } from "./domain/model";
+import { createModel } from "./reconstruction/model";
 import {
   applyPostDecodeStoragePolicy,
   createStorageMaintenanceCoordinator,
@@ -11,6 +12,7 @@ import {
   enforceStorageBudgetForAll,
   refreshCacheMeta,
 } from "./storage-maintenance";
+import type { RevisionStore } from "./store";
 
 function raw(body: unknown): RawPayload {
   const docId = asDocId("maintDoc");
@@ -23,6 +25,30 @@ function raw(body: unknown): RawPayload {
     receivedAt: 0,
     body,
   };
+}
+
+async function saveActivePublication(
+  store: RevisionStore,
+  docId: DocId,
+  publicationId = "pub-maint",
+): Promise<void> {
+  await store.saveReplayPublication(docId, {
+    publicationId,
+    parserVersion: PARSER_VERSION,
+    revisions: [
+      {
+        revisionId: asRevisionId(1),
+        userId: null,
+        sessionId: null,
+        time: null,
+        operations: [],
+      },
+    ],
+    snapshots: [{ appliedCount: 0, model: createModel() }],
+    timeline: [],
+    publishedAt: 456,
+  });
+  await store.setActiveReplayPublication(docId, publicationId);
 }
 
 describe("storage maintenance", () => {
@@ -52,26 +78,11 @@ describe("storage maintenance", () => {
     expect(meta.reconstructionStatus).toBe("partial");
   });
 
-  it("applies keepRawData=false only after decode data exists, preserving derived data", async () => {
+  it("applies keepRawData=false only after an active publication exists", async () => {
     const store = createMemoryStore();
     const docId = asDocId("maintDoc");
     await store.saveRawChunk(raw("body"));
-    await store.saveReplayPublication(docId, {
-      publicationId: "pub-maint",
-      parserVersion: PARSER_VERSION,
-      revisions: [
-        {
-          revisionId: asRevisionId(1),
-          userId: null,
-          sessionId: null,
-          time: null,
-          operations: [],
-        },
-      ],
-      snapshots: [],
-      timeline: [],
-      publishedAt: 456,
-    });
+    await saveActivePublication(store, docId, "pub-maint");
 
     await applyPostDecodeStoragePolicy(store, docId, {
       keepRawData: false,
@@ -90,6 +101,7 @@ describe("storage maintenance", () => {
     const coordinator = createStorageMaintenanceCoordinator(store);
     const docId = asDocId("maintDoc");
     await store.saveRawChunk(raw("body"));
+    await saveActivePublication(store, docId);
 
     coordinator.beginDecodeLease(docId);
     const deferred = await coordinator.request({
@@ -121,6 +133,7 @@ describe("storage maintenance", () => {
     };
     const coordinator = createStorageMaintenanceCoordinator(store);
     await store.saveRawChunk(raw("body"));
+    await saveActivePublication(store, rawDocId);
 
     coordinator.beginDecodeLease(rawDocId);
     await coordinator.request({
@@ -159,12 +172,43 @@ describe("storage maintenance", () => {
     expect((await store.getCacheMeta(docId))?.reconstructionStatus).toBe("partial");
   });
 
+  it("does not discard raw when cache metadata is complete but the active pointer is missing", async () => {
+    const store = createMemoryStore();
+    const docId = asDocId("maintDoc");
+    await store.saveRawChunk(raw("body"));
+    await refreshCacheMeta(store, docId, { now: 1, reconstructionStatus: "complete" });
+
+    const reclaimed = await enforceStorageBudget(store, docId, {
+      perDocumentBytes: 0,
+      globalCapBytes: 0,
+    });
+
+    expect(reclaimed).toBe(0);
+    expect(await store.getRawChunks(docId)).toHaveLength(1);
+  });
+
+  it("does not discard raw when the active pointer is dangling", async () => {
+    const store = createMemoryStore();
+    const docId = asDocId("maintDoc");
+    await store.saveRawChunk(raw("body"));
+    await store.setActiveReplayPublication(docId, "missing-publication");
+
+    const reclaimed = await enforceStorageBudget(store, docId, {
+      perDocumentBytes: 0,
+      globalCapBytes: 0,
+    });
+
+    expect(reclaimed).toBe(0);
+    expect(await store.getRawChunks(docId)).toHaveLength(1);
+  });
+
   it("global maintenance prunes only documents already marked complete", async () => {
     const store = createMemoryStore();
     const completeDoc = asDocId("completeMaintDoc");
     const partialDoc = asDocId("partialMaintDoc");
     await store.saveRawChunk({ ...raw("complete"), docId: completeDoc });
     await store.saveRawChunk({ ...raw("partial"), docId: partialDoc });
+    await saveActivePublication(store, completeDoc);
     await refreshCacheMeta(store, completeDoc, { now: 1, reconstructionStatus: "complete" });
     await refreshCacheMeta(store, partialDoc, { now: 2, reconstructionStatus: "partial" });
 
@@ -200,6 +244,7 @@ describe("storage maintenance", () => {
     const store = createMemoryStore();
     const docId = asDocId("maintDoc");
     await store.saveRawChunk(raw("x".repeat(100)));
+    await saveActivePublication(store, docId);
     await refreshCacheMeta(store, docId, { now: 1, reconstructionStatus: "complete" });
 
     const retained = await store.estimateRawBytes(docId);
@@ -221,6 +266,8 @@ describe("storage maintenance", () => {
       ...raw("y".repeat(100)),
       docId: otherDoc,
     });
+    await saveActivePublication(store, docId, "pub-maint-a");
+    await saveActivePublication(store, otherDoc, "pub-maint-b");
     await refreshCacheMeta(store, docId, { now: 1, reconstructionStatus: "complete" });
     await refreshCacheMeta(store, otherDoc, { now: 2, reconstructionStatus: "complete" });
 

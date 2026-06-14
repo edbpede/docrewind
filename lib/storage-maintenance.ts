@@ -96,7 +96,6 @@ export async function runStorageMaintenance(
   }
 
   let reclaimed = 0;
-  const existingMeta = await store.getCacheMeta(request.docId);
   const refreshOptions =
     request.reconstructionStatus === undefined && request.now === undefined
       ? undefined
@@ -111,10 +110,7 @@ export async function runStorageMaintenance(
     await refreshCacheMeta(store, request.docId, refreshOptions);
   }
 
-  const canDiscardRaw =
-    request.reconstructionStatus === "complete" ||
-    (request.reconstructionStatus === undefined &&
-      existingMeta?.reconstructionStatus === "complete");
+  const canDiscardRaw = (await store.getActiveReplayPublication(request.docId)) !== null;
 
   if (canDiscardRaw) {
     reclaimed += request.keepRawData

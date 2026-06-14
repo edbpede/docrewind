@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fakeBrowser } from "wxt/testing";
 import background from "@/entrypoints/background";
 import { createIdbStore } from "@/lib/db";
+import { PARSER_VERSION } from "@/lib/decoder/version";
 import { asDocId, asRevisionId } from "@/lib/domain/ids";
 import type { RawPayload } from "@/lib/domain/model";
 import { removeAllListeners, sendMessage } from "@/lib/messaging";
@@ -44,6 +45,21 @@ const FRAMED_CHUNK = `)]}'\n${JSON.stringify({
     [{ ty: "is", s: "Hi", ibi: 1 }, 1_700_000_000_000, "sess", 1, "user", 0, null, null, false],
   ],
 })}`;
+
+async function saveActivePublication(
+  store: ReturnType<typeof createIdbStore>,
+  docId: ReturnType<typeof asDocId>,
+): Promise<void> {
+  await store.saveReplayPublication(docId, {
+    publicationId: "pub-active",
+    parserVersion: PARSER_VERSION,
+    revisions: [],
+    snapshots: [],
+    timeline: [],
+    publishedAt: 1,
+  });
+  await store.setActiveReplayPublication(docId, "pub-active");
+}
 
 describe("background retrieval wiring", () => {
   beforeEach(() => {
@@ -143,6 +159,7 @@ describe("background retrieval wiring", () => {
       receivedAt: 0,
       body: "raw-body",
     } satisfies RawPayload);
+    await saveActivePublication(store, docId);
 
     runBackground();
     await sendMessage("beginDecodeLease", { docId });
@@ -175,6 +192,7 @@ describe("background retrieval wiring", () => {
       receivedAt: 0,
       body: "raw-body",
     } satisfies RawPayload);
+    await saveActivePublication(store, docId);
 
     runBackground();
     await sendMessage("beginDecodeLease", { docId });
@@ -202,6 +220,7 @@ describe("background retrieval wiring", () => {
       receivedAt: 0,
       body: "raw-body",
     } satisfies RawPayload);
+    await saveActivePublication(store, docId);
     const request = createPendingStorageMaintenanceRequest({
       docId,
       keepRawData: false,

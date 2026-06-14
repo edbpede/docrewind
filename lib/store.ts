@@ -17,11 +17,12 @@
 //
 //   • background / orchestrator  →  owns writes to `rawChunks` + `checkpoints`
 //   • replay page                →  reads `rawChunks`, verifies the active run,
-//                                    then owns writes to `decoded` / `snapshots`
-//                                    / `timeline`
+//                                    then owns replay publication rows and the
+//                                    doc-scoped active publication pointer
 //
 // `CheckpointStore` (below) is the orchestrator's write surface; replay decode
-// uses the raw read + derived-write methods only after page-side run verification.
+// uses the raw read + replay-publication methods only after page-side run
+// verification.
 // Readers (the replay UI) may read anything.
 
 import type {
@@ -59,6 +60,18 @@ export interface ReplayPublication {
   readonly snapshots: readonly StoredSnapshot[];
   readonly timeline: readonly TimelineEvent[];
   readonly publishedAt: number;
+}
+
+/**
+ * The doc-scoped replay publication pointer. Replay loading follows this
+ * pointer first and then reads the exact publication row it names; it never
+ * guesses "latest" by document.
+ */
+export interface ActiveReplayPublication {
+  readonly publicationId: string;
+  /** Decode-pipeline version in force when this pointer was promoted. */
+  readonly parserVersion: number;
+  readonly activatedAt: number;
 }
 
 /**
@@ -131,12 +144,16 @@ export interface RevisionStore {
     docId: DocId,
     expectedPublicationId: string,
   ): Promise<ReplayPublication | null>;
+  /** Promote one publication id as the document's active replay pointer. */
+  setActiveReplayPublication(docId: DocId, publicationId: string): Promise<void>;
   /**
-   * Best-effort same-document replay-publication GC. Deletes only generations
-   * whose id is not the exact active publication id; it does not establish or
-   * persist any "current publication" pointer.
+   * Resolve the active replay pointer and then read that exact publication. A
+   * missing pointer, stale parser version, dangling row, or stale publication
+   * returns null. No latest-row scan is allowed.
    */
-  pruneReplayPublicationsExcept(docId: DocId, keepPublicationId: string): Promise<void>;
+  getActiveReplayPublication(docId: DocId): Promise<ReplayPublication | null>;
+  /** Delete one replay publication; clears the active pointer if it named it. */
+  deleteReplayPublication(docId: DocId, publicationId: string): Promise<void>;
 
   // --- Legacy split decoded data (compatibility / explicit consumption only) -
   saveDecoded(docId: DocId, revisions: readonly DecodedRevision[]): Promise<void>;
