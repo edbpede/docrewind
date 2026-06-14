@@ -41,7 +41,16 @@ WORKDIR="${WORKDIR:-.}"
 AWK_SCRIPT="${AWK_SCRIPT:-scripts/hunk-lines.awk}"
 MARKER="${MARKER:-<!-- goose-pr-reviewer -->}"
 MAX_DIFF_BYTES="${MAX_DIFF_BYTES:-400000}"
-GOOSE_TIMEOUT="${GOOSE_TIMEOUT:-300}"
+GOOSE_TIMEOUT="${GOOSE_TIMEOUT:-600}"   # per-stage wall-clock cap; :thinking models on a large diff can exceed 300s (a tier rc=124 timeout falls through to the next tier)
+# Turn budget for the goose agent loop, passed via the --max-turns FLAG below.
+# This must be enforced on the CLI (or via the GOOSE_MAX_TURNS env): goose 1.37.0
+# IGNORES a recipe-level `settings.max_turns` for `goose run` (verified — it ran
+# to the default ~1000). It must exceed 1 because goose delivers the recipes'
+# `response.json_schema` through an agentic "final output" tool the model must
+# CALL, and a :thinking model spends a turn reasoning before that call — a budget
+# of 1 stalls with "I've reached the maximum number of actions". Tool-less
+# recipes (extensions: []) keep these turns harmless: they can only emit JSON.
+GOOSE_MAX_TURNS="${GOOSE_MAX_TURNS:-5}"
 POST_RETRY_MAX="${POST_RETRY_MAX:-5}"
 SKIP_POST="${SKIP_POST:-0}"   # tests set 1 to stop after building payload.json
 
@@ -146,9 +155,12 @@ run_stage() {
     # A recipe run ignores GOOSE_MODEL/GOOSE_PROVIDER env, so the tier model is
     # passed via the explicit --model/--provider flags. --quiet keeps stdout to
     # the model response; --no-session avoids writing session state in CI.
+    # --max-turns bounds the structured-output agent loop (recipe settings are
+    # ignored by `goose run`; this flag / GOOSE_MAX_TURNS is the only lever).
     run_with_timeout \
       goose run --recipe "$recipe" --params "$param_key=$param_file" \
       --provider "${GOOSE_PROVIDER:-openai}" --model "$model" \
+      --max-turns "$GOOSE_MAX_TURNS" \
       --quiet --no-session \
       > "$raw" 2> "$gerr" || rc=$?
     # goose can exit 0 even on provider/auth errors (the error text lands on

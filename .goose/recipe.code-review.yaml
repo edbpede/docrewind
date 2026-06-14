@@ -4,13 +4,29 @@ description: "Low-noise spec/security/quality lane; reads a unified diff and emi
 
 # Lane A of the two-lane reviewer. Provider and model are supplied via the
 # explicit --provider/--model flags by scripts/review.sh (per fallback tier),
-# so the recipe stays model-agnostic. Tool-less by design: no extensions are
-# enabled, so a successful prompt injection can at worst corrupt the JSON
-# (caught by validation) — it can never execute code or call an API. This lane
-# runs in its own clean `goose run --no-session` context, in parallel with the
-# architect lane; neither lane sees the other's output.
-settings:
-  goose_max_turns: 1
+# so the recipe stays model-agnostic. Tool-less by design (see `extensions: []`
+# below): with no extensions a successful prompt injection can at worst corrupt
+# the JSON (caught by validation) — it can never execute code or call an API.
+# This lane runs in its own clean `goose run --no-session` context, in parallel
+# with the architect lane; neither lane sees the other's output.
+
+# Tool-less by design. The EXPLICIT EMPTY extensions list is what actually makes
+# this recipe tool-less: omitting it inherits Goose's globally configured
+# extensions, and the `developer` builtin (shell + edit + write) is ON by
+# default. Without this line the review model gets a live shell on the
+# pull_request_target runner (GH_TOKEN + NANOGPT_API_KEY in scope) — a
+# prompt-injection RCE vector, and the reason a :thinking model burned its turn
+# budget running `ls` instead of reviewing. Verified on goose 1.37.0: with this
+# line the only tool exposed to the model is `recipe__final_output`.
+#
+# NOTE: the turn budget is intentionally NOT set here. goose 1.37.0 ignores a
+# recipe-level `settings.max_turns` for `goose run` (verified — it ran to the
+# default ~1000), so scripts/review.sh enforces it with the `--max-turns` flag
+# (GOOSE_MAX_TURNS, default 5). It must exceed 1: goose delivers this recipe's
+# `response.json_schema` via an agentic "final output" tool the model must CALL,
+# and a :thinking model reasons for a turn before calling it — a budget of 1
+# stalled every tier with "I've reached the maximum number of actions".
+extensions: []
 
 instructions: |
   You are a low-noise senior code reviewer. You review ONLY the changed lines in

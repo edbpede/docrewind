@@ -29,6 +29,7 @@ REVIEW="$ROOT/scripts/review.sh"
 AWK="$ROOT/scripts/hunk-lines.awk"
 SYNJQ="$ROOT/scripts/synthesize.jq"
 GUARD="$ROOT/scripts/check-pr-review-workflow.sh"
+RECIPE_GUARD="$ROOT/scripts/check-pr-review-recipes.sh"
 PATCH="$FIX/multi.patch"
 
 chmod +x "$STUBS"/* 2>/dev/null || true
@@ -204,6 +205,27 @@ else no "AC7 namespacing/precompute static check"; fi
 echo "== AC6  workflow security guard =="
 if bash "$GUARD" >/dev/null 2>&1; then ok "AC6 check-pr-review-workflow.sh exits 0"
 else no "AC6 workflow guard"; fi
+
+echo "== AC13  recipe tool-less guard (the developer-extension / max-turns fix) =="
+# Positive: the three real reviewer recipes must declare `extensions: []`.
+if bash "$RECIPE_GUARD" >/dev/null 2>&1; then ok "AC13 all reviewer recipes are tool-less (extensions: [])"
+else no "AC13 recipe guard rejected the real recipes"; fi
+# Negative: the guard must REJECT a recipe that omits extensions (which would
+# inherit Goose's default `developer` shell — the RCE + max-turns-stall cause),
+# a commented-out declaration, and a non-empty extensions list.
+wd=$(mktmp)
+printf 'version: "1.0.0"\nsettings:\n  goose_max_turns: 1\n' > "$wd/missing.yaml"
+printf 'version: "1.0.0"\n# extensions: []\n' > "$wd/commented.yaml"
+printf 'version: "1.0.0"\nextensions:\n  - type: builtin\n    name: developer\n' > "$wd/nonempty.yaml"
+neg_ok=1
+for c in missing commented nonempty; do
+  bash "$RECIPE_GUARD" "$wd/$c.yaml" >/dev/null 2>&1 && neg_ok=0
+done
+# Sanity: an explicit empty list with inner/outer whitespace must still pass.
+printf 'version: "1.0.0"\nextensions:   [ ]  \n' > "$wd/spaced.yaml"
+bash "$RECIPE_GUARD" "$wd/spaced.yaml" >/dev/null 2>&1 || neg_ok=0
+if [ "$neg_ok" -eq 1 ]; then ok "AC13 guard rejects missing/commented/non-empty extensions, accepts whitespaced []"
+else no "AC13 guard did not reject a tool-enabled recipe"; fi
 
 echo
 echo "RESULT: $PASS passed, $FAIL failed"

@@ -5,7 +5,7 @@ description: "Tool-less synthesizer; receives both review lanes' already-extract
 # Final stage of the two-lane reviewer, run sequentially after both review
 # lanes complete, in its own clean `goose run --no-session` context. Provider
 # and model are supplied via the explicit --provider/--model flags by
-# scripts/review.sh. Tool-less by design: no extensions are enabled. It does
+# scripts/review.sh. Tool-less by design (see `extensions: []` below). It does
 # NOT receive the diff — only the two lanes' filtered findings — which bounds
 # its scope and keeps untrusted diff handling in the review lanes.
 #
@@ -14,8 +14,24 @@ description: "Tool-less synthesizer; receives both review lanes' already-extract
 # every anchor this stage proposes against the real diff, and hard-codes the
 # posted GitHub event to COMMENT. A synthesizer omission, contradiction, or
 # outage therefore cannot hide a blocker, fake an approval, or post a bad anchor.
-settings:
-  goose_max_turns: 1
+
+# Tool-less by design. The EXPLICIT EMPTY extensions list is what actually makes
+# this recipe tool-less: omitting it inherits Goose's globally configured
+# extensions, and the `developer` builtin (shell + edit + write) is ON by
+# default. Without this line the synthesizer gets a live shell on the
+# pull_request_target runner (GH_TOKEN + NANOGPT_API_KEY in scope) — a
+# prompt-injection RCE vector, and the reason a :thinking model burned its turn
+# budget running `ls` instead of synthesising. Verified on goose 1.37.0: with
+# this line the only tool exposed to the model is `recipe__final_output`.
+#
+# NOTE: the turn budget is intentionally NOT set here. goose 1.37.0 ignores a
+# recipe-level `settings.max_turns` for `goose run` (verified — it ran to the
+# default ~1000), so scripts/review.sh enforces it with the `--max-turns` flag
+# (GOOSE_MAX_TURNS, default 5). It must exceed 1: goose delivers this recipe's
+# `response.json_schema` via an agentic "final output" tool the model must CALL,
+# and a :thinking model reasons for a turn before calling it — a budget of 1
+# stalled every tier with "I've reached the maximum number of actions".
+extensions: []
 
 instructions: |
   You are the synthesizer for a two-lane automated PR review. You receive the
