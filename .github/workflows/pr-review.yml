@@ -83,8 +83,8 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Reviewer-transcript paste (best-effort). TRANSCRIPT_ENABLED defaults to
-          # 1 in review.sh; the config points at the logs.notifiarr.com PrivateBin
-          # instance with 1-year retention. A missing CLI/config or a failed upload
-          # degrades to a local recap with no link — it never blocks the review.
+          # 1 in review.sh; the config points at the zbin.io PrivateBin instance
+          # with 1-year retention and a markdown formatter. A missing CLI/config or
+          # a failed upload degrades to a local recap with no link — never blocks.
           PRIVATEBIN_CONFIG: .github/privatebin.json
         run: bash scripts/review.sh
