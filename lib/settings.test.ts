@@ -17,6 +17,8 @@ import {
   getPendingDestructiveStorageClears,
   getPendingStorageMaintenance,
   hasActiveStorageLease,
+  isCurrentPendingDestructiveStorageClear,
+  isCurrentPendingStorageMaintenance,
   keepRawData,
   pendingDestructiveStorageClears,
   pendingStorageMaintenance,
@@ -24,6 +26,7 @@ import {
   refreshStorageLease,
   removePendingDestructiveStorageClear,
   removePendingStorageMaintenance,
+  removePendingStorageMaintenanceForScope,
   STORAGE_BUDGET_MIGRATIONS,
   storageBudget,
   theme,
@@ -83,7 +86,7 @@ describe("settings", () => {
       expect(await storageBudget.getValue()).toEqual(next);
     });
 
-    it("keeps distinct pending maintenance policies under distinct durable ids", async () => {
+    it("keeps only the latest pending maintenance policy for one scope", async () => {
       const first = createPendingStorageMaintenanceRequest({
         docId: null,
         keepRawData: false,
@@ -100,12 +103,110 @@ describe("settings", () => {
       await upsertPendingStorageMaintenance(first);
       await upsertPendingStorageMaintenance(second);
 
-      expect(await getPendingStorageMaintenance()).toEqual([first, second]);
-
-      await removePendingStorageMaintenance(first.id);
       expect(await getPendingStorageMaintenance()).toEqual([second]);
 
-      await removePendingStorageMaintenance(second.id);
+      await removePendingStorageMaintenance(first.id, first.queuedAt);
+      expect(await getPendingStorageMaintenance()).toEqual([second]);
+
+      await removePendingStorageMaintenance(second.id, second.queuedAt);
+      expect(await getPendingStorageMaintenance()).toEqual([]);
+    });
+
+    it("coalesces document-scoped pending maintenance separately from global policy", async () => {
+      const docId = asDocId("docPendingPolicy");
+      const docFirst = createPendingStorageMaintenanceRequest({
+        docId,
+        keepRawData: false,
+        budget: DEFAULT_STORAGE_BUDGET,
+        queuedAt: 1,
+      });
+      const docSecond = createPendingStorageMaintenanceRequest({
+        docId,
+        keepRawData: true,
+        budget: { perDocumentBytes: 1, globalCapBytes: 2 },
+        queuedAt: 2,
+      });
+      const global = createPendingStorageMaintenanceRequest({
+        docId: null,
+        keepRawData: false,
+        budget: DEFAULT_STORAGE_BUDGET,
+        queuedAt: 3,
+      });
+
+      await upsertPendingStorageMaintenance(docFirst);
+      await upsertPendingStorageMaintenance(global);
+      await upsertPendingStorageMaintenance(docSecond);
+
+      expect(await getPendingStorageMaintenance()).toEqual([global, docSecond]);
+    });
+
+    it("does not let an old completion remove a newer same-id maintenance request", async () => {
+      const first = createPendingStorageMaintenanceRequest({
+        docId: null,
+        keepRawData: false,
+        budget: DEFAULT_STORAGE_BUDGET,
+        queuedAt: 1,
+      });
+      const second = createPendingStorageMaintenanceRequest({
+        docId: null,
+        keepRawData: false,
+        budget: DEFAULT_STORAGE_BUDGET,
+        queuedAt: 2,
+      });
+
+      await upsertPendingStorageMaintenance(first);
+      await upsertPendingStorageMaintenance(second);
+      await removePendingStorageMaintenance(first.id, first.queuedAt);
+
+      expect(await getPendingStorageMaintenance()).toEqual([second]);
+
+      await removePendingStorageMaintenance(second.id, second.queuedAt);
+      expect(await getPendingStorageMaintenance()).toEqual([]);
+    });
+
+    it("detects current pending maintenance by scope id and queuedAt", async () => {
+      const first = createPendingStorageMaintenanceRequest({
+        docId: null,
+        keepRawData: false,
+        budget: DEFAULT_STORAGE_BUDGET,
+        queuedAt: 1,
+      });
+      const second = createPendingStorageMaintenanceRequest({
+        docId: null,
+        keepRawData: true,
+        budget: DEFAULT_STORAGE_BUDGET,
+        queuedAt: 2,
+      });
+
+      await upsertPendingStorageMaintenance(first);
+      await upsertPendingStorageMaintenance(second);
+
+      expect(await isCurrentPendingStorageMaintenance(first)).toBe(false);
+      expect(await isCurrentPendingStorageMaintenance(second)).toBe(true);
+    });
+
+    it("removes pending maintenance by destructive-clear scope", async () => {
+      const docId = asDocId("docPendingPolicy");
+      const docRequest = createPendingStorageMaintenanceRequest({
+        docId,
+        keepRawData: false,
+        budget: DEFAULT_STORAGE_BUDGET,
+        queuedAt: 1,
+      });
+      const globalRequest = createPendingStorageMaintenanceRequest({
+        docId: null,
+        keepRawData: false,
+        budget: DEFAULT_STORAGE_BUDGET,
+        queuedAt: 2,
+      });
+
+      await upsertPendingStorageMaintenance(docRequest);
+      await upsertPendingStorageMaintenance(globalRequest);
+      await removePendingStorageMaintenanceForScope(docId);
+
+      expect(await getPendingStorageMaintenance()).toEqual([globalRequest]);
+
+      await removePendingStorageMaintenanceForScope(null);
       expect(await getPendingStorageMaintenance()).toEqual([]);
     });
 
@@ -125,8 +226,33 @@ describe("settings", () => {
       await upsertPendingDestructiveStorageClear(second);
 
       expect(await getPendingDestructiveStorageClears()).toEqual([second]);
+      expect(await isCurrentPendingDestructiveStorageClear(first)).toBe(false);
+      expect(await isCurrentPendingDestructiveStorageClear(second)).toBe(true);
 
-      await removePendingDestructiveStorageClear(second.id);
+      await removePendingDestructiveStorageClear(second);
+      expect(await getPendingDestructiveStorageClears()).toEqual([]);
+    });
+
+    it("does not let an old completion remove a newer same-id destructive clear", async () => {
+      const docId = asDocId("docClearSettings");
+      const first = createPendingDestructiveStorageClear({
+        kind: "document",
+        docId,
+        queuedAt: 1,
+      });
+      const second = createPendingDestructiveStorageClear({
+        kind: "document",
+        docId,
+        queuedAt: 2,
+      });
+
+      await upsertPendingDestructiveStorageClear(first);
+      await upsertPendingDestructiveStorageClear(second);
+      await removePendingDestructiveStorageClear(first);
+
+      expect(await getPendingDestructiveStorageClears()).toEqual([second]);
+
+      await removePendingDestructiveStorageClear(second);
       expect(await getPendingDestructiveStorageClears()).toEqual([]);
     });
 

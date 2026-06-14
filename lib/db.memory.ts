@@ -253,18 +253,24 @@ export function createMemoryStore(options: MemoryStoreOptions = {}): RevisionSto
     backend.checkpoints.set(checkpoint.docId, cloneValue(checkpoint));
   }
 
+  async function deleteCheckpoint(docId: DocId): Promise<void> {
+    backend.checkpoints.delete(docId);
+  }
+
   async function deleteRawForDoc(docId: DocId): Promise<number> {
     const perDoc = backend.rawChunks.get(docId);
-    if (perDoc === undefined) return 0;
     let reclaimed = 0;
-    for (const payload of perDoc.values()) {
-      reclaimed += estimatePayloadBytes(payload);
+    if (perDoc !== undefined) {
+      for (const payload of perDoc.values()) {
+        reclaimed += estimatePayloadBytes(payload);
+      }
+      backend.rawChunks.delete(docId);
     }
-    backend.rawChunks.delete(docId);
     const meta = backend.cacheMeta.get(docId);
     if (meta !== undefined) {
       backend.cacheMeta.set(docId, { ...meta, estimatedBytes: 0, rawRetained: false });
     }
+    backend.checkpoints.delete(docId);
     return reclaimed;
   }
 
@@ -276,6 +282,7 @@ export function createMemoryStore(options: MemoryStoreOptions = {}): RevisionSto
       }
     }
     backend.rawChunks.clear();
+    backend.checkpoints.clear();
     for (const meta of backend.cacheMeta.values()) {
       backend.cacheMeta.set(meta.docId, { ...meta, estimatedBytes: 0, rawRetained: false });
     }
@@ -382,6 +389,7 @@ export function createMemoryStore(options: MemoryStoreOptions = {}): RevisionSto
     touch,
     readCheckpoint,
     writeCheckpoint,
+    deleteCheckpoint,
     estimateUsage,
     pruneLRU,
     deleteDocument,

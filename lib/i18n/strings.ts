@@ -91,6 +91,9 @@ export const strings = {
     largeEdits: "Large edits",
     pauses: "Pauses",
     span: "Revisions spanned",
+    duration: "Replay duration",
+    durationUnknown: "—",
+    attributionCaveat: "Attribution may be incomplete.",
   },
   options: {
     title: "DocRewind settings",
@@ -114,6 +117,7 @@ export const strings = {
     themeLight: "Light",
     themeDark: "Dark",
     keepRawLabel: "Keep raw data for re-decoding",
+    keepRawHint: "When disabled, raw data is discarded once no replay or decode is using it.",
     realIdentitiesLabel: "Show real account identities",
     perDocumentCapLabel: "Per-document cap (MB)",
     globalCapLabel: "Global cap (MB)",

@@ -67,9 +67,47 @@ function markerClass(kind: TimelineMarker["kind"]): string {
 }
 
 const Timeline: Component<TimelineProps> = (props) => {
+  let track: HTMLDivElement | undefined;
+  let activePointerId: number | null = null;
   const fraction = createMemo(() => (props.max > 0 ? props.currentIndex / props.max : 0));
   const pct = (value: number): string =>
     `${(props.max > 0 ? (value / props.max) * 100 : 0).toFixed(2)}%`;
+
+  function scrubFromClientX(clientX: number): void {
+    if (track === undefined || props.max <= 0) {
+      props.onScrub(0);
+      return;
+    }
+    const rect = track.getBoundingClientRect();
+    const ratio = rect.width > 0 ? (clientX - rect.left) / rect.width : 0;
+    const next = Math.round(Math.max(0, Math.min(1, ratio)) * props.max);
+    props.onScrub(next);
+  }
+
+  function onPointerDown(event: PointerEvent): void {
+    activePointerId = event.pointerId;
+    const target = event.currentTarget as HTMLDivElement;
+    target.setPointerCapture(event.pointerId);
+    scrubFromClientX(event.clientX);
+  }
+
+  function onPointerMove(event: PointerEvent): void {
+    if (activePointerId !== event.pointerId) {
+      return;
+    }
+    scrubFromClientX(event.clientX);
+  }
+
+  function endPointer(event: PointerEvent): void {
+    if (activePointerId !== event.pointerId) {
+      return;
+    }
+    activePointerId = null;
+    const target = event.currentTarget as HTMLDivElement;
+    if (target.hasPointerCapture(event.pointerId)) {
+      target.releasePointerCapture(event.pointerId);
+    }
+  }
 
   function onKeyDown(event: KeyboardEvent): void {
     let next: number | null = null;
@@ -97,6 +135,7 @@ const Timeline: Component<TimelineProps> = (props) => {
 
   return (
     <div
+      ref={track}
       class="tl-track"
       role="slider"
       tabIndex={0}
@@ -106,19 +145,29 @@ const Timeline: Component<TimelineProps> = (props) => {
       aria-valuenow={props.currentIndex}
       aria-valuetext={revisionOf(props.currentIndex, props.max)}
       onKeyDown={onKeyDown}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={endPointer}
+      onPointerCancel={endPointer}
     >
       <div class="tl-fill" style={{ width: `${fraction() * 100}%` }} />
       <For each={props.events}>
         {(marker) => (
           <Show when={marker.index >= 0 && marker.index <= props.max}>
-            <span
-              class={markerClass(marker.kind)}
+            <button
+              type="button"
+              class={`${markerClass(marker.kind)} cursor-pointer border-0 bg-transparent p-0`}
               style={{ left: pct(marker.index) }}
               title={marker.label}
-              aria-hidden="true"
+              aria-label={`${marker.label} — ${revisionOf(marker.index, props.max)}`}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation();
+                props.onScrub(marker.index);
+              }}
             >
               {markerGlyph(marker.kind)}
-            </span>
+            </button>
           </Show>
         )}
       </For>

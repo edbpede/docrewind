@@ -57,7 +57,10 @@ describe("strings catalog", () => {
     expect(strings.privacy.approximationNote.length).toBeGreaterThan(0);
     expect(strings.controls.play.length).toBeGreaterThan(0);
     expect(strings.timeline.label).toBe("Revision timeline");
+    expect(strings.insights.duration).toBe("Replay duration");
+    expect(strings.insights.attributionCaveat.length).toBeGreaterThan(0);
     expect(strings.options.title.length).toBeGreaterThan(0);
+    expect(strings.options.keepRawHint).toContain("once no replay or decode is using it");
     expect(strings.options.perDocumentCapLabel).toBe("Per-document cap (MB)");
     expect(strings.options.globalCapLabel).toBe("Global cap (MB)");
   });

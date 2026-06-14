@@ -16,6 +16,20 @@ interface AuthorLabel {
   readonly label: string;
 }
 
+function formatDuration(ms: number): string {
+  const totalSeconds = Math.max(0, Math.round(ms / 1000));
+  if (totalSeconds < 60) {
+    return `${totalSeconds}s`;
+  }
+  const totalMinutes = Math.round(totalSeconds / 60);
+  if (totalMinutes < 60) {
+    return `${totalMinutes}m`;
+  }
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}m`;
+}
+
 export interface SummaryInsightsProps {
   readonly revisions: readonly DecodedRevision[];
   readonly timeline: readonly TimelineEvent[];
@@ -30,6 +44,8 @@ const SummaryInsights: Component<SummaryInsightsProps> = (rawProps) => {
     let sessions = 0;
     let largeEdits = 0;
     let pauses = 0;
+    let firstTime: number | null = null;
+    let lastTime: number | null = null;
     for (const event of props.timeline) {
       switch (event.kind) {
         case "session":
@@ -48,11 +64,24 @@ const SummaryInsights: Component<SummaryInsightsProps> = (rawProps) => {
         }
       }
     }
+    for (const revision of props.revisions) {
+      if (revision.time === null) {
+        continue;
+      }
+      const time = Number(revision.time);
+      firstTime = firstTime === null ? time : Math.min(firstTime, time);
+      lastTime = lastTime === null ? time : Math.max(lastTime, time);
+    }
+    const duration =
+      firstTime === null || lastTime === null
+        ? strings.insights.durationUnknown
+        : formatDuration(lastTime - firstTime);
     return [
       { key: "sessions", label: strings.insights.sessions, value: sessions },
       { key: "largeEdits", label: strings.insights.largeEdits, value: largeEdits },
       { key: "pauses", label: strings.insights.pauses, value: pauses },
       { key: "span", label: strings.insights.span, value: props.revisions.length },
+      { key: "duration", label: strings.insights.duration, value: duration },
     ];
   });
 
@@ -86,15 +115,20 @@ const SummaryInsights: Component<SummaryInsightsProps> = (rawProps) => {
         </For>
       </dl>
       <Show when={authors().length > 0}>
-        <ul class="mt-3 flex flex-wrap gap-2">
-          <For each={authors()}>
-            {(author) => (
-              <li class="rounded border border-stone-300 px-2 py-0.5 text-xs text-stone-600 dark:border-stone-600 dark:text-stone-300">
-                {author.label}
-              </li>
-            )}
-          </For>
-        </ul>
+        <div class="mt-3 flex flex-col gap-2">
+          <ul class="flex flex-wrap gap-2">
+            <For each={authors()}>
+              {(author) => (
+                <li class="rounded border border-stone-300 px-2 py-0.5 text-xs text-stone-600 dark:border-stone-600 dark:text-stone-300">
+                  {author.label}
+                </li>
+              )}
+            </For>
+          </ul>
+          <p class="text-xs text-stone-500 dark:text-stone-400">
+            {strings.insights.attributionCaveat}
+          </p>
+        </div>
       </Show>
     </section>
   );

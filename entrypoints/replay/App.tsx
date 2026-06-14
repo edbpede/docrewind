@@ -368,7 +368,7 @@ const ReplaySurface: Component<{
     try {
       const ack = await sendMessage("requestStorageMaintenance", request);
       if (ack.status === "completed") {
-        await removePendingStorageMaintenance(request.id);
+        await removePendingStorageMaintenance(request.id, request.queuedAt);
       }
     } catch {
       // Durable pending state was written before send; background startup or a

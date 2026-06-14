@@ -159,7 +159,7 @@ export function runRevisionStoreContract(
       expect(await store.getSnapshots(docA)).toHaveLength(1);
       expect(await store.getTimeline(docA)).toHaveLength(1);
       expect(await store.getReplayPublication(docA, "pub-raw-one")).not.toBeNull();
-      expect(await store.readCheckpoint(docA)).not.toBeNull();
+      expect(await store.readCheckpoint(docA)).toBeNull();
       expect((await store.getCacheMeta(docA))?.rawRetained).toBe(false);
       expect((await store.getCacheMeta(docA))?.estimatedBytes).toBe(0);
     });
@@ -171,6 +171,20 @@ export function runRevisionStoreContract(
       await store.saveReplayPublication(docA, replayPublication("pub-raw-all"));
       await store.putCacheMeta(cacheRec(docA, 1));
       await store.putCacheMeta(cacheRec(docB, 2));
+      await store.writeCheckpoint({
+        docId: docA,
+        upperBound: rev(4),
+        nextStart: rev(5),
+        completed: true,
+        updatedAt: 0,
+      });
+      await store.writeCheckpoint({
+        docId: docB,
+        upperBound: rev(4),
+        nextStart: rev(5),
+        completed: true,
+        updatedAt: 0,
+      });
 
       const reclaimed = await store.deleteRawAll();
 
@@ -181,6 +195,8 @@ export function runRevisionStoreContract(
       expect(await store.getReplayPublication(docA, "pub-raw-all")).not.toBeNull();
       expect((await store.getCacheMeta(docA))?.rawRetained).toBe(false);
       expect((await store.getCacheMeta(docB))?.rawRetained).toBe(false);
+      expect(await store.readCheckpoint(docA)).toBeNull();
+      expect(await store.readCheckpoint(docB)).toBeNull();
     });
 
     it("coarsely prunes one document when its raw bytes exceed the per-document cap", async () => {
@@ -378,6 +394,22 @@ export function runRevisionStoreContract(
       };
       await store.writeCheckpoint(cp);
       expect(await store.readCheckpoint(docA)).toEqual(cp);
+      await store.deleteCheckpoint(docA);
+      expect(await store.readCheckpoint(docA)).toBeNull();
+    });
+
+    it("deleteRawForDoc invalidates a checkpoint even when raw is already absent", async () => {
+      await store.writeCheckpoint({
+        docId: docA,
+        upperBound: rev(4),
+        nextStart: rev(5),
+        completed: true,
+        updatedAt: 0,
+      });
+
+      expect(await store.deleteRawForDoc(docA)).toBe(0);
+
+      expect(await store.readCheckpoint(docA)).toBeNull();
     });
 
     it("invalidates decoded/snapshots/timeline on a parser-version bump but retains raw", async () => {

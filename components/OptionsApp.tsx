@@ -108,7 +108,7 @@ const OptionsApp: Component = () => {
       docId,
       keepRawData: keepRaw() ?? true,
       budget: next,
-    });
+    }).catch(() => setMaintenanceStatus("failed"));
   }
 
   async function sendDurableMaintenance(input: {
@@ -122,7 +122,7 @@ const OptionsApp: Component = () => {
     try {
       const ack = await sendMessage("requestStorageMaintenance", request);
       if (ack.status === "completed") {
-        await removePendingStorageMaintenance(request.id);
+        await removePendingStorageMaintenance(request.id, request.queuedAt);
         await refreshPendingStatus();
       } else {
         setMaintenanceStatus(ack.status === "failed" ? "failed" : "pending");
@@ -152,7 +152,7 @@ const OptionsApp: Component = () => {
     try {
       const ack = await sendMessage("clearDocumentCache", request);
       if (ack.status === "completed") {
-        await removePendingDestructiveStorageClear(request.id);
+        await removePendingDestructiveStorageClear(request);
         await refreshPendingStatus();
       } else {
         setMaintenanceStatus(ack.status === "failed" ? "failed" : "pending");
@@ -169,7 +169,7 @@ const OptionsApp: Component = () => {
     try {
       const ack = await sendMessage("clearAllCaches", request);
       if (ack.status === "completed") {
-        await removePendingDestructiveStorageClear(request.id);
+        await removePendingDestructiveStorageClear(request);
         await refreshPendingStatus();
       } else {
         setMaintenanceStatus(ack.status === "failed" ? "failed" : "pending");
@@ -212,6 +212,7 @@ const OptionsApp: Component = () => {
             />
             <span>{strings.options.keepRawLabel}</span>
           </label>
+          <p class="text-xs text-stone-600 dark:text-stone-400">{strings.options.keepRawHint}</p>
 
           <label class="flex items-center gap-2">
             <input

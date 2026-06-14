@@ -42,6 +42,9 @@ import {
   refreshStorageLease,
   removePendingDestructiveStorageClear,
   removePendingStorageMaintenance,
+  removePendingStorageMaintenanceForScope,
+  runIfCurrentPendingDestructiveStorageClear,
+  runIfCurrentPendingStorageMaintenance,
   STORAGE_LEASE_REFRESH_MS,
 } from "@/lib/settings";
 import {
@@ -77,49 +80,117 @@ export default defineBackground(() => {
 
   async function requestDestructiveClear(
     request:
-      | { readonly kind: "document"; readonly docId: DocId; readonly id?: string }
-      | { readonly kind: "all"; readonly id?: string },
+      | {
+          readonly kind: "document";
+          readonly docId: DocId;
+          readonly id?: string;
+          readonly queuedAt?: number;
+        }
+      | { readonly kind: "all"; readonly id?: string; readonly queuedAt?: number },
   ) {
-    const blockedScope = request.kind === "all" ? null : request.docId;
-    if (request.kind === "all") {
-      cancelAllDocumentRuns();
-    } else {
-      cancelDocumentRun(request.docId);
+    const cleanupScope = async (ack: { readonly status: "completed" | "deferred" | "failed" }) => {
+      if (ack.status === "completed") {
+        await removePendingStorageMaintenanceForScope(
+          request.kind === "all" ? null : request.docId,
+        );
+      }
+    };
+
+    async function execute() {
+      const blockedScope = request.kind === "all" ? null : request.docId;
+      if (request.kind === "all") {
+        cancelAllDocumentRuns();
+      } else {
+        cancelDocumentRun(request.docId);
+      }
+      const hasDurableLease = await hasActiveStorageLease(blockedScope);
+      if (
+        request.id !== undefined &&
+        (hasDurableLease || maintenance.hasActiveLease(blockedScope))
+      ) {
+        return { status: "deferred" as const, reclaimedBytes: 0 };
+      }
+      if (request.kind === "all") {
+        return maintenance.requestDestructiveClear({ kind: "all" });
+      }
+      return maintenance.requestDestructiveClear({ kind: "document", docId: request.docId });
     }
-    const hasDurableLease = await hasActiveStorageLease(blockedScope);
-    const isPersisted = request.id !== undefined;
-    if (isPersisted && (hasDurableLease || maintenance.hasActiveLease(blockedScope))) {
-      return { status: "deferred" as const, reclaimedBytes: 0 };
+
+    const requestId = request.id;
+    if (requestId === undefined) {
+      const ack = await execute();
+      await cleanupScope(ack);
+      return ack;
     }
-    if (request.kind === "all") {
-      return maintenance.requestDestructiveClear({ kind: "all" });
+    if (request.queuedAt === undefined) {
+      return { status: "completed" as const, reclaimedBytes: 0 };
     }
-    return maintenance.requestDestructiveClear({ kind: "document", docId: request.docId });
+    const identity =
+      request.kind === "all"
+        ? { id: requestId, kind: "all" as const, queuedAt: request.queuedAt }
+        : {
+            id: requestId,
+            kind: "document" as const,
+            docId: request.docId,
+            queuedAt: request.queuedAt,
+          };
+    const outcome = await runIfCurrentPendingDestructiveStorageClear(identity, execute);
+    if (!outcome.current) {
+      return { status: "completed" as const, reclaimedBytes: 0 };
+    }
+    await cleanupScope(outcome.value);
+    return outcome.value;
   }
 
   async function requestStorageMaintenance(
-    request: StorageMaintenanceRequest & { readonly id?: string },
+    request: StorageMaintenanceRequest & { readonly id?: string; readonly queuedAt?: number },
   ) {
-    const hasDurableLease = await hasActiveStorageLease(request.docId);
-    const isPersisted = request.id !== undefined;
-    if (isPersisted && (hasDurableLease || maintenance.hasActiveLease(request.docId))) {
-      return { status: "deferred" as const, reclaimedBytes: 0 };
+    // Persisted maintenance requests are durable policy intents, not permission
+    // to mutate raw bytes immediately. They must still be the latest persisted
+    // intent for their scope, and startup replay after MV3 restart must still
+    // wait until both the durable lease marker and the live in-memory coordinator
+    // say the scope is clear.
+    async function execute() {
+      const hasDurableLease = await hasActiveStorageLease(request.docId);
+      if (
+        request.id !== undefined &&
+        (hasDurableLease || maintenance.hasActiveLease(request.docId))
+      ) {
+        return { status: "deferred" as const, reclaimedBytes: 0 };
+      }
+      return maintenance.request(request);
     }
-    return maintenance.request(request);
+
+    const requestId = request.id;
+    if (requestId === undefined) {
+      return execute();
+    }
+    if (request.queuedAt === undefined) {
+      return { status: "completed" as const, reclaimedBytes: 0 };
+    }
+    const outcome = await runIfCurrentPendingStorageMaintenance(
+      {
+        docId: request.docId,
+        id: requestId,
+        queuedAt: request.queuedAt,
+      },
+      execute,
+    );
+    return outcome.current ? outcome.value : { status: "completed" as const, reclaimedBytes: 0 };
   }
 
   async function drainPersistedRequests(): Promise<void> {
     for (const request of await getPendingDestructiveStorageClears()) {
       const ack = await requestDestructiveClear(request);
       if (ack.status === "completed") {
-        await removePendingDestructiveStorageClear(request.id);
+        await removePendingDestructiveStorageClear(request);
       }
     }
 
     for (const request of await getPendingStorageMaintenance()) {
       const ack = await requestStorageMaintenance(request);
       if (ack.status === "completed") {
-        await removePendingStorageMaintenance(request.id);
+        await removePendingStorageMaintenance(request.id, request.queuedAt);
       }
     }
   }
@@ -304,8 +375,13 @@ export default defineBackground(() => {
   });
 
   onMessage("beginDecodeLease", async ({ data }) => {
-    await beginStorageLease(data.docId);
     maintenance.beginDecodeLease(data.docId);
+    try {
+      await beginStorageLease(data.docId);
+    } catch (error) {
+      await maintenance.endDecodeLease(data.docId);
+      throw error;
+    }
   });
 
   onMessage("refreshDecodeLease", async ({ data }) => {
@@ -321,24 +397,33 @@ export default defineBackground(() => {
 
   onMessage("requestStorageMaintenance", async ({ data }) => {
     const ack = await requestStorageMaintenance(data);
-    if (ack.status === "completed" && data.id !== undefined) {
-      await removePendingStorageMaintenance(data.id);
+    if (ack.status === "completed" && data.id !== undefined && data.queuedAt !== undefined) {
+      await removePendingStorageMaintenance(data.id, data.queuedAt);
     }
     return ack;
   });
 
   onMessage("clearDocumentCache", async ({ data }) => {
     const ack = await requestDestructiveClear({ ...data, kind: "document" });
-    if (ack.status === "completed" && data.id !== undefined) {
-      await removePendingDestructiveStorageClear(data.id);
+    if (ack.status === "completed" && data.id !== undefined && data.queuedAt !== undefined) {
+      await removePendingDestructiveStorageClear({
+        id: data.id,
+        kind: "document",
+        docId: data.docId,
+        queuedAt: data.queuedAt,
+      });
     }
     return ack;
   });
 
   onMessage("clearAllCaches", async ({ data }) => {
     const ack = await requestDestructiveClear({ ...data, kind: "all" });
-    if (ack.status === "completed" && data.id !== undefined) {
-      await removePendingDestructiveStorageClear(data.id);
+    if (ack.status === "completed" && data.id !== undefined && data.queuedAt !== undefined) {
+      await removePendingDestructiveStorageClear({
+        id: data.id,
+        kind: "all",
+        queuedAt: data.queuedAt,
+      });
     }
     return ack;
   });
@@ -348,8 +433,13 @@ export default defineBackground(() => {
     // lose it, so all maintenance requests are idempotent and replay terminal
     // paths retry cleanup; while this worker is alive, raw pruning waits until
     // retrieval and page decode have both released their leases.
-    await beginStorageLease(data.docId);
     maintenance.beginDecodeLease(data.docId);
+    try {
+      await beginStorageLease(data.docId);
+    } catch (error) {
+      await maintenance.endDecodeLease(data.docId);
+      throw error;
+    }
     const leaseRefresh = setInterval(() => {
       void refreshStorageLease(data.docId).catch(() => {});
     }, STORAGE_LEASE_REFRESH_MS);

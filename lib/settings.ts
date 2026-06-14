@@ -86,6 +86,9 @@ export type PendingAllStorageClearInput = Extract<
   PendingDestructiveStorageClearInput,
   { readonly kind: "all" }
 >;
+export type PendingDestructiveStorageClearIdentity =
+  | Pick<PendingDocumentStorageClear, "id" | "kind" | "docId" | "queuedAt">
+  | Pick<PendingAllStorageClear, "id" | "kind" | "queuedAt">;
 
 const MIB = 1024 * 1024;
 export const STORAGE_LEASE_TTL_MS = 10 * 60 * 1000;
@@ -183,10 +186,30 @@ export const activeStorageLeases = storage.defineItem<readonly ActiveStorageLeas
 );
 
 let storageLeaseMutationQueue: Promise<void> = Promise.resolve();
+let pendingStorageMaintenanceMutationQueue: Promise<void> = Promise.resolve();
+let pendingDestructiveStorageClearMutationQueue: Promise<void> = Promise.resolve();
 
 function enqueueStorageLeaseMutation<T>(mutation: () => Promise<T>): Promise<T> {
   const run = storageLeaseMutationQueue.then(mutation, mutation);
   storageLeaseMutationQueue = run.then(
+    () => {},
+    () => {},
+  );
+  return run;
+}
+
+function enqueuePendingStorageMaintenanceMutation<T>(mutation: () => Promise<T>): Promise<T> {
+  const run = pendingStorageMaintenanceMutationQueue.then(mutation, mutation);
+  pendingStorageMaintenanceMutationQueue = run.then(
+    () => {},
+    () => {},
+  );
+  return run;
+}
+
+function enqueuePendingDestructiveStorageClearMutation<T>(mutation: () => Promise<T>): Promise<T> {
+  const run = pendingDestructiveStorageClearMutationQueue.then(mutation, mutation);
+  pendingDestructiveStorageClearMutationQueue = run.then(
     () => {},
     () => {},
   );
@@ -277,6 +300,12 @@ function pendingMaintenanceId(input: PendingStorageMaintenanceInput): string {
   return `storage-maintenance:${scope}:${status}:${rawPolicy}:${perDoc}:${global}`;
 }
 
+function pendingMaintenanceScopeKey(
+  request: Pick<PendingStorageMaintenanceRequest, "docId">,
+): string {
+  return request.docId ?? "*";
+}
+
 export function createPendingStorageMaintenanceRequest(
   input: PendingStorageMaintenanceInput,
 ): PendingStorageMaintenanceRequest {
@@ -299,23 +328,87 @@ export async function getPendingStorageMaintenance(): Promise<
   return pendingStorageMaintenance.getValue();
 }
 
+export async function isCurrentPendingStorageMaintenance(
+  request: Pick<PendingStorageMaintenanceRequest, "docId" | "id" | "queuedAt">,
+): Promise<boolean> {
+  return enqueuePendingStorageMaintenanceMutation(async () => {
+    const scope = pendingMaintenanceScopeKey(request);
+    const current = await pendingStorageMaintenance.getValue();
+    return current.some(
+      (item) =>
+        pendingMaintenanceScopeKey(item) === scope &&
+        item.id === request.id &&
+        item.queuedAt === request.queuedAt,
+    );
+  });
+}
+
+export async function runIfCurrentPendingStorageMaintenance<T>(
+  request: Pick<PendingStorageMaintenanceRequest, "docId" | "id" | "queuedAt">,
+  operation: () => Promise<T>,
+): Promise<{ readonly current: true; readonly value: T } | { readonly current: false }> {
+  return enqueuePendingStorageMaintenanceMutation(async () => {
+    const scope = pendingMaintenanceScopeKey(request);
+    const current = await pendingStorageMaintenance.getValue();
+    const isCurrent = current.some(
+      (item) =>
+        pendingMaintenanceScopeKey(item) === scope &&
+        item.id === request.id &&
+        item.queuedAt === request.queuedAt,
+    );
+    if (!isCurrent) {
+      return { current: false };
+    }
+    return { current: true, value: await operation() };
+  });
+}
+
 export async function upsertPendingStorageMaintenance(
   request: PendingStorageMaintenanceRequest,
 ): Promise<void> {
-  const current = await pendingStorageMaintenance.getValue();
-  await pendingStorageMaintenance.setValue([
-    ...current.filter((item) => item.id !== request.id),
-    request,
-  ]);
+  await enqueuePendingStorageMaintenanceMutation(async () => {
+    const scope = pendingMaintenanceScopeKey(request);
+    const current = await pendingStorageMaintenance.getValue();
+    await pendingStorageMaintenance.setValue([
+      ...current.filter((item) => pendingMaintenanceScopeKey(item) !== scope),
+      request,
+    ]);
+  });
 }
 
-export async function removePendingStorageMaintenance(id: string): Promise<void> {
-  const current = await pendingStorageMaintenance.getValue();
-  await pendingStorageMaintenance.setValue(current.filter((item) => item.id !== id));
+export async function removePendingStorageMaintenance(id: string, queuedAt: number): Promise<void> {
+  await enqueuePendingStorageMaintenanceMutation(async () => {
+    const current = await pendingStorageMaintenance.getValue();
+    await pendingStorageMaintenance.setValue(
+      current.filter((item) => item.id !== id || item.queuedAt !== queuedAt),
+    );
+  });
+}
+
+export async function removePendingStorageMaintenanceForScope(docId: DocId | null): Promise<void> {
+  await enqueuePendingStorageMaintenanceMutation(async () => {
+    const current = await pendingStorageMaintenance.getValue();
+    await pendingStorageMaintenance.setValue(
+      docId === null ? [] : current.filter((item) => pendingMaintenanceScopeKey(item) !== docId),
+    );
+  });
 }
 
 function destructiveClearId(input: PendingDestructiveStorageClearInput): string {
   return input.kind === "all" ? "destructive-clear:*" : `destructive-clear:document:${input.docId}`;
+}
+
+function sameDestructiveStorageClear(
+  item: PendingDestructiveStorageClear,
+  request: PendingDestructiveStorageClearIdentity,
+): boolean {
+  if (item.id !== request.id || item.queuedAt !== request.queuedAt || item.kind !== request.kind) {
+    return false;
+  }
+  if (item.kind === "all") {
+    return true;
+  }
+  return request.kind === "document" && item.docId === request.docId;
 }
 
 export function createPendingDestructiveStorageClear(
@@ -348,17 +441,48 @@ export async function getPendingDestructiveStorageClears(): Promise<
   return pendingDestructiveStorageClears.getValue();
 }
 
+export async function isCurrentPendingDestructiveStorageClear(
+  request: PendingDestructiveStorageClearIdentity,
+): Promise<boolean> {
+  return enqueuePendingDestructiveStorageClearMutation(async () => {
+    const current = await pendingDestructiveStorageClears.getValue();
+    return current.some((item) => sameDestructiveStorageClear(item, request));
+  });
+}
+
+export async function runIfCurrentPendingDestructiveStorageClear<T>(
+  request: PendingDestructiveStorageClearIdentity,
+  operation: () => Promise<T>,
+): Promise<{ readonly current: true; readonly value: T } | { readonly current: false }> {
+  return enqueuePendingDestructiveStorageClearMutation(async () => {
+    const current = await pendingDestructiveStorageClears.getValue();
+    const isCurrent = current.some((item) => sameDestructiveStorageClear(item, request));
+    if (!isCurrent) {
+      return { current: false };
+    }
+    return { current: true, value: await operation() };
+  });
+}
+
 export async function upsertPendingDestructiveStorageClear(
   request: PendingDestructiveStorageClear,
 ): Promise<void> {
-  const current = await pendingDestructiveStorageClears.getValue();
-  await pendingDestructiveStorageClears.setValue([
-    ...current.filter((item) => item.id !== request.id),
-    request,
-  ]);
+  await enqueuePendingDestructiveStorageClearMutation(async () => {
+    const current = await pendingDestructiveStorageClears.getValue();
+    await pendingDestructiveStorageClears.setValue([
+      ...current.filter((item) => item.id !== request.id),
+      request,
+    ]);
+  });
 }
 
-export async function removePendingDestructiveStorageClear(id: string): Promise<void> {
-  const current = await pendingDestructiveStorageClears.getValue();
-  await pendingDestructiveStorageClears.setValue(current.filter((item) => item.id !== id));
+export async function removePendingDestructiveStorageClear(
+  request: PendingDestructiveStorageClearIdentity,
+): Promise<void> {
+  await enqueuePendingDestructiveStorageClearMutation(async () => {
+    const current = await pendingDestructiveStorageClears.getValue();
+    await pendingDestructiveStorageClears.setValue(
+      current.filter((item) => !sameDestructiveStorageClear(item, request)),
+    );
+  });
 }

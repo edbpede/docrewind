@@ -111,13 +111,15 @@ export interface RevisionStore {
    */
   estimateRawBytes(docId: DocId): Promise<number>;
   /**
-   * Remove only raw chunks for one document, preserving decoded/snapshots/
-   * timeline/checkpoints. Returns best-effort reclaimed bytes.
+   * Remove only raw chunks for one document, preserving derived replay data but
+   * invalidating the retrieval checkpoint. Without raw coverage, any future
+   * document-growth retrieval must restart from revision 1 rather than resume
+   * from a now-unbacked cursor. Returns best-effort reclaimed bytes.
    */
   deleteRawForDoc(docId: DocId): Promise<number>;
   /**
    * Remove only raw chunks for every document, preserving derived data and
-   * checkpoints. Returns best-effort reclaimed bytes.
+   * invalidating retrieval checkpoints. Returns best-effort reclaimed bytes.
    */
   deleteRawAll(): Promise<number>;
   /**
@@ -172,6 +174,8 @@ export interface RevisionStore {
   // --- Resumable-retrieval checkpoints (owner: background/orchestrator) ----
   readCheckpoint(docId: DocId): Promise<RetrievalCheckpoint | null>;
   writeCheckpoint(checkpoint: RetrievalCheckpoint): Promise<void>;
+  /** Delete one retrieval checkpoint. Used when retained raw coverage is discarded. */
+  deleteCheckpoint(docId: DocId): Promise<void>;
 
   // --- Maintenance --------------------------------------------------------
   /** Coarse usage/quota figures for the LRU/quota path. */

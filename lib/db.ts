@@ -208,14 +208,6 @@ export function createIdbStore(options: IdbStoreOptions = {}): RevisionStore {
     return { usage: 0, quota: 0 };
   }
 
-  async function flagRawDiscarded(docId: DocId): Promise<void> {
-    const d = await db();
-    const meta = await d.get("cacheMeta", docId);
-    if (meta === undefined) return;
-    // Raw was discarded — mark for re-fetch (PRD §9.8).
-    await d.put("cacheMeta", { ...meta, estimatedBytes: 0, rawRetained: false });
-  }
-
   async function saveRawChunk(chunk: RawPayload): Promise<void> {
     await ensurePersisted();
     const record: RawChunkRecord = {
@@ -376,19 +368,29 @@ export function createIdbStore(options: IdbStoreOptions = {}): RevisionStore {
     await d.put("checkpoints", checkpoint);
   }
 
+  async function deleteCheckpoint(docId: DocId): Promise<void> {
+    const d = await db();
+    await d.delete("checkpoints", docId);
+  }
+
   async function deleteRawForDoc(docId: DocId): Promise<number> {
     const d = await db();
-    const records = await d.getAllFromIndex("rawChunks", "by-doc", docId);
+    const tx = d.transaction(["rawChunks", "cacheMeta", "checkpoints"], "readwrite");
+    const raw = tx.objectStore("rawChunks");
+    const metaStore = tx.objectStore("cacheMeta");
+    const checkpointStore = tx.objectStore("checkpoints");
+    const records = await raw.index("by-doc").getAll(docId);
     let reclaimed = 0;
-    const tx = d.transaction("rawChunks", "readwrite");
     for (const r of records) {
       reclaimed += estimatePayloadBytes(r.payload);
-      await tx.store.delete([r.docId, r.start, r.end]);
+      await raw.delete([r.docId, r.start, r.end]);
     }
+    const meta = await metaStore.get(docId);
+    if (meta !== undefined) {
+      await metaStore.put({ ...meta, estimatedBytes: 0, rawRetained: false });
+    }
+    await checkpointStore.delete(docId);
     await tx.done;
-    if (reclaimed > 0) {
-      await flagRawDiscarded(docId);
-    }
     return reclaimed;
   }
 
@@ -399,7 +401,7 @@ export function createIdbStore(options: IdbStoreOptions = {}): RevisionStore {
       (total, record) => total + estimatePayloadBytes(record.payload),
       0,
     );
-    const tx = d.transaction(["rawChunks", "cacheMeta"], "readwrite");
+    const tx = d.transaction(["rawChunks", "cacheMeta", "checkpoints"], "readwrite");
     const raw = tx.objectStore("rawChunks");
     const metaStore = tx.objectStore("cacheMeta");
     await raw.clear();
@@ -407,6 +409,7 @@ export function createIdbStore(options: IdbStoreOptions = {}): RevisionStore {
     await Promise.all(
       metas.map((meta) => metaStore.put({ ...meta, estimatedBytes: 0, rawRetained: false })),
     );
+    await tx.objectStore("checkpoints").clear();
     await tx.done;
     return reclaimed;
   }
@@ -542,6 +545,7 @@ export function createIdbStore(options: IdbStoreOptions = {}): RevisionStore {
     touch,
     readCheckpoint,
     writeCheckpoint,
+    deleteCheckpoint,
     estimateUsage,
     pruneLRU,
     deleteDocument,

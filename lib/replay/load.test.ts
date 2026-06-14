@@ -9,9 +9,12 @@ import { createMemoryStore } from "../db.memory";
 import { PARSER_VERSION } from "../decoder/version";
 import { asDocId, asRevisionId } from "../domain/ids";
 import type { DecodedRevision, RawPayload } from "../domain/model";
+import type { RevisionRangeDiscovery } from "../protocol/discovery";
 import { createModel, type DocumentModel } from "../reconstruction/model";
 import { modelAtRevisionIndex, SNAPSHOT_CADENCE } from "../reconstruction/snapshot";
 import { currentText } from "../reconstruction/text";
+import { runRetrieval } from "../retrieval/orchestrator";
+import type { ChunkFetcher } from "../retrieval/transport";
 import type { StoredSnapshot } from "../store";
 import {
   loadReplayData,
@@ -335,5 +338,77 @@ describe("runPipelineSameThread", () => {
     expect(await store.getDecoded(DOC)).toEqual([]);
     expect(await store.getSnapshots(DOC)).toEqual([]);
     expect(await store.getTimeline(DOC)).toEqual([]);
+  });
+
+  test("raw deletion invalidates checkpoints so document growth re-fetches a complete replay", async () => {
+    const store = createMemoryStore();
+    const docId = asDocId("DocGrowthReplay");
+    let upperBound = asRevisionId(2);
+    const fetcher: ChunkFetcher = {
+      async fetchChunk({ span }) {
+        const changelog: Array<{ ty: "is"; s: string; ibi: number; revision_id: number }> = [];
+        for (let revision = Number(span.start); revision <= Number(span.end); revision += 1) {
+          changelog.push({ ty: "is", s: String(revision), ibi: revision, revision_id: revision });
+        }
+        return {
+          ok: true as const,
+          value: {
+            docId,
+            range: { requested: span, received: span },
+            receivedAt: 0,
+            body: { changelog },
+          },
+        };
+      },
+    };
+    const discovery: RevisionRangeDiscovery = {
+      strategy: "unconfirmed",
+      async discoverUpperBound() {
+        return upperBound;
+      },
+    };
+    const deps = {
+      fetcher,
+      discovery,
+      store,
+      sleep: async () => {},
+      now: () => 1,
+    };
+
+    await runRetrieval(deps, {
+      docId,
+      userIndex: null,
+      cancellation: { isCancelled: () => false },
+    });
+    await runPipelineSameThread(store, docId, { publicationId: "pub-initial" });
+    expect(
+      (await store.getActiveReplayPublication(docId))?.revisions.map((r) => r.revisionId),
+    ).toEqual([asRevisionId(1), asRevisionId(2)]);
+
+    await store.deleteRawForDoc(docId);
+    expect(await store.readCheckpoint(docId)).toBeNull();
+
+    upperBound = asRevisionId(4);
+    await runRetrieval(deps, {
+      docId,
+      userIndex: null,
+      cancellation: { isCancelled: () => false },
+    });
+    const outcome = await runPipelineSameThread(store, docId, {
+      publicationId: "pub-after-growth",
+    });
+    expect(outcome.kind).toBe("published");
+    const loaded = await loadReplayData(store, docId);
+
+    expect(loaded.kind).toBe("ok");
+    if (loaded.kind !== "ok") {
+      throw new Error("expected active replay data");
+    }
+    expect(loaded.data.revisions.map((r) => r.revisionId)).toEqual([
+      asRevisionId(1),
+      asRevisionId(2),
+      asRevisionId(3),
+      asRevisionId(4),
+    ]);
   });
 });

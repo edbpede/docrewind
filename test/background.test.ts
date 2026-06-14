@@ -96,6 +96,7 @@ describe("background retrieval wiring", () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
 
@@ -208,6 +209,85 @@ describe("background retrieval wiring", () => {
     expect(await store.getRawChunks(docId)).toEqual([]);
   });
 
+  it("makes the live decode lease visible before durable lease persistence resolves", async () => {
+    const docId = asDocId("docBeginLeaseRaceMaintenanceBG");
+    const store = createIdbStore();
+    await saveCompleteRawDocument(store, docId);
+    const originalSet = fakeBrowser.storage.local.set.bind(fakeBrowser.storage.local);
+    let releaseLeaseWrite: (() => void) | undefined;
+    let delayed = false;
+    vi.spyOn(fakeBrowser.storage.local, "set").mockImplementation(
+      async (items: Record<string, unknown>) => {
+        if (!delayed && Object.hasOwn(items, "activeStorageLeases")) {
+          delayed = true;
+          await new Promise<void>((resolve) => {
+            releaseLeaseWrite = resolve;
+          });
+        }
+        await originalSet(items);
+      },
+    );
+
+    runBackground();
+    const begin = sendMessage("beginDecodeLease", { docId });
+    await vi.waitFor(() => expect(releaseLeaseWrite).toBeTypeOf("function"));
+
+    const deferred = await sendMessage("requestStorageMaintenance", {
+      docId,
+      keepRawData: false,
+      budget: { perDocumentBytes: 1, globalCapBytes: 1 },
+      reconstructionStatus: "complete",
+    });
+
+    expect(deferred.status).toBe("deferred");
+    expect(await store.getRawChunks(docId)).toHaveLength(1);
+
+    releaseLeaseWrite?.();
+    await begin;
+    await sendMessage("endDecodeLease", { docId });
+
+    await vi.waitFor(async () => {
+      expect(await store.getRawChunks(docId)).toEqual([]);
+    });
+  });
+
+  it("blocks destructive clear while durable lease persistence is still pending", async () => {
+    const docId = asDocId("docBeginLeaseRaceClearBG");
+    const store = createIdbStore();
+    await saveCompleteRawDocument(store, docId);
+    const originalSet = fakeBrowser.storage.local.set.bind(fakeBrowser.storage.local);
+    let releaseLeaseWrite: (() => void) | undefined;
+    let delayed = false;
+    vi.spyOn(fakeBrowser.storage.local, "set").mockImplementation(
+      async (items: Record<string, unknown>) => {
+        if (!delayed && Object.hasOwn(items, "activeStorageLeases")) {
+          delayed = true;
+          await new Promise<void>((resolve) => {
+            releaseLeaseWrite = resolve;
+          });
+        }
+        await originalSet(items);
+      },
+    );
+
+    runBackground();
+    const begin = sendMessage("beginDecodeLease", { docId });
+    await vi.waitFor(() => expect(releaseLeaseWrite).toBeTypeOf("function"));
+
+    const deferred = await sendMessage("clearDocumentCache", { docId });
+
+    expect(deferred.status).toBe("deferred");
+    expect(await store.getRawChunks(docId)).toHaveLength(1);
+
+    releaseLeaseWrite?.();
+    await begin;
+    await sendMessage("endDecodeLease", { docId });
+
+    await vi.waitFor(async () => {
+      expect(await store.getRawChunks(docId)).toEqual([]);
+    });
+  });
+
   it("routes destructive document clear through the lease-aware background coordinator", async () => {
     const docId = asDocId("docClearBG");
     const store = createIdbStore();
@@ -262,6 +342,116 @@ describe("background retrieval wiring", () => {
 
     await vi.waitFor(async () => {
       expect(await store.getRawChunks(docId)).toEqual([]);
+      expect(await getPendingStorageMaintenance()).toEqual([]);
+    });
+  });
+
+  it("ignores stale coalesced persisted maintenance after a newer policy wins", async () => {
+    const docId = asDocId("docStalePolicyBG");
+    const store = createIdbStore();
+    await saveCompleteRawDocument(store, docId, "raw-body", 1);
+    const stale = createPendingStorageMaintenanceRequest({
+      docId,
+      keepRawData: false,
+      budget: { perDocumentBytes: 1, globalCapBytes: 1 },
+      reconstructionStatus: "complete",
+      queuedAt: 1,
+    });
+    const latest = createPendingStorageMaintenanceRequest({
+      docId,
+      keepRawData: true,
+      budget: {
+        perDocumentBytes: Number.MAX_SAFE_INTEGER,
+        globalCapBytes: Number.MAX_SAFE_INTEGER,
+      },
+      reconstructionStatus: "complete",
+      queuedAt: 2,
+    });
+    await upsertPendingStorageMaintenance(stale);
+    await upsertPendingStorageMaintenance(latest);
+
+    runBackground();
+
+    await vi.waitFor(async () => {
+      expect(await getPendingStorageMaintenance()).toEqual([]);
+    });
+    const ack = await sendMessage("requestStorageMaintenance", stale);
+
+    expect(ack).toEqual({ status: "completed", reclaimedBytes: 0 });
+    expect(await store.getRawChunks(docId)).toHaveLength(1);
+  });
+
+  it("does not let stale or malformed maintenance acks remove a newer pending request", async () => {
+    const docId = asDocId("docStaleAckPolicyBG");
+    const store = createIdbStore();
+    await saveCompleteRawDocument(store, docId, "raw-body", 1);
+    const stale = createPendingStorageMaintenanceRequest({
+      docId,
+      keepRawData: false,
+      budget: { perDocumentBytes: 1, globalCapBytes: 1 },
+      reconstructionStatus: "complete",
+      queuedAt: 1,
+    });
+    const latest = createPendingStorageMaintenanceRequest({
+      docId,
+      keepRawData: false,
+      budget: { perDocumentBytes: 1, globalCapBytes: 1 },
+      reconstructionStatus: "complete",
+      queuedAt: 2,
+    });
+    await upsertPendingStorageMaintenance(latest);
+    await beginStorageLease(docId, Date.now());
+
+    runBackground();
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(await store.getRawChunks(docId)).toHaveLength(1);
+    expect(await getPendingStorageMaintenance()).toEqual([latest]);
+
+    expect(await sendMessage("requestStorageMaintenance", stale)).toEqual({
+      status: "completed",
+      reclaimedBytes: 0,
+    });
+    expect(await getPendingStorageMaintenance()).toEqual([latest]);
+
+    expect(
+      await sendMessage("requestStorageMaintenance", {
+        id: latest.id,
+        docId,
+        keepRawData: false,
+        budget: { perDocumentBytes: 1, globalCapBytes: 1 },
+        reconstructionStatus: "complete",
+      }),
+    ).toEqual({ status: "completed", reclaimedBytes: 0 });
+    expect(await getPendingStorageMaintenance()).toEqual([latest]);
+    expect(await store.getRawChunks(docId)).toHaveLength(1);
+  });
+
+  it("drops matching pending maintenance when a destructive document clear completes", async () => {
+    const docId = asDocId("docClearCancelsMaintenanceBG");
+    const store = createIdbStore();
+    await saveCompleteRawDocument(store, docId, "raw-body", 1);
+    const maintenance = createPendingStorageMaintenanceRequest({
+      docId,
+      keepRawData: false,
+      budget: { perDocumentBytes: 1, globalCapBytes: 1 },
+      reconstructionStatus: "complete",
+      queuedAt: 1,
+    });
+    const clear = createPendingDestructiveStorageClear({
+      kind: "document",
+      docId,
+      queuedAt: 1,
+    });
+    await upsertPendingStorageMaintenance(maintenance);
+    await upsertPendingDestructiveStorageClear(clear);
+
+    runBackground();
+
+    await vi.waitFor(async () => {
+      expect(await store.getRawChunks(docId)).toEqual([]);
+      expect(await store.getCacheMeta(docId)).toBeNull();
+      expect(await getPendingDestructiveStorageClears()).toEqual([]);
       expect(await getPendingStorageMaintenance()).toEqual([]);
     });
   });
@@ -362,6 +552,102 @@ describe("background retrieval wiring", () => {
       expect(await store.getRawChunks(docId)).toEqual([]);
       expect(await getPendingDestructiveStorageClears()).toEqual([]);
     });
+  });
+
+  it("does not let stale or malformed destructive clear acks remove a newer pending clear", async () => {
+    const docId = asDocId("docStaleClearAckBG");
+    const store = createIdbStore();
+    await saveCompleteRawDocument(store, docId);
+    const stale = createPendingDestructiveStorageClear({
+      kind: "document",
+      docId,
+      queuedAt: 1,
+    });
+    const latest = createPendingDestructiveStorageClear({
+      kind: "document",
+      docId,
+      queuedAt: 2,
+    });
+    await upsertPendingDestructiveStorageClear(latest);
+    await beginStorageLease(docId, Date.now());
+
+    runBackground();
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(await store.getRawChunks(docId)).toHaveLength(1);
+    expect(await getPendingDestructiveStorageClears()).toEqual([latest]);
+
+    expect(await sendMessage("clearDocumentCache", stale)).toEqual({
+      status: "completed",
+      reclaimedBytes: 0,
+    });
+    expect(await getPendingDestructiveStorageClears()).toEqual([latest]);
+
+    expect(await sendMessage("clearDocumentCache", { id: latest.id, docId })).toEqual({
+      status: "completed",
+      reclaimedBytes: 0,
+    });
+    expect(await getPendingDestructiveStorageClears()).toEqual([latest]);
+    expect(await store.getRawChunks(docId)).toHaveLength(1);
+  });
+
+  it("does not treat a document clear token as current for clear-all", async () => {
+    const docId = asDocId("docWrongClearAllTokenBG");
+    const store = createIdbStore();
+    await saveCompleteRawDocument(store, docId);
+    const request = createPendingDestructiveStorageClear({
+      kind: "document",
+      docId,
+      queuedAt: 1,
+    });
+    await upsertPendingDestructiveStorageClear(request);
+    await beginStorageLease(docId, Date.now());
+
+    runBackground();
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(await getPendingDestructiveStorageClears()).toEqual([request]);
+
+    expect(
+      await sendMessage("clearAllCaches", { id: request.id, queuedAt: request.queuedAt }),
+    ).toEqual({
+      status: "completed",
+      reclaimedBytes: 0,
+    });
+
+    expect(await store.getRawChunks(docId)).toHaveLength(1);
+    expect(await getPendingDestructiveStorageClears()).toEqual([request]);
+  });
+
+  it("does not treat a clear-all token as current for a document clear", async () => {
+    const docId = asDocId("docWrongDocumentTokenBG");
+    const otherDocId = asDocId("docWrongDocumentTokenOtherBG");
+    const store = createIdbStore();
+    await saveCompleteRawDocument(store, docId, "raw-a", 1);
+    await saveCompleteRawDocument(store, otherDocId, "raw-b", 2);
+    const request = createPendingDestructiveStorageClear({
+      kind: "all",
+      queuedAt: 1,
+    });
+    await upsertPendingDestructiveStorageClear(request);
+    await beginStorageLease(docId, Date.now());
+
+    runBackground();
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(await getPendingDestructiveStorageClears()).toEqual([request]);
+
+    expect(
+      await sendMessage("clearDocumentCache", {
+        id: request.id,
+        docId,
+        queuedAt: request.queuedAt,
+      }),
+    ).toEqual({ status: "completed", reclaimedBytes: 0 });
+
+    expect(await store.getRawChunks(docId)).toHaveLength(1);
+    expect(await store.getRawChunks(otherDocId)).toHaveLength(1);
+    expect(await getPendingDestructiveStorageClears()).toEqual([request]);
   });
 
   it("keeps persisted document maintenance deferred when durable leases outlive the current worker lease", async () => {

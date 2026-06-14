@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemoryStore } from "./db.memory";
 import { PARSER_VERSION } from "./decoder/version";
 import { asDocId, asRevisionId } from "./domain/ids";
@@ -11,6 +11,7 @@ import {
   enforceStorageBudget,
   enforceStorageBudgetForAll,
   refreshCacheMeta,
+  runStorageMaintenance,
 } from "./storage-maintenance";
 import type { RevisionStore } from "./store";
 
@@ -240,6 +241,125 @@ describe("storage maintenance", () => {
 
     expect(released.status).toBe("completed");
     expect(await store.getRawChunks(docId)).toEqual([]);
+  });
+
+  it("defers maintenance if a decode lease begins while the durable check is pending", async () => {
+    const store = createMemoryStore();
+    const docId = asDocId("maintDoc");
+    await store.saveRawChunk(raw("body"));
+    await saveActivePublication(store, docId);
+    let releaseDurableCheck: ((allowed: boolean) => void) | undefined;
+    let firstCheck = true;
+    const coordinator = createStorageMaintenanceCoordinator(store, {
+      canRunScope: async () => {
+        if (!firstCheck) {
+          return true;
+        }
+        firstCheck = false;
+        return new Promise<boolean>((resolve) => {
+          releaseDurableCheck = resolve;
+        });
+      },
+    });
+
+    const request = coordinator.request({
+      docId,
+      keepRawData: false,
+      budget: { perDocumentBytes: 1, globalCapBytes: 1 },
+      reconstructionStatus: "complete",
+    });
+    await vi.waitFor(() => expect(releaseDurableCheck).toBeTypeOf("function"));
+    coordinator.beginDecodeLease(docId);
+    releaseDurableCheck?.(true);
+
+    const deferred = await request;
+
+    expect(deferred.status).toBe("deferred");
+    expect(await store.getRawChunks(docId)).toHaveLength(1);
+
+    const released = await coordinator.endDecodeLease(docId);
+
+    expect(released.status).toBe("completed");
+    expect(await store.getRawChunks(docId)).toEqual([]);
+  });
+
+  it("defers destructive clear if a decode lease begins while the durable check is pending", async () => {
+    const store = createMemoryStore();
+    const docId = asDocId("maintDoc");
+    await store.saveRawChunk(raw("body"));
+    let releaseDurableCheck: ((allowed: boolean) => void) | undefined;
+    let firstCheck = true;
+    const coordinator = createStorageMaintenanceCoordinator(store, {
+      canRunScope: async () => {
+        if (!firstCheck) {
+          return true;
+        }
+        firstCheck = false;
+        return new Promise<boolean>((resolve) => {
+          releaseDurableCheck = resolve;
+        });
+      },
+    });
+
+    const request = coordinator.requestDestructiveClear({ kind: "document", docId });
+    await vi.waitFor(() => expect(releaseDurableCheck).toBeTypeOf("function"));
+    coordinator.beginDecodeLease(docId);
+    releaseDurableCheck?.(true);
+
+    const deferred = await request;
+
+    expect(deferred.status).toBe("deferred");
+    expect(await store.getRawChunks(docId)).toHaveLength(1);
+
+    const released = await coordinator.endDecodeLease(docId);
+
+    expect(released.status).toBe("completed");
+    expect(await store.getRawChunks(docId)).toEqual([]);
+  });
+
+  it("does not let destructive clear drain into stale scoped maintenance", async () => {
+    const store = createMemoryStore();
+    const coordinator = createStorageMaintenanceCoordinator(store);
+    const docId = asDocId("maintDoc");
+    await store.saveRawChunk(raw("body"));
+    await saveActivePublication(store, docId);
+    await refreshCacheMeta(store, docId, { now: 1, reconstructionStatus: "complete" });
+
+    coordinator.beginDecodeLease(docId);
+    await coordinator.request({
+      docId,
+      keepRawData: false,
+      budget: { perDocumentBytes: 1, globalCapBytes: 1 },
+      reconstructionStatus: "complete",
+      now: 2,
+    });
+    await coordinator.requestDestructiveClear({ kind: "document", docId });
+
+    const released = await coordinator.endDecodeLease(docId);
+
+    expect(released.status).toBe("completed");
+    expect(await store.getRawChunks(docId)).toEqual([]);
+    expect(await store.getCacheMeta(docId)).toBeNull();
+  });
+
+  it("does not recreate metadata for maintenance after a document was cleared", async () => {
+    const store = createMemoryStore();
+    const docId = asDocId("maintDoc");
+    await store.saveRawChunk(raw("body"));
+    await saveActivePublication(store, docId);
+    await refreshCacheMeta(store, docId, { now: 1, reconstructionStatus: "complete" });
+    await store.deleteDocument(docId);
+
+    const reclaimed = await runStorageMaintenance(store, {
+      docId,
+      keepRawData: false,
+      budget: { perDocumentBytes: 1, globalCapBytes: 1 },
+      reconstructionStatus: "complete",
+      now: 2,
+    });
+
+    expect(reclaimed).toBe(0);
+    expect(await store.getCacheMeta(docId)).toBeNull();
   });
 
   it("enforces per-document raw budget on the normal maintenance path", async () => {

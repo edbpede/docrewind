@@ -30,6 +30,7 @@ const { sendMessageMock, storeMock } = vi.hoisted(() => ({
     touch: vi.fn(),
     readCheckpoint: vi.fn(async () => null),
     writeCheckpoint: vi.fn(),
+    deleteCheckpoint: vi.fn(),
     estimateUsage: vi.fn(async () => ({ usage: 0, quota: 0 })),
     pruneLRU: vi.fn(async () => 0),
     deleteDocument: vi.fn(),
@@ -80,6 +81,11 @@ describe("OptionsApp storage policy controls", () => {
   it("turning off raw retention requests guarded maintenance without direct raw deletion", async () => {
     render(() => <OptionsApp />);
     const checkbox = await screen.findByLabelText("Keep raw data for re-decoding");
+    expect(
+      screen.getByText(
+        "When disabled, raw data is discarded once no replay or decode is using it.",
+      ),
+    ).toBeTruthy();
 
     await fireEvent.click(checkbox);
 
@@ -192,6 +198,21 @@ describe("OptionsApp storage policy controls", () => {
     const checkbox = await screen.findByLabelText("Keep raw data for re-decoding");
 
     await fireEvent.click(checkbox);
+
+    await vi.waitFor(() =>
+      expect(
+        screen.getByText("Storage cleanup could not be confirmed and will retry automatically."),
+      ).toBeTruthy(),
+    );
+  });
+
+  it("reports budget maintenance failures", async () => {
+    sendMessageMock.mockRejectedValueOnce(new Error("sw unavailable"));
+    render(() => <OptionsApp />);
+    const globalCap = await screen.findByLabelText("Global cap (MB)");
+    await vi.waitFor(() => expect((globalCap as HTMLInputElement).value).toBe("500"));
+
+    await fireEvent.change(globalCap, { target: { value: "4" } });
 
     await vi.waitFor(() =>
       expect(
