@@ -28,9 +28,9 @@
 #                -> 422-tolerant single COMMENT POST
 #
 # Every stage is env-overridable so it can be exercised with stub `goose`/`gh`
-# binaries on PATH (see scripts/test/run-pr-review-tests.sh) and a pure jq unit
-# test for the deterministic core (scripts/synthesize.jq). Live posting needs
-# REPO / PR / HEAD_SHA / GH_TOKEN and a real NANOGPT_API_KEY (CI only).
+# binaries on PATH and a pure jq unit test for the deterministic core
+# (scripts/synthesize.jq). Live posting needs REPO / PR / HEAD_SHA / GH_TOKEN
+# and a real NANOGPT_API_KEY (CI only).
 
 set -euo pipefail
 
