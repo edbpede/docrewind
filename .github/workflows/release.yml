@@ -1,0 +1,67 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Phase 7 release packaging. Tag-triggered: builds both MV3 extensions from the
+# committed lockfile, audits the SHIPPED bytes, emits checksums, and uploads the
+# artifacts. This is the packaging counterpart to ci.yml's test job — kept in its
+# own workflow so a tag push (not every PR) drives a full release build.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: build · zip · verify-manifest · checksums (both browsers)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Exact Bun pin — same version the build provenance records (docs/RELEASE.md).
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Install dependencies (frozen lockfile)
+        run: bun install --frozen-lockfile
+
+      - name: Prepare WXT
+        run: bun run postinstall
+
+      # Build + package both browsers from the one codebase.
+      - name: Build & zip Chrome MV3
+        run: bun run build && bun run zip
+      - name: Build & zip Firefox MV3
+        run: bun run build:firefox && bun run zip:firefox
+
+      # Re-assert the privacy/permission invariant on the zipped artifacts.
+      - name: Verify built manifests
+        run: bash scripts/verify-manifest.sh
+
+      # Same-environment per-file determinism gate (see script header for scope).
+      - name: Verify build determinism
+        run: bash scripts/verify-reproducible-build.sh
+
+      # Record provenance + emit SHA256SUMS over the shipped zips.
+      - name: Build provenance
+        run: |
+          echo "bun: $(bun --version)"
+          echo "git: ${GITHUB_SHA}"
+          echo "date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "bun.lock sha256: $(sha256sum bun.lock | awk '{print $1}')"
+      - name: Checksums
+        run: bash scripts/checksums.sh
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: docrewind-extensions
+          path: |
+            .output/*.zip
+            .output/SHA256SUMS
+          if-no-files-found: error

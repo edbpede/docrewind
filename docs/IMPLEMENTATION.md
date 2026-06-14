@@ -404,27 +404,29 @@ This plan **follows `.augment/rules/bun-solid-pro.md`** as the authoritative sou
 
 ### Tasks
 
-- [ ] Deterministic build:
-  - [ ] Pin the toolchain: record exact Bun version (and any Node version) in `docs/STACK.md`/CI; build from `bun install --frozen-lockfile`.
-  - [ ] `bun run build` (Chromium MV3) and `bun run build:firefox` (Firefox MV3 event page); confirm both outputs from one codebase.
-  - [ ] Verify the build is **reproducible** from the committed lockfile (rebuild + diff); minification allowed **with sources**, obfuscation prohibited (PRD §11.4).
-- [ ] Packaging:
-  - [ ] `bun run zip` and `bun run zip:firefox` to produce store-ready archives in `.output/`.
-  - [ ] Generate and publish **SHA-256 checksums** for each artifact; record build provenance.
-- [ ] Manifest/permissions verification on the built artifacts:
-  - [ ] Confirm generated `manifest.json` declares only `host_permissions: ["*://docs.google.com/*"]` and `storage` (plus WXT dev-only additions absent from production builds), with no `<all_urls>` and no remote code.
-  - [ ] Confirm the Firefox build carries `browser_specific_settings.gecko.id` and the correct event-page background.
-- [ ] Store-submission prep (PRD §16 Phase 4 / §21.5) — prepare but do not necessarily submit in MVP:
-  - [ ] CWS single-purpose statement, "no remote code" declaration, `docs.google.com` host-permission justification (local-only processing).
-  - [ ] AMO source-submission README enabling a reviewer to rebuild from source + lockfile and diff against the artifact.
-  - [ ] Document the `activeTab`/optional-permission fallback in case a store rejects the standing host permission (PRD §12).
+- [x] Deterministic build:
+  - [x] Pin the toolchain: record exact Bun version (and any Node version) in `docs/STACK.md`/CI; build from `bun install --frozen-lockfile`. *(Bun 1.3.14 pinned in `docs/STACK.md`, `docs/RELEASE.md`, both CI workflows.)*
+  - [x] `bun run build` (Chromium MV3) and `bun run build:firefox` (Firefox MV3 event page); confirm both outputs from one codebase.
+  - [x] Verify the build is **reproducible** from the committed lockfile (rebuild + diff); minification allowed **with sources**, obfuscation prohibited (PRD §11.4). *(`scripts/verify-reproducible-build.sh` green — same-environment per-file content determinism; cross-machine byte-repro = §0.9 stretch, see `docs/RELEASE.md`. No-obfuscation/readable-`-sources.zip` asserted by `scripts/verify-manifest.sh`. The UnoCSS theme-var ordering that broke determinism is normalized in `uno.config.ts`.)*
+- [x] Packaging:
+  - [x] `bun run zip` and `bun run zip:firefox` to produce store-ready archives in `.output/`.
+  - [x] Generate and publish **SHA-256 checksums** for each artifact; record build provenance. *(`scripts/checksums.sh` → `.output/SHA256SUMS`; provenance in `docs/RELEASE.md` + `release.yml`.)*
+- [x] Manifest/permissions verification on the built artifacts:
+  - [x] Confirm generated `manifest.json` declares only `host_permissions: ["*://docs.google.com/*"]` and `storage` (plus WXT dev-only additions absent from production builds), with no `<all_urls>` and no remote code. *(`scripts/verify-manifest.sh`, on the zipped bytes.)*
+  - [x] Confirm the Firefox build carries `browser_specific_settings.gecko.id` and the correct event-page background.
+- [x] Store-submission prep (PRD §16 Phase 4 / §21.5) — prepare but do not necessarily submit in MVP:
+  - [x] CWS single-purpose statement, "no remote code" declaration, `docs.google.com` host-permission justification (local-only processing). *(`docs/store-submission/cws-listing.md`.)*
+  - [x] AMO source-submission README enabling a reviewer to rebuild from source + lockfile and diff against the artifact. *(`docs/store-submission/amo-source-readme.md`.)*
+  - [x] Document the `activeTab`/optional-permission fallback in case a store rejects the standing host permission (PRD §12). *(Worded as contingency in `cws-listing.md` — not implemented.)*
+- [ ] **(UNCHECKED — release blocker, escalated)** CWS 128px icon + full icon set. No icons are shipped (`public/icon/` absent; `manifest` has no `icons`/`action`). Routed to the `frontend-design` lane — no placeholder PNGs shipped (surface-and-defer; mirrors the Phase 6 / Firefox-gate precedent).
 
 ### Validation / acceptance criteria
 
-- [ ] Two artifacts (Chromium MV3, Firefox MV3) build cleanly from `--frozen-lockfile`; a rebuild reproduces matching output.
-- [ ] Published SHA-256 checksums match the artifacts; provenance recorded.
-- [ ] Built manifests pass the permission/no-remote-code review; Firefox build loads via `web-ext` and activates on `docs.google.com`.
-- [ ] AMO source-submission README + CWS statements exist and are accurate.
+- [x] Two artifacts (Chromium MV3, Firefox MV3) build cleanly from `--frozen-lockfile`; a rebuild reproduces matching output. *(`scripts/verify-reproducible-build.sh` green — same-environment per-file content determinism; cross-machine byte-repro is the named §0.9 stretch goal, `docs/RELEASE.md`.)*
+- [x] Published SHA-256 checksums match the artifacts; provenance recorded. *(`scripts/checksums.sh` + `docs/RELEASE.md`.)*
+- [x] Built manifests pass the permission/no-remote-code review. *(`scripts/verify-manifest.sh` green on both zipped artifacts.)*
+- [ ] **(UNCHECKED — release gate, escalated)** Firefox build loads via `web-ext run` and activates on `docs.google.com`. Firefox is absent in dev/CI; `web-ext lint` (`bun run lint:firefox`) runs and is green, but the live load/activate is manual — execute `docs/firefox-validation.md` on a machine with Firefox. (Mirrors the Phase 6 precedent above.)
+- [x] AMO source-submission README + CWS statements exist and are accurate. *(`docs/store-submission/`.)*
 
 ---
 

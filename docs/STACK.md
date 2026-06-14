@@ -35,13 +35,16 @@ might reach for:
 
 ## Build-provenance pin (net-new, for Phase 7)
 
-- **Bun 1.3.14 — exact, not a range.** Phase 7 requires deterministic, reproducible
-  builds from the committed `bun.lock` via `bun install --frozen-lockfile`, and
-  AMO source review rebuilds from source + lockfile and diffs against the shipped
-  artifact (PRD §11.4). Record this exact Bun version in CI and release provenance
-  so the rebuild is bit-reproducible. (The guidelines' table lists Bun 1.3.14 as
-  the snapshot version; this entry promotes it to an exact release-gate pin and
-  states *why* an exact value, not a range, is required.)
+- **Bun 1.3.14 — exact, not a range.** Phase 7 requires builds that are
+  **deterministic from the committed `bun.lock` (same-environment)** via
+  `bun install --frozen-lockfile`, and AMO source review rebuilds from source +
+  lockfile and diffs against the shipped artifact (PRD §11.4). Record this exact
+  Bun version in CI and release provenance so a same-environment rebuild is
+  per-file content-deterministic; **cross-machine byte-for-byte reproducibility is
+  a PRD §0.9 stretch goal**, documented in `docs/RELEASE.md`, not a shipped
+  guarantee. (The guidelines' table lists Bun 1.3.14 as the snapshot version; this
+  entry promotes it to an exact release-gate pin and states *why* an exact value,
+  not a range, is required.)
 
 ## Target WXT directory layout
 

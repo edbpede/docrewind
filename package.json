@@ -1,5 +1,6 @@
 {
   "name": "docrewind",
+  "version": "0.1.0",
   "description": "Local-first Google Docs revision-replay browser extension.",
   "private": true,
   "type": "module",
@@ -10,6 +11,7 @@
     "build:firefox": "wxt build -b firefox",
     "zip": "wxt zip",
     "zip:firefox": "wxt zip -b firefox",
+    "lint:firefox": "web-ext lint --source-dir .output/firefox-mv3",
     "compile": "tsc --noEmit",
     "test": "vitest",
     "test:run": "vitest run",
@@ -43,6 +45,7 @@
     "unocss": "66.7.0",
     "vite-plugin-solid": "2.11.12",
     "vitest": "4.1.8",
+    "web-ext": "10.4.0",
     "wxt": "0.20.26"
   }
 }
