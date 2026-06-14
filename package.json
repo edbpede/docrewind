@@ -14,6 +14,7 @@
     "test": "vitest",
     "test:run": "vitest run",
     "test:logic": "bun test ./lib/decoder ./lib/reconstruction ./lib/timeline ./lib/domain ./lib/protocol ./lib/retrieval ./lib/worker ./lib/docs-url ./lib/replay ./lib/i18n ./lib/theme.test.ts",
+    "test:coverage": "bun test --coverage ./lib/decoder ./lib/reconstruction",
     "test:e2e": "playwright test",
     "check": "biome check --write .",
     "hooks": "prek run --all-files",

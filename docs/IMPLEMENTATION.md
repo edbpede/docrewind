@@ -361,7 +361,7 @@ This plan **follows `.augment/rules/bun-solid-pro.md`** as the authoritative sou
 - [ ] `vite-plugin-solid` emits **no** reactivity warnings during `bun run dev`/`bun run build`.
 - [ ] `bun run build` includes the replay page, options page, and content script with UnoCSS styles applied (the dev-mode `uno.css`-not-found warning is expected and ignored).
 - [ ] Keyboard-only walkthrough of replay controls succeeds; focus is visible; reduced-motion is honored.
-- [ ] Component tests (Phase 6) pass for core interactions (play/pause, scrub, speed change).
+- [x] Component tests (Phase 6) pass for core interactions (play/pause, scrub, speed change).
 
 ---
 
@@ -371,30 +371,30 @@ This plan **follows `.augment/rules/bun-solid-pro.md`** as the authoritative sou
 
 ### Tasks
 
-- [ ] Pure-logic tests under Bun (`*.test.ts` colocated with `lib/parser`/`lib/decoder`/`lib/reconstruction`/`lib/timeline`):
-  - [ ] Fixture-based decoder tests against sanitized capture fixtures (`is`/`ds`/`mlti`/suggestion ops, multi/compound, unknown-op isolation).
-  - [ ] Reconstruction tests asserting end-of-timeline text equals current text for the simple fixture corpus.
-  - [ ] Timeline tests: session grouping, large-insertion detection, deletion events, pause detection (deterministic).
-  - [ ] Run with `bun test ./lib/...` (wired as `test:logic`). Use `bun test` **only** for DOM-free logic — never for Solid components.
-- [ ] Vitest tests (`*.test.tsx`/`*.test.ts` for components, storage, browser APIs):
-  - [ ] Solid component tests with `@solidjs/testing-library` — `render(() => <Comp/>)`, drive updates via signals/`fireEvent`, assert via roles/`toHaveTextContent`.
-  - [ ] Storage tests with `fakeBrowser` (`beforeEach(() => fakeBrowser.reset())`): settings defaults/updates; `idb` migrations; cache invalidation on parser-version bump; LRU pruning order (raw first).
-  - [ ] Messaging tests for the typed `ProtocolMap`.
-- [ ] Playwright E2E (`e2e/*.spec.ts`, Chromium-only):
-  - [ ] Use the persistent-context fixture loading `.output/chrome-mv3`; resolve `extensionId` from the service worker.
-  - [ ] Smoke: open the replay page, confirm it renders; (with a fixture/mocked retrieval) confirm play/scrub work.
-  - [ ] Run after `bun run build`.
-- [ ] Firefox validation (no automated E2E): document a manual exploratory checklist + `web-ext` smoke steps (load, activate, retrieve, replay) in `docs/firefox-validation.md` (PRD §9.10/§11.5).
-- [ ] CI network-isolation audit: add a check (CI or test harness) asserting zero non-Google network requests during processing (PRD §17).
-- [ ] Coverage: configure Vitest v8 coverage; target **≥85% line coverage on parser/reconstruction** modules (PRD §17).
+- [x] Pure-logic tests under Bun (`*.test.ts` colocated with `lib/decoder`/`lib/reconstruction`/`lib/timeline` — note: there is **no `lib/parser`**; "parser" maps to `lib/decoder`):
+  - [x] Fixture-based decoder tests against sanitized capture fixtures (`is`/`ds`/`mlti`/suggestion ops, multi/compound, unknown-op isolation incl. position+timing survival on the bearing revision).
+  - [x] Reconstruction tests asserting end-of-timeline text equals current text for the simple fixture corpus.
+  - [x] Timeline tests: session grouping, large-insertion detection, deletion events, pause detection (deterministic).
+  - [x] Run with `bun test ./lib/...` (wired as `test:logic`). Use `bun test` **only** for DOM-free logic — never for Solid components.
+- [x] Vitest tests (`*.test.tsx`/`*.test.ts` for components, storage, browser APIs):
+  - [x] Solid component tests with `@solidjs/testing-library` — `render(() => <Comp/>)`, drive updates via signals/`fireEvent`, assert via roles/`toHaveTextContent`.
+  - [x] Storage tests with `fakeBrowser` (`beforeEach(() => fakeBrowser.reset())`): settings defaults/updates; `idb` migrations; cache invalidation on parser-version bump; LRU pruning order (raw first).
+  - [x] Messaging tests for the typed `ProtocolMap`.
+- [x] Playwright E2E (`e2e/*.spec.ts`, Chromium-only):
+  - [x] Use the persistent-context fixture loading `.output/chrome-mv3`; resolve `extensionId` from the service worker.
+  - [x] Smoke: open the replay page, confirm it renders; (with a fixture/mocked retrieval) confirm play/scrub work. (`e2e/replay-smoke.spec.ts` — SW-aware fulfillment of the real `docs.google.com` flow from `CAPTURED_SIMPLE_DOC`; drives play + keyboard scrub and asserts the reconstructed final text.)
+  - [x] Run after `bun run build`.
+- [x] Firefox validation (no automated E2E): document a manual exploratory checklist + `web-ext` smoke steps (load, activate, retrieve, replay) in `docs/firefox-validation.md` (PRD §9.10/§11.5). *(Doc authored; the checklist itself must still be executed once against a real `build:firefox` artifact — see acceptance below.)*
+- [x] CI network-isolation audit: `e2e/network-isolation.spec.ts` (SW-aware `context.on("request")` observation, asserts the complement — zero public non-Google hosts) + the static guard `scripts/check-no-foreign-hosts.sh`, both wired into `.github/workflows/ci.yml` (PRD §17).
+- [x] Coverage: **≥85% line/function coverage on decoder/reconstruction** modules, enforced by `test:coverage` (PRD §17). *(Deviation #1: gated via **Bun coverage** — `bunfig.toml [test].coverageThreshold` + `coveragePathIgnorePatterns` scoping the report to `lib/decoder`+`lib/reconstruction` — **not** Vitest v8, because those modules are Bun-tested and excluded from Vitest by design. Vitest v8 coverage stays configured for the component/storage tier.)*
 
 ### Validation / acceptance criteria
 
-- [ ] `bun run test:logic` (Bun) is green; `bun run test:run` (Vitest) is green; `bun run test:e2e` (Playwright) is green against a fresh `.output/chrome-mv3`.
-- [ ] Parser/reconstruction line coverage ≥85% (report captured).
-- [ ] No Solid component test runs under `bun test` (verify test locations/config).
-- [ ] Firefox manual + `web-ext` checklist exists and has been executed at least once on a real build.
-- [ ] Network-isolation audit passes (zero non-Google requests).
+- [x] `bun run test:logic` (Bun) is green; `bun run test:run` (Vitest) is green; `bun run test:e2e` (Playwright) is green against a fresh `.output/chrome-mv3`.
+- [x] Parser/reconstruction line coverage ≥85% (report captured). *(Decoder/reconstruction scoped report: decode.ts 96.25%, reconstruction 86.4–100% line, 100% function; enforced by `test:coverage`. "Parser" = `lib/decoder`; coverage is Bun, not Vitest — Deviation #1.)*
+- [x] No Solid component test runs under `bun test` (verified: Vitest excludes the pure dirs; `bun test` covers DOM-free logic only; `check-pure-core` green).
+- [ ] Firefox manual + `web-ext` checklist exists and has been executed at least once on a real build. *(`docs/firefox-validation.md` exists; the manual run is a **release gate** and has **not** been executed yet — CI is Chromium-only and cannot perform it.)*
+- [x] Network-isolation audit passes (zero non-Google requests). *(Runtime: `e2e/network-isolation.spec.ts`; static: `scripts/check-no-foreign-hosts.sh`.)*
 
 ---
 

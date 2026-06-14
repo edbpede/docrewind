@@ -115,6 +115,37 @@ describe("decodeOperations — unknown-op isolation + privacy (R5)", () => {
     expect(JSON.stringify(decoded)).not.toContain(secret);
   });
 
+  test("isolates an unknown op WITHOUT dropping its revision position + timing", () => {
+    // The unknown op must degrade to an opaque placeholder while the revision it
+    // rode in on keeps its position (revisionId) and timing (time/session/user)
+    // intact — the decode never aborts and never loses the surrounding metadata.
+    const decoded = decodeOperations({
+      changelog: [
+        {
+          ty: "zz_future_op",
+          payload: "ignored",
+          revision_id: 7,
+          user_id: "u-9",
+          session_id: "s-9",
+          time: 1718000000000,
+        },
+      ],
+    });
+    expect(decoded).toHaveLength(1);
+    const rev = decoded[0];
+    expect(rev).toMatchObject({
+      revisionId: 7 as never,
+      userId: "u-9",
+      sessionId: "s-9",
+      time: 1718000000000,
+    });
+    const op = rev?.operations[0];
+    expect(op?.ty).toBe("unknown");
+    if (op?.ty !== "unknown") return;
+    // The placeholder carries the revisionId so replay keeps the slot in place.
+    expect(op.revisionId).toBe(7 as never);
+  });
+
   test("degrades a known op with malformed fields to UnknownOp", () => {
     const op = onlyOp(entry({ ty: "is", s: "x" })); // missing ibi
     expect(op.ty).toBe("unknown");

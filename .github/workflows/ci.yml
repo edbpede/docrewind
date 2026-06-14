@@ -1,0 +1,82 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Phase 6 test CI. Runs the three-tier test split + coverage gate + network
+# isolation audit. Phase 7 EXTENDS this file with packaging/provenance (zip,
+# signing, store upload) — it does NOT recreate it. Keep packaging out of here.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: compile · check · test (logic/coverage/vitest) · build · e2e
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pin Bun to the version the project targets (.augment/rules + @types/bun).
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # Generate .wxt/ types so tsc + the build resolve WXT aliases.
+      - name: Prepare WXT
+        run: bun run postinstall
+
+      - name: Typecheck
+        run: bun run compile
+
+      # Non-writing lint/format in CI (the local `check` uses --write).
+      - name: Lint & format check
+        run: bunx biome ci .
+
+      # Static network-isolation guard (Phase 6 WI-5 / PRD §17): defense-in-depth
+      # static lint complementing the runtime e2e audit. Exits non-zero if any
+      # source line names a non-Google network target; CI gates on that exit code.
+      - name: Network-isolation static guard
+        run: bash scripts/check-no-foreign-hosts.sh
+
+      # Coverage-gate disjointness guard (Decision D1): asserts no dir gated by
+      # test:coverage is also in bunfig.toml's coveragePathIgnorePatterns, which
+      # would make the per-file floor vacuous. Catches the one silent-drift mode;
+      # see scripts/check-coverage-gate-disjoint.sh for why complement-equality
+      # is NOT the right invariant. Exits non-zero on overlap; CI gates on it.
+      - name: Coverage-gate disjointness guard
+        run: bash scripts/check-coverage-gate-disjoint.sh
+
+      - name: Pure-logic tests (Bun)
+        run: bun run test:logic
+
+      # Coverage gate (Decision D1): >=85% line/function on decoder+reconstruction.
+      # Bun reads the threshold from bunfig.toml [test]; a real miss exits non-zero.
+      - name: Coverage gate (decoder/reconstruction)
+        run: bun run test:coverage
+
+      - name: Component/storage tests (Vitest)
+        run: bun run test:run
+
+      - name: Build Chrome MV3 extension
+        run: bun run build
+
+      # Channel parity: e2e/fixtures.ts pins `channel: "chromium"`; this provisions
+      # exactly that Playwright-bundled Chromium so local/CI behavior matches.
+      - name: Install Playwright Chromium
+        run: bunx playwright install --with-deps chromium
+
+      # E2E incl. replay-smoke + network-isolation audit, against .output/chrome-mv3.
+      - name: E2E tests (Playwright, Chromium)
+        run: bun run test:e2e

@@ -1,3 +1,45 @@
 # Pin every added dependency to an exact version (determinism is a Phase 2 driver).
 [install]
 exact = true
+
+# Coverage gate for the pure-logic tier (Phase 6 / Decision D1). Keys live directly
+# under [test] — Bun has no [test.coverage] table. Empirically verified on Bun 1.3.14:
+#   • The metric keys are the PLURAL `lines`/`functions`/`statements`. The singular
+#     `line`/`function` form parses but is silently ignored — a VACUOUS gate.
+#   • When honored, the threshold is applied PER-FILE, not to the aggregate. So every
+#     file the coverage run loads must clear the bar, including modules that the
+#     decoder/reconstruction tests only import transitively (domain/i18n/timeline/…).
+# To gate exactly the decoder + reconstruction modules (the plan's "parser/reconstruction"
+# target), `coveragePathIgnorePatterns` drops those transitive imports from the report so
+# the per-file floor applies only to the modules under test. `statements` is omitted on
+# purpose; `lines` + `functions` are the plan's stated metrics.
+# The threshold is enforced only when `--coverage` is passed, so `test:logic` (no flag)
+# is unaffected; `test:coverage` enforces the floor and exits non-zero on a real miss.
+# Sync requirement: the GATED tier is defined POSITIVELY by the path args of the
+# `test:coverage` script in package.json (currently `./lib/decoder ./lib/reconstruction`)
+# and NEGATIVELY by the ignore list below. Bun has no inclusion-side key, so when changing
+# the `test:coverage` paths, also decide here whether the affected tier is gated (leave it
+# out) or excluded (add it to coveragePathIgnorePatterns). Keep the two lists in agreement.
+# Enforced: scripts/check-coverage-gate-disjoint.sh (CI) fails if a gated dir is suppressed
+# WHOLESALE here (a `**/lib/<dir>/**` glob — a vacuous gate). Single-file exemptions (the
+# escape hatch below, e.g. `**/lib/decoder/thin-adapter.ts`) are permitted and do NOT trip it.
+# The lists are NOT complements, so that disjointness — not complement-equality — is the
+# checkable invariant.
+# Failure modes & escape hatch: a NEW file added inside the gated tier (./lib/decoder or
+# ./lib/reconstruction) is subject to the per-file floor from its first commit — there is no
+# aggregate grace, so a partially-covered helper fails the build even when overall coverage is
+# well above 85%. Bun 1.3.14 has NO per-file threshold-override key (no coverageThresholdOverrides
+# or per-path map). To legitimately exempt a file that cannot meet the floor (thin adapter,
+# generated, or scaffolding), add its specific path glob to `coveragePathIgnorePatterns` below
+# with a one-line justification — do NOT lower the global `coverageThreshold`.
+[test]
+coverageSkipTestFiles = true
+coveragePathIgnorePatterns = [
+  "**/lib/domain/**",
+  "**/lib/i18n/**",
+  "**/lib/protocol/**",
+  "**/lib/timeline/**",
+  "**/lib/worker/**",
+  "**/lib/fixtures/**",
+]
+coverageThreshold = { lines = 0.85, functions = 0.85 }

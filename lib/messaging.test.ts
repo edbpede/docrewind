@@ -105,4 +105,16 @@ describe("messaging ProtocolMap", () => {
       reclaimedBytes: 0,
     });
   });
+
+  it("round-trips cancelRetrieval with the typed docId payload", async () => {
+    const docId = asDocId("docCANCEL");
+    let received: string | null = null;
+    onMessage("cancelRetrieval", ({ data }) => {
+      received = data.docId;
+    });
+
+    await sendMessage("cancelRetrieval", { docId });
+
+    expect(received).toBe("docCANCEL");
+  });
 });

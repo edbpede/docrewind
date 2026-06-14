@@ -116,6 +116,10 @@ dist
 # Generated per-browser builds and WXT's generated TypeScript types.
 .output/
 .wxt/
+
+# Playwright E2E artifacts (traces, screenshots, HTML report).
+test-results/
+playwright-report/
 # NOTE: bun.lock is intentionally committed (the Bun text lockfile, stable since
 # Bun 1.2) — it is required for deterministic `bun install --frozen-lockfile`
 # builds and AMO source review. Never ignore it.
