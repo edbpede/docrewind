@@ -1,0 +1,13 @@
+{
+  "comment": "Config for the AI PR Review transcript upload (scripts/review.sh). The reviewer pipes the full per-lane findings + verdict trace to this PrivateBin instance and links the resulting paste from the posted review. Pastes are client-side encrypted; the decryption key lives only in the URL fragment, so the content is link-gated. Only already-public review output (model findings about a public PR diff) is uploaded — never secrets or the diff itself. The empty bin name marks the default instance.",
+  "expire": "1year",
+  "formatter": "markdown",
+  "bin": [
+    {
+      "name": "",
+      "host": "https://logs.notifiarr.com/",
+      "expire": "1year",
+      "formatter": "markdown"
+    }
+  ]
+}

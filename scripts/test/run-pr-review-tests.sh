@@ -16,6 +16,9 @@
 #   AC11     deterministic safety overlay survives a contradictory synth prose
 #   AC12     synthesizer failure -> deterministic fallback posts, logs note
 #   AC6      scripts/check-pr-review-workflow.sh exits 0
+#   AC14     reviewer transcript: collapsed <details> recap + best-effort paste
+#            link (stub privatebin); upload-failure and disabled paths degrade to
+#            a recap-only body with the review still posting
 #
 # Usage: bash scripts/test/run-pr-review-tests.sh   (exits non-zero on any FAIL)
 
@@ -33,6 +36,12 @@ RECIPE_GUARD="$ROOT/scripts/check-pr-review-recipes.sh"
 PATCH="$FIX/multi.patch"
 
 chmod +x "$STUBS"/* 2>/dev/null || true
+
+# Keep the whole suite offline: disable the transcript paste by default so no
+# test reaches logs.notifiarr.com even on a machine with a real `privatebin` on
+# PATH. The dedicated AC14 block re-enables it with the stub. The always-on
+# per-lane recap is unaffected (it is built from local artifacts).
+export TRANSCRIPT_ENABLED=0
 
 PASS=0; FAIL=0
 ok() { echo "  PASS: $1"; PASS=$((PASS + 1)); }
@@ -226,6 +235,67 @@ printf 'version: "1.0.0"\nextensions:   [ ]  \n' > "$wd/spaced.yaml"
 bash "$RECIPE_GUARD" "$wd/spaced.yaml" >/dev/null 2>&1 || neg_ok=0
 if [ "$neg_ok" -eq 1 ]; then ok "AC13 guard rejects missing/commented/non-empty extensions, accepts whitespaced []"
 else no "AC13 guard did not reject a tool-enabled recipe"; fi
+
+echo "== AC14  reviewer transcript: collapsed recap + best-effort paste link =="
+# Success: stub privatebin echoes a paste URL. The posted body must gain the
+# collapsed <details> recap (both lanes) + the link, exactly one marker must
+# survive, and the uploaded transcript must carry both lanes + the verdict trace.
+wd=$(mktmp); rec="$wd/transcript.captured.md"
+PATH="$STUBS:$PATH" CODE_REVIEW_MODELS="m1" ARCHITECT_MODELS="m1" SYNTH_MODELS="m1" \
+  STUB_CODE_OUT="$FIX/code.bugs.json" STUB_ARCH_OUT="$FIX/arch.block.json" STUB_SYNTH_OUT="$FIX/synth.good.json" \
+  TRANSCRIPT_ENABLED=1 PRIVATEBIN_BIN="$STUBS/privatebin" PRIVATEBIN_CONFIG="$ROOT/.github/privatebin.json" \
+  STUB_PB_RECORD="$rec" STUB_PB_URL="https://logs.notifiarr.com/?pasteid#KeY123" \
+  WORKDIR="$wd" DIFF_FILE="$PATCH" AWK_SCRIPT="$AWK" HEAD_SHA="abc" SKIP_POST=1 \
+  bash "$REVIEW" > "$wd/run.log" 2>&1 || true
+body=$(jq -r '.body' "$wd/payload.json" 2>/dev/null)
+markers=$(printf '%s' "$body" | grep -c 'goose-pr-reviewer')
+if printf '%s' "$body" | grep -q '🔍 Reviewer internals' \
+   && printf '%s' "$body" | grep -q 'https://logs.notifiarr.com/?pasteid#KeY123' \
+   && printf '%s' "$body" | grep -q '| Code review |' \
+   && printf '%s' "$body" | grep -q '| Architect |' \
+   && printf '%s' "$body" | grep -q '| Synthesizer |' \
+   && [ "$markers" = "1" ] \
+   && [ -s "$rec" ] \
+   && grep -q 'Verdict derivation' "$rec" \
+   && grep -q 'Lane 1 — Code review' "$rec" \
+   && grep -q 'Lane 2 — Architect' "$rec" \
+   && grep -q 'Lane 3 — Synthesizer' "$rec"; then
+  ok "AC14 transcript: details+recap+link posted, one marker, full transcript carries both lanes + verdict trace"
+else no "AC14 transcript success (markers=$markers rec=$([ -s "$rec" ] && echo yes || echo no))"; fi
+
+# Graceful degradation: the paste upload fails -> the review still posts, the
+# recap is still present, but there is NO link (and a recap-only note instead),
+# and the run logs the failure. Exit 0.
+wd=$(mktmp); rc=0
+PATH="$STUBS:$PATH" CODE_REVIEW_MODELS="m1" ARCHITECT_MODELS="m1" SYNTH_MODELS="m1" \
+  STUB_CODE_OUT="$FIX/code.bugs.json" STUB_ARCH_OUT="$FIX/arch.block.json" STUB_SYNTH_OUT="$FIX/synth.good.json" \
+  TRANSCRIPT_ENABLED=1 PRIVATEBIN_BIN="$STUBS/privatebin" PRIVATEBIN_CONFIG="$ROOT/.github/privatebin.json" \
+  STUB_PB_FAIL=1 \
+  WORKDIR="$wd" DIFF_FILE="$PATCH" AWK_SCRIPT="$AWK" HEAD_SHA="abc" SKIP_POST=1 \
+  bash "$REVIEW" > "$wd/run.log" 2>&1 || rc=$?
+body=$(jq -r '.body' "$wd/payload.json" 2>/dev/null)
+if [ "$rc" = "0" ] && [ -s "$wd/payload.json" ] \
+   && printf '%s' "$body" | grep -q '🔍 Reviewer internals' \
+   && ! printf '%s' "$body" | grep -q 'logs.notifiarr.com' \
+   && printf '%s' "$body" | grep -q 'transcript paste unavailable' \
+   && grep -q 'paste upload failed' "$wd/run.log"; then
+  ok "AC14 transcript upload failure degrades to recap-only; review still posts, logged, exit 0"
+else no "AC14 transcript degrade (rc=$rc)"; fi
+
+# Disabled (default suite state): no privatebin invocation, no link, recap present.
+wd=$(mktmp)
+PATH="$STUBS:$PATH" CODE_REVIEW_MODELS="m1" ARCHITECT_MODELS="m1" SYNTH_MODELS="m1" \
+  STUB_CODE_OUT="$FIX/code.bugs.json" STUB_ARCH_OUT="$FIX/arch.block.json" STUB_SYNTH_OUT="$FIX/synth.good.json" \
+  PRIVATEBIN_BIN="$STUBS/privatebin" STUB_PB_RECORD="$wd/should-not-exist.md" \
+  WORKDIR="$wd" DIFF_FILE="$PATCH" AWK_SCRIPT="$AWK" HEAD_SHA="abc" SKIP_POST=1 \
+  bash "$REVIEW" > "$wd/run.log" 2>&1 || true
+body=$(jq -r '.body' "$wd/payload.json" 2>/dev/null)
+if printf '%s' "$body" | grep -q '🔍 Reviewer internals' \
+   && ! printf '%s' "$body" | grep -q 'logs.notifiarr.com' \
+   && [ ! -f "$wd/should-not-exist.md" ] \
+   && grep -q 'transcript: disabled' "$wd/run.log"; then
+  ok "AC14 TRANSCRIPT_ENABLED=0 (suite default): recap shown, paste never invoked"
+else no "AC14 disabled gate"; fi
 
 echo
 echo "RESULT: $PASS passed, $FAIL failed"

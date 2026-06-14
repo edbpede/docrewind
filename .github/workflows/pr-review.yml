@@ -9,6 +9,13 @@
 # or build tool, and do not check out `pull_request.head` —
 # scripts/check-pr-review-workflow.sh fails CI on either. The review is
 # COMMENT-only and can never gate a merge.
+#
+# EGRESS: review.sh additionally uploads the reviewer transcript (per-lane
+# findings + verdict trace) to a client-side-encrypted PrivateBin paste and links
+# it from the posted review. This is the only outbound data beyond the review
+# itself; it contains only model findings about an already-public PR diff (never
+# secrets, never the diff), the paste is link-gated (decryption key in the URL
+# fragment), and the upload is best-effort — a failure never blocks the review.
 name: AI PR Review
 
 on:
@@ -38,6 +45,22 @@ jobs:
             | CONFIGURE=false GOOSE_BIN_DIR="$HOME/.local/bin" bash
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
+      - name: Install privatebin CLI (transcript paste; version-pinned + checksum-verified)
+        # Pinned release + SHA-512 check so a compromised download cannot run on
+        # the runner. No build tool is invoked (curl/tar/install only) — the
+        # workflow guard forbids package managers on pull_request_target.
+        env:
+          PB_VERSION: "2.2.1"
+          PB_SHA512: "94871cfbad9e4ebeac0fcc5a33aa41d899aedc5ba455fd4957eea64c8c2b1901a4b0d34c3fe535c239b91a9101e35a723bcfa31425e6ddf0105e7549e997b74a"
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          url="https://github.com/gearnode/privatebin/releases/download/v${PB_VERSION}/privatebin_Linux_x86_64.tar.gz"
+          curl -fsSL -o /tmp/privatebin.tar.gz "$url"
+          echo "${PB_SHA512}  /tmp/privatebin.tar.gz" | sha512sum -c -
+          tar -xzf /tmp/privatebin.tar.gz -C /tmp privatebin
+          install -m 0755 /tmp/privatebin "$HOME/.local/bin/privatebin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
       - name: Gather diff (diff-only; PR title/body are NOT fed to the model)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -60,4 +83,9 @@ jobs:
           REPO: ${{ github.repository }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Reviewer-transcript paste (best-effort). TRANSCRIPT_ENABLED defaults to
+          # 1 in review.sh; the config points at the logs.notifiarr.com PrivateBin
+          # instance with 1-year retention. A missing CLI/config or a failed upload
+          # degrades to a local recap with no link — it never blocks the review.
+          PRIVATEBIN_CONFIG: .github/privatebin.json
         run: bash scripts/review.sh

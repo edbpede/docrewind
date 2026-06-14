@@ -21,7 +21,10 @@
 #   stage 2    : LLM synthesizer (sequential) -> narrative + curated comments,
 #                whose anchors are re-validated (gate B, anchor-only mode);
 #                on synthesizer failure, deterministic synthesize.jq fallback
-#   assemble   : deterministic body (verdict/banner/watchlist/caveats) + payload
+#   transcript : (best-effort) full per-lane findings + verdict trace uploaded to
+#                a client-side-encrypted PrivateBin paste; linked from a collapsed
+#                <details> block. Disabled/failed upload degrades to a local recap.
+#   assemble   : deterministic body (verdict/banner/watchlist/caveats/recap) + payload
 #                -> 422-tolerant single COMMENT POST
 #
 # Every stage is env-overridable so it can be exercised with stub `goose`/`gh`
@@ -54,6 +57,24 @@ GOOSE_MAX_TURNS="${GOOSE_MAX_TURNS:-5}"
 POST_RETRY_MAX="${POST_RETRY_MAX:-5}"
 SKIP_POST="${SKIP_POST:-0}"   # tests set 1 to stop after building payload.json
 
+# --- transcript paste (best-effort, off by default in tests) -----------------
+# After assembling the review, the full per-lane findings + verdict derivation
+# are uploaded to a client-side-encrypted PrivateBin paste (gearnode/privatebin
+# CLI) and linked from a collapsed <details> block in the posted review, so a
+# reader can inspect "what the lanes discussed" without bloating the comment.
+# This is strictly best-effort: if disabled, if the CLI is absent, if the config
+# is missing, or if the upload fails for any reason, the review still posts —
+# just without the link. Only already-public review output is uploaded (model
+# findings about a public PR diff), never secrets or the diff itself. The offline
+# test suite sets TRANSCRIPT_ENABLED=0 so it never touches the network; the
+# dedicated transcript test flips it on with a stub `privatebin` on PATH.
+TRANSCRIPT_ENABLED="${TRANSCRIPT_ENABLED:-1}"
+PRIVATEBIN_BIN="${PRIVATEBIN_BIN:-privatebin}"
+PRIVATEBIN_CONFIG="${PRIVATEBIN_CONFIG:-.github/privatebin.json}"
+PRIVATEBIN_BIN_NAME="${PRIVATEBIN_BIN_NAME:-}"   # configured bin to target (--bin); empty = default
+PRIVATEBIN_EXPIRE="${PRIVATEBIN_EXPIRE:-1year}"
+PRIVATEBIN_TIMEOUT="${PRIVATEBIN_TIMEOUT:-30}"   # upload wall-clock cap (seconds)
+
 # Priority-ordered model tiers (space-separated); *_MODELS override for tests.
 DEFAULT_CODE_MODELS="deepseek/deepseek-v4-pro-cheaper:thinking xiaomi/mimo-v2.5-pro:thinking minimax/minimax-m3:thinking"
 DEFAULT_ARCH_MODELS="deepseek/deepseek-v4-pro-cheaper:thinking minimax/minimax-m3:thinking"
@@ -85,6 +106,8 @@ SYNTH_FALLBACK_JSON="$WORKDIR/synth.fallback.json"
 BODY_FILE="$WORKDIR/body.md"
 PAYLOAD="$WORKDIR/payload.json"
 POST_ERR="$WORKDIR/post.err"
+TRANSCRIPT_FILE="$WORKDIR/transcript.md"
+PB_ERR="$WORKDIR/privatebin.err"
 
 ESC=$(printf '\033')   # real ESC byte; portable across BSD/GNU sed
 
@@ -277,6 +300,157 @@ build_findings() {
   sed 's/^/  /' "$FINDINGS_JSON" > "$FINDINGS_INDENTED" 2>/dev/null || cp "$FINDINGS_JSON" "$FINDINGS_INDENTED"
 }
 
+# --- per-lane recap (compact, always available from the artifacts) -----------
+# A small glanceable markdown table of each lane's verdict, model, and finding
+# count. Unlike the transcript paste this is built purely from local artifacts,
+# so it renders even when the paste upload is disabled or fails — the reader
+# still sees what each lane concluded without leaving GitHub. Sets RECAP_MD.
+build_recap() {
+  code_row="| Code review | _unavailable_ | — | — |"
+  if [ "$CODE_AVAIL" -eq 1 ]; then
+    code_row=$(jq -r '
+      "| Code review | " + (.recommendation // "?")
+      + " | `" + (.model_used // "?") + "` (tier " + (((.fallback_attempts // 0) + 1) | tostring) + ")"
+      + " | " + ((.comments | length) | tostring) + " |"' "$CODE_JSON" 2>/dev/null \
+      || echo "| Code review | ? | — | — |")
+  fi
+  arch_row="| Architect | _unavailable_ | — | — |"
+  if [ "$ARCH_AVAIL" -eq 1 ]; then
+    arch_row=$(jq -r '
+      "| Architect | " + (.architectural_status // "?")
+      + " | `" + (.model_used // "?") + "` (tier " + (((.fallback_attempts // 0) + 1) | tostring) + ")"
+      + " | " + ((.concerns | length) | tostring) + " |"' "$ARCH_JSON" 2>/dev/null \
+      || echo "| Architect | ? | — | — |")
+  fi
+  if [ "$1" -eq 1 ]; then   # synth_ok
+    synth_row=$(jq -r '
+      "| Synthesizer | curated | `" + (.model_used // "?")
+      + "` (tier " + (((.fallback_attempts // 0) + 1) | tostring) + ")"
+      + " | " + ((.comments | length) | tostring) + " |"' "$SYNTH_JSON" 2>/dev/null \
+      || echo "| Synthesizer | curated | — | — |")
+  else
+    synth_row="| Synthesizer | _deterministic fallback_ | — | — |"
+  fi
+  RECAP_MD=$(printf '%s\n%s\n%s\n%s\n%s\n%s' \
+    "| Lane | Verdict | Model (tier) | Findings |" \
+    "| --- | --- | --- | --- |" \
+    "$code_row" "$arch_row" "$synth_row")
+}
+
+# --- full transcript (uploaded to a paste; the "agents discussing" view) ------
+# Renders every lane's raw structured findings + the deterministic verdict
+# derivation as readable markdown. Written to TRANSCRIPT_FILE; never posted
+# inline (it can be large) — only uploaded and linked. $1 = synth_ok.
+render_lane_code() {   # raw code-review json -> markdown
+  jq -r '
+    "### Lane 1 — Code review\n"
+    + "\n- **Model:** `" + (.model_used // "?") + "` (fallback tier " + (((.fallback_attempts // 0) + 1) | tostring) + ")"
+    + "\n- **Lane recommendation:** " + (.recommendation // "?")
+    + "\n\n**Summary:** " + (.summary // "_(none)_")
+    + "\n\n**Findings (" + ((.comments | length) | tostring) + "):**\n"
+    + ( if (.comments | length) == 0 then "\n_No inline findings._\n"
+        else ( .comments | map(
+            "\n- **[" + (.severity // "?") + " / " + (.category // "?") + " / conf " + (.confidence // "?") + "]** `"
+            + (.path // "?") + ":" + ((.line // 0) | tostring) + " (" + (.side // "?") + ")`\n\n  "
+            + ((.body // "") | gsub("\n"; "\n  "))
+          ) | join("\n") ) + "\n" end )
+  ' "$1" 2>/dev/null || printf '### Lane 1 — Code review\n\n_(artifact unreadable)_\n'
+}
+render_lane_arch() {   # raw architect json -> markdown
+  jq -r '
+    "### Lane 2 — Architect (devil'"'"'s advocate)\n"
+    + "\n- **Model:** `" + (.model_used // "?") + "` (fallback tier " + (((.fallback_attempts // 0) + 1) | tostring) + ")"
+    + "\n- **Architectural status:** " + (.architectural_status // "?")
+    + "\n\n**Summary:** " + (.summary // "_(none)_")
+    + "\n\n**Concerns (" + ((.concerns | length) | tostring) + "):**\n"
+    + ( if (.concerns | length) == 0 then "\n_No architectural concerns._\n"
+        else ( .concerns | map(
+            "\n- **[" + (.status // "?") + " / conf " + (.confidence // "?") + "]**"
+            + (if has("path") and has("line") then " `" + (.path // "?") + ":" + ((.line // 0) | tostring) + " (" + (.side // "RIGHT") + ")`" else " _(non-anchorable)_" end)
+            + "\n\n  " + ((.body // "") | gsub("\n"; "\n  "))
+          ) | join("\n") ) + "\n" end )
+  ' "$1" 2>/dev/null || printf '### Lane 2 — Architect\n\n_(artifact unreadable)_\n'
+}
+build_transcript() {
+  synth_ok="$1"
+  : > "$TRANSCRIPT_FILE"
+  {
+    printf '# AI PR Review — full reviewer transcript\n\n'
+    printf 'PR head: `%s`\n\n' "${HEAD_SHA:-unknown}"
+    printf '**Final recommendation: %s**\n\n' "$FINAL_REC"
+    printf 'Each lane below ran in its own isolated, tool-less `goose run` context. '
+    printf 'The two review lanes ran in parallel; the synthesizer ran last over their '
+    printf 'extracted findings (never the diff). The verdict and this transcript are '
+    printf 'assembled deterministically by `scripts/review.sh` — the models only propose.\n\n'
+    printf -- '---\n\n## Verdict derivation\n\n'
+    printf -- '- Code-review lane recommendation: `%s`\n' "$([ "$CODE_AVAIL" -eq 1 ] && jq -r '.recommendation // "?"' "$CODE_JSON" 2>/dev/null || echo 'unavailable')"
+    printf -- '- Architect lane status: `%s`\n' "$([ "$ARCH_AVAIL" -eq 1 ] && jq -r '.architectural_status // "?"' "$ARCH_JSON" 2>/dev/null || echo 'unavailable')"
+    printf -- '- Deterministic gating rule (`scripts/synthesize.jq`) → **%s**\n' "$FINAL_REC"
+    [ "$ARCH_STATUS" = "BLOCK" ] && printf -- '- ⚠️ Architect BLOCK forced REQUEST_CHANGES.\n'
+    [ -n "$CAVEAT" ] && printf -- '- %s\n' "$CAVEAT"
+    printf '\n---\n\n'
+    if [ "$CODE_AVAIL" -eq 1 ]; then
+      render_lane_code "$CODE_JSON"
+      printf '\n<sub>raw artifact</sub>\n\n```json\n'; jq -S . "$CODE_JSON" 2>/dev/null; printf '\n```\n'
+    else
+      printf '### Lane 1 — Code review\n\n_Lane unavailable across all fallback tiers — partial review._\n'
+    fi
+    printf '\n---\n\n'
+    if [ "$ARCH_AVAIL" -eq 1 ]; then
+      render_lane_arch "$ARCH_JSON"
+      printf '\n<sub>raw artifact</sub>\n\n```json\n'; jq -S . "$ARCH_JSON" 2>/dev/null; printf '\n```\n'
+    else
+      printf '### Lane 2 — Architect\n\n_Lane unavailable across all fallback tiers — partial review._\n'
+    fi
+    printf '\n---\n\n### Lane 3 — Synthesizer\n\n'
+    if [ "$synth_ok" -eq 1 ]; then
+      proposed=$(jq '.comments | length' "$SYNTH_JSON" 2>/dev/null || echo '?')
+      survived=$(jq '.comments | length' "$SYNTH_FILTERED" 2>/dev/null || echo '?')
+      printf -- '- **Model:** `%s`\n' "$(jq -r '.model_used // "?"' "$SYNTH_JSON" 2>/dev/null)"
+      printf -- '- **Curated comments:** %s proposed, %s survived anchor re-validation.\n\n' "$proposed" "$survived"
+      printf '**Narrative:**\n\n%s\n' "$(jq -r '.summary // "_(none)_"' "$SYNTH_JSON" 2>/dev/null)"
+      printf '\n<sub>raw artifact (pre re-validation)</sub>\n\n```json\n'; jq -S . "$SYNTH_JSON" 2>/dev/null; printf '\n```\n'
+    else
+      printf 'The LLM synthesizer failed all fallback tiers; the summary and merged '
+      printf 'comments below were produced deterministically by `scripts/synthesize.jq`.\n\n'
+      printf '```json\n'; jq -S . "$SYNTH_FALLBACK_JSON" 2>/dev/null; printf '\n```\n'
+    fi
+  } >> "$TRANSCRIPT_FILE"
+}
+
+# --- best-effort paste upload ------------------------------------------------
+# Echoes the paste URL on success, nothing on any failure. Never returns
+# non-zero (so a `$(upload_transcript)` capture under set -e cannot abort the
+# run). Gated: disabled flag, missing CLI, or missing config all skip silently.
+upload_transcript() {
+  [ "$TRANSCRIPT_ENABLED" = "1" ] || { log "transcript: disabled (TRANSCRIPT_ENABLED=$TRANSCRIPT_ENABLED)"; return 0; }
+  command -v "$PRIVATEBIN_BIN" >/dev/null 2>&1 || { log "transcript: '$PRIVATEBIN_BIN' not on PATH — skipping paste"; return 0; }
+  [ -f "$PRIVATEBIN_CONFIG" ] || { log "transcript: config $PRIVATEBIN_CONFIG missing — skipping paste"; return 0; }
+  [ -s "$TRANSCRIPT_FILE" ]   || { log "transcript: empty transcript — skipping paste"; return 0; }
+  set +e
+  if [ -n "$TIMEOUT_BIN" ]; then
+    url=$("$TIMEOUT_BIN" "$PRIVATEBIN_TIMEOUT" "$PRIVATEBIN_BIN" --config "$PRIVATEBIN_CONFIG" \
+          ${PRIVATEBIN_BIN_NAME:+--bin "$PRIVATEBIN_BIN_NAME"} \
+          create --expire "$PRIVATEBIN_EXPIRE" --formatter markdown < "$TRANSCRIPT_FILE" 2> "$PB_ERR")
+  else
+    url=$("$PRIVATEBIN_BIN" --config "$PRIVATEBIN_CONFIG" \
+          ${PRIVATEBIN_BIN_NAME:+--bin "$PRIVATEBIN_BIN_NAME"} \
+          create --expire "$PRIVATEBIN_EXPIRE" --formatter markdown < "$TRANSCRIPT_FILE" 2> "$PB_ERR")
+  fi
+  rc=$?
+  set -e
+  # Keep only a real http(s) URL — defends against a CLI that prints diagnostics
+  # to stdout on partial failure. The `|| true` is load-bearing: with `pipefail`
+  # a no-match grep returns 1, which under `set -e` would abort the whole review
+  # on an upload failure instead of degrading to the recap.
+  url=$(printf '%s' "$url" | tr -d '\r' | grep -oE 'https?://[^[:space:]]+' | head -1 || true)
+  if [ "$rc" -eq 0 ] && [ -n "$url" ]; then
+    printf '%s' "$url"; return 0
+  fi
+  log "transcript: paste upload failed (rc=$rc): $(tail -c 200 "$PB_ERR" 2>/dev/null | tr '\n' ' ')"
+  return 0
+}
+
 # --- deterministic body assembly (script around model prose) -----------------
 # The verdict line, BLOCK banner, advisory disclaimer, watchlist, and partial
 # caveats are emitted here REGARDLESS of the synthesizer, with exactly one
@@ -302,6 +476,25 @@ build_body() {
   fi
   if [ -n "$CAVEAT" ]; then
     printf '\n%s\n' "$CAVEAT" >> "$BODY_FILE"
+  fi
+  # Collapsed reviewer internals: the compact per-lane recap is always shown
+  # (built from local artifacts); the full transcript link appears only when the
+  # paste upload succeeded. No MARKER is emitted here — the one-marker invariant
+  # is preserved.
+  if [ -n "${RECAP_MD:-}" ]; then
+    {
+      printf '\n<details>\n<summary>🔍 Reviewer internals — per-lane findings & verdict trace</summary>\n\n'
+      printf '%s\n\n' "$RECAP_MD"
+      if [ -n "${TRANSCRIPT_URL:-}" ]; then
+        exp_h=$(printf '%s' "$PRIVATEBIN_EXPIRE" | sed -E 's/([0-9])([a-z])/\1 \2/')
+        printf 'Full transcript of what each lane found and how the verdict was derived (expires in %s):\n\n' "$exp_h"
+        printf '**[View full reviewer transcript →](%s)**\n\n' "$TRANSCRIPT_URL"
+        printf '_Hosted on a client-side-encrypted PrivateBin paste; the decryption key lives only in the link fragment._\n'
+      else
+        printf '_Full transcript paste unavailable for this run; the recap above is built from the lane artifacts._\n'
+      fi
+      printf '</details>\n'
+    } >> "$BODY_FILE"
   fi
 }
 
@@ -450,6 +643,20 @@ main() {
     body_summary=$(jq -r '.summary // ""' "$SYNTH_FALLBACK_JSON")
     comments_json=$(jq -c '.comments // []' "$SYNTH_FALLBACK_JSON")
     log "stage=synth: synthesizer unavailable — deterministic fallback (merged comments=$(jq '.comments | length' "$SYNTH_FALLBACK_JSON"))"
+  fi
+
+  # --- reviewer-internals transcript (always-on recap + best-effort paste) ----
+  # The recap is built unconditionally from the artifacts; the full transcript is
+  # only assembled and uploaded when enabled. A failed/disabled upload leaves
+  # TRANSCRIPT_URL empty and the body degrades to the recap alone.
+  build_recap "$synth_ok"
+  TRANSCRIPT_URL=""
+  if [ "$TRANSCRIPT_ENABLED" = "1" ]; then
+    build_transcript "$synth_ok"
+    TRANSCRIPT_URL=$(upload_transcript)
+    [ -n "$TRANSCRIPT_URL" ] && log "transcript: paste posted ($TRANSCRIPT_URL)"
+  else
+    log "transcript: disabled (TRANSCRIPT_ENABLED=$TRANSCRIPT_ENABLED) — recap only"
   fi
 
   # --- assemble body + single payload (one build_payload for both paths) ------
