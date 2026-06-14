@@ -20,6 +20,11 @@ exact = true
 # and NEGATIVELY by the ignore list below. Bun has no inclusion-side key, so when changing
 # the `test:coverage` paths, also decide here whether the affected tier is gated (leave it
 # out) or excluded (add it to coveragePathIgnorePatterns). Keep the two lists in agreement.
+# Enforced: scripts/check-coverage-gate-disjoint.sh (CI) fails if a gated dir is suppressed
+# WHOLESALE here (a `**/lib/<dir>/**` glob — a vacuous gate). Single-file exemptions (the
+# escape hatch below, e.g. `**/lib/decoder/thin-adapter.ts`) are permitted and do NOT trip it.
+# The lists are NOT complements, so that disjointness — not complement-equality — is the
+# checkable invariant.
 # Failure modes & escape hatch: a NEW file added inside the gated tier (./lib/decoder or
 # ./lib/reconstruction) is subject to the per-file floor from its first commit — there is no
 # aggregate grace, so a partially-covered helper fails the build even when overall coverage is

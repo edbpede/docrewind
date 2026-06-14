@@ -50,6 +50,14 @@ jobs:
       - name: Network-isolation static guard
         run: bash scripts/check-no-foreign-hosts.sh
 
+      # Coverage-gate disjointness guard (Decision D1): asserts no dir gated by
+      # test:coverage is also in bunfig.toml's coveragePathIgnorePatterns, which
+      # would make the per-file floor vacuous. Catches the one silent-drift mode;
+      # see scripts/check-coverage-gate-disjoint.sh for why complement-equality
+      # is NOT the right invariant. Exits non-zero on overlap; CI gates on it.
+      - name: Coverage-gate disjointness guard
+        run: bash scripts/check-coverage-gate-disjoint.sh
+
       - name: Pure-logic tests (Bun)
         run: bun run test:logic
 
