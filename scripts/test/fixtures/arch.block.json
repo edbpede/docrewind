@@ -1,0 +1,29 @@
+{
+  "architectural_status": "BLOCK",
+  "summary": "The new coupling introduces a migration trap that should block merge.",
+  "concerns": [
+    {
+      "body": "This tightly couples a.ts to b.ts; introduce an interface boundary.",
+      "status": "BLOCK",
+      "confidence": "high",
+      "path": "src/a.ts",
+      "line": 2,
+      "side": "RIGHT"
+    },
+    {
+      "body": "There is no rollback path for the implied schema change.",
+      "status": "BLOCK",
+      "confidence": "high"
+    },
+    {
+      "body": "Possible ordering hazard under concurrent writers.",
+      "status": "WATCH",
+      "confidence": "low",
+      "path": "src/a.ts",
+      "line": 3,
+      "side": "RIGHT"
+    }
+  ],
+  "model_used": "",
+  "fallback_attempts": 0
+}

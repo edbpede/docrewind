@@ -54,6 +54,12 @@ hooks = [
   # pure dirs (decoder/reconstruction/timeline/domain/protocol/fixtures). Durable into Phase 4.
   { id = "check-pure-core", name = "Pure-core purity guard", language = "system",
     entry = "bash scripts/check-pure-core.sh", pass_filenames = false },
+  # PR-reviewer recipes must stay tool-less (extensions: []). Goose's `developer`
+  # shell is on by default; an omitted extensions field re-enables it, a
+  # prompt-injection RCE risk on pull_request_target and the cause of the
+  # "maximum number of actions" stall. Runs when a reviewer recipe changes.
+  { id = "check-pr-review-recipes", name = "PR-review recipes tool-less guard", language = "system",
+    entry = "bash scripts/check-pr-review-recipes.sh", files = '^\.goose/recipe\..*\.yaml$', pass_filenames = false },
   # Vitest (Solid/storage/browser-API). Heavier — restrict to pre-push.
   { id = "vitest", name = "Vitest unit/component", language = "system",
     entry = "bun run test:run", stages = ["pre-push"], pass_filenames = false },
