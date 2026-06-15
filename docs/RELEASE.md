@@ -84,9 +84,26 @@ bash scripts/checksums.sh      # → .output/SHA256SUMS over all *.zip
 #    release. Record the four provenance facts above in the release notes.
 ```
 
+### Automated release (recommended)
+
+Pushing a `v*` tag triggers `.github/workflows/release.yml`, which performs the
+whole chain automatically: `bun install --frozen-lockfile` → license audit → build
++ zip both browsers → `verify-manifest.sh` → `web-ext lint` → determinism check →
+checksums + provenance → **publish a GitHub Release** with the extension zips, the
+`-sources.zip`, and `SHA256SUMS` attached and the provenance table in the notes.
+
+```bash
+git tag -s v0.1.0 -m "DocRewind v0.1.0"   # signed, matches package.json version
+git push origin v0.1.0
+```
+
+The job requires `contents: write` (declared in the workflow) to create the
+release. The manual steps above remain the source of truth for what the workflow
+does and for releasing from a machine without CI.
+
 `scripts/verify-manifest.sh` and `scripts/verify-reproducible-build.sh` also run
 as the CI `packaging-smoke` job (`.github/workflows/ci.yml`); the full
-build→verify→checksum→upload chain runs on tag push via
+build→verify→checksum→publish chain runs on tag push via
 `.github/workflows/release.yml`.
 
 ## Open release gates (escalated, not closed here)

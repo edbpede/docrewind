@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
-# Phase 7 release packaging. Tag-triggered: builds both MV3 extensions from the
-# committed lockfile, audits the SHIPPED bytes, emits checksums, and uploads the
-# artifacts. This is the packaging counterpart to ci.yml's test job — kept in its
-# own workflow so a tag push (not every PR) drives a full release build.
+# Phase 7/8 release packaging. Tag-triggered: builds both MV3 extensions from the
+# committed lockfile, audits the SHIPPED bytes, emits checksums + provenance, and
+# publishes a GitHub Release with the artifacts attached. This is the packaging
+# counterpart to ci.yml's test job — kept in its own workflow so a tag push (not
+# every PR) drives a full release build.
 name: Release
 
 on:
@@ -11,12 +12,13 @@ on:
     tags:
       - "v*"
 
+# `contents: write` is required to create the GitHub Release and upload assets.
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   package:
-    name: build · zip · verify-manifest · checksums (both browsers)
+    name: build · zip · verify · checksums · publish (both browsers)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -33,6 +35,10 @@ jobs:
       - name: Prepare WXT
         run: bun run postinstall
 
+      # AGPL dependency-license audit on the exact graph being shipped (PRD §11.6).
+      - name: Dependency license audit
+        run: bun run audit:licenses
+
       # Build + package both browsers from the one codebase.
       - name: Build & zip Chrome MV3
         run: bun run build && bun run zip
@@ -43,21 +49,55 @@ jobs:
       - name: Verify built manifests
         run: bash scripts/verify-manifest.sh
 
+      # Firefox static lint (web-ext) on the built artifact.
+      - name: Firefox static lint (web-ext)
+        run: bun run lint:firefox
+
       # Same-environment per-file determinism gate (see script header for scope).
       - name: Verify build determinism
         run: bash scripts/verify-reproducible-build.sh
 
-      # Record provenance + emit SHA256SUMS over the shipped zips.
-      - name: Build provenance
+      # Record provenance (Bun version, lockfile hash, commit, date) and emit
+      # SHA256SUMS over the shipped zips. Both feed the release notes.
+      - name: Build provenance & checksums
         run: |
-          echo "bun: $(bun --version)"
-          echo "git: ${GITHUB_SHA}"
-          echo "date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          echo "bun.lock sha256: $(sha256sum bun.lock | awk '{print $1}')"
-      - name: Checksums
-        run: bash scripts/checksums.sh
+          BUN_VERSION="$(bun --version)"
+          LOCK_SHA="$(sha256sum bun.lock | awk '{print $1}')"
+          BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          bash scripts/checksums.sh
+          {
+            echo "## DocRewind ${GITHUB_REF_NAME}"
+            echo ""
+            echo "Local-first Google Docs revision-replay extension (Chromium + Firefox MV3)."
+            echo ""
+            echo "### Verify your download"
+            echo ""
+            echo "Download \`SHA256SUMS\` plus the extension zip, then from inside the"
+            echo "download directory run \`sha256sum --ignore-missing -c SHA256SUMS\` (macOS: \`shasum -a 256 --ignore-missing -c SHA256SUMS\`)."
+            echo "\`SHA256SUMS\` covers every archive; \`--ignore-missing\` skips the ones you didn't download."
+            echo "Each remaining line must report \`OK\`. Do not install an archive that fails verification."
+            echo ""
+            echo "### Build provenance"
+            echo ""
+            echo "| Fact | Value |"
+            echo "|------|-------|"
+            echo "| Bun version | \`${BUN_VERSION}\` |"
+            echo "| \`bun.lock\` sha256 | \`${LOCK_SHA}\` |"
+            echo "| Git commit | \`${GITHUB_SHA}\` |"
+            echo "| Build date (UTC) | \`${BUILD_DATE}\` |"
+            echo ""
+            echo "Built with \`bun install --frozen-lockfile\`. See \`docs/RELEASE.md\` for the"
+            echo "reproducibility scope and \`PRIVACY.md\` for the privacy guarantees."
+            echo ""
+            echo "### Checksums"
+            echo ""
+            echo '```'
+            cat .output/SHA256SUMS
+            echo '```'
+          } > release-notes.md
 
-      - name: Upload release artifacts
+      # Keep the actions-run artifact (debuggable even for non-release runs/forks).
+      - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
           name: docrewind-extensions
@@ -65,3 +105,13 @@ jobs:
             .output/*.zip
             .output/SHA256SUMS
           if-no-files-found: error
+
+      # Publish the GitHub Release with the shipped bytes + checksums attached.
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          body_path: release-notes.md
+          fail_on_unmatched_files: true
+          files: |
+            .output/*.zip
+            .output/SHA256SUMS
