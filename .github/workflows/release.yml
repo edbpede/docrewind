@@ -21,7 +21,7 @@ jobs:
     name: build · zip · verify · checksums · publish (both browsers)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Exact Bun pin — same version the build provenance records.
       - name: Setup Bun
