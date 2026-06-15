@@ -50,6 +50,26 @@ describe("replay UI components", () => {
     expect(onScrub.mock.calls.map((call) => call[0])).toEqual([8, 3]);
   });
 
+  it("scrubs the timeline with the keyboard (Arrow / Home / End)", async () => {
+    const onScrub = vi.fn();
+    render(() => <Timeline currentIndex={5} max={10} events={[]} onScrub={onScrub} />);
+    const slider = screen.getByRole("slider");
+
+    // Exposes a focusable ARIA slider with the full value contract.
+    expect(slider.getAttribute("tabindex")).toBe("0");
+    expect(slider.getAttribute("aria-valuemin")).toBe("0");
+    expect(slider.getAttribute("aria-valuemax")).toBe("10");
+    expect(slider.getAttribute("aria-valuenow")).toBe("5");
+
+    await fireEvent.keyDown(slider, { key: "ArrowRight" });
+    await fireEvent.keyDown(slider, { key: "ArrowLeft" });
+    await fireEvent.keyDown(slider, { key: "Home" });
+    await fireEvent.keyDown(slider, { key: "End" });
+
+    // ±1 step from the current index, then clamp to both bounds.
+    expect(onScrub.mock.calls.map((call) => call[0])).toEqual([6, 4, 0, 10]);
+  });
+
   it("jumps to accessible timeline markers", async () => {
     const onScrub = vi.fn();
     const events: TimelineMarker[] = [

@@ -61,7 +61,7 @@ Run on the `docs/phase-8-handoff` branch. All gates green:
 ## Open release gates (escalated, not closed by Phase 8)
 
 These remain unchecked in `IMPLEMENTATION.md` because they require resources absent
-from dev/CI — they are release-time manual gates, not Phase 8 deliverables:
+from dev/CI — they are release-time manual gates, not code deliverables:
 
 - **CWS 128px icon set** — no icons shipped yet; routed to the `frontend-design`
   lane (Phase 7 blocker, PRD §16 Phase 4). Chrome Web Store listing blocker.
@@ -69,13 +69,23 @@ from dev/CI — they are release-time manual gates, not Phase 8 deliverables:
   live `web-ext run` + activate on `docs.google.com` needs a real Firefox. Execute
   [`firefox-validation.md`](firefox-validation.md) before a Firefox-targeting
   release.
-- **Phase 5 UI** — the replay/options/affordance UI tasks in `IMPLEMENTATION.md`
-  Phase 5 remain open (component tests exist; the page entrypoints + visual design
-  are the `frontend-design` lane).
+
+### Closed since this note was first written
+
+- **Phase 5 UI — DONE (PR #20).** The replay page (`entrypoints/replay/*`), options
+  page (`entrypoints/options/*` + `OptionsApp`), content-script affordance
+  (`ReplayAffordance` via `createShadowRootUi`), and the `uno.config.ts` presetWind4
+  design system are all implemented and idiom-clean (no React-isms; `virtual:uno.css`
+  per entrypoint; ARIA-slider keyboard scrub). The earlier "open" status here was
+  stale — `IMPLEMENTATION.md` Phase 5 + the DoD **UI** line are now ticked with
+  per-item verification notes.
+- **Pre-push `bun run build` gate — DONE.** Now that Phase 7 confirmed the build is
+  fast (~1–1.5 s) and reproducible, `prek.toml` gained a `wxt-build` pre-push hook
+  (`IMPLEMENTATION.md` Phase 0 line 96).
 
 ## Next steps
 
-1. Commission the icon set + Phase 5 UI via the `frontend-design` lane.
+1. Commission the icon set via the `frontend-design` lane (last UI/release blocker).
 2. Execute the Firefox manual validation checklist on a machine with Firefox.
 3. Tag a release (`git tag -s vX.Y.Z`) to exercise the automated GitHub Release
    workflow end-to-end.

@@ -38,8 +38,13 @@ hooks = [
 # PROJECT-LOCAL HOOKS — Bun only. Wired to real package.json scripts.
 # Confirmed against package.json: `check`, `compile`, `test:run`, `test:logic` exist.
 #   - biome-check / tsc-compile / check-pure-core run at PRE-COMMIT -> green gate
-#   - vitest / bun-logic-tests run at PRE-PUSH
-# (Optional `bun run build` pre-push gate deferred to Phase 7 — CI covers it.)
+#   - vitest / bun-logic-tests / wxt-build run at PRE-PUSH
+# DECISION (plan Phase 0 line 96, unblocked once Phase 7 landed): the `bun run
+# build` smoke gate is now ENABLED at pre-push. Phase 7 confirmed the build is fast
+# (~1-1.5 s, see docs/HANDOFF.md verification table) and reproducible
+# (scripts/verify-reproducible-build.sh), so gating pushes on it is cheap and
+# catches bundle/manifest regressions before they reach the remote. It builds the
+# Chromium MV3 target only (fast smoke); CI still builds BOTH browsers.
 # ============================================================
 [[repos]]
 repo = "local"
@@ -60,4 +65,8 @@ hooks = [
   # Pure-logic Bun tests (decoder/reconstruction/timeline/domain). Pre-push.
   { id = "bun-logic-tests", name = "Bun pure-logic tests", language = "system",
     entry = "bun run test:logic", stages = ["pre-push"], pass_filenames = false },
+  # Extension build smoke (WXT Chromium MV3) — enabled Phase 7 (fast + reproducible).
+  # Catches bundle/manifest regressions before a push; CI builds both browsers.
+  { id = "wxt-build", name = "WXT build (Chromium MV3) smoke", language = "system",
+    entry = "bun run build", stages = ["pre-push"], pass_filenames = false },
 ]
