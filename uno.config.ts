@@ -126,8 +126,8 @@ export default defineConfig({
       "before:bg-stone-300/70 sm:before:left-9 dark:bg-stone-800 dark:ring-stone-700 " +
       "dark:before:bg-stone-600/50",
     // A dateline reads like the hand-noted date in a manuscript margin.
-    "dr-dateline":
-      "font-mono text-[11px] uppercase tracking-[0.16em] text-stone-500 dark:text-stone-400",
+    // Same visual treatment as the masthead eyebrow — aliased to one source.
+    "dr-dateline": "dr-eyebrow",
 
     // ── Buttons (focus-visible rings; never color-only — each carries a label) ─
     "btn-base":

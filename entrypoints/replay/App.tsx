@@ -482,7 +482,12 @@ const ReplaySurface: Component<{
       return "";
     }
     const time = data.revisions[index - 1]?.time;
-    return time === null || time === undefined ? "" : datelineFormat.format(Number(time));
+    // The decoder admits any finite number, but `format` throws RangeError beyond
+    // the Date epoch bound (±8.64e15 ms). Out-of-range metadata degrades to blank.
+    if (time === null || time === undefined || Math.abs(time) > 8.64e15) {
+      return "";
+    }
+    return datelineFormat.format(time);
   });
 
   // ── Retrieval flow: fire start, poll the checkpoint, detect stalls ──────────

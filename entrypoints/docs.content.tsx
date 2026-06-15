@@ -35,7 +35,7 @@ export default defineContentScript({
       anchor: () =>
         document.querySelector(".docs-titlebar-buttons") ??
         document.querySelector("#docs-titlebar-share-client-button")?.parentElement ??
-        document.querySelector("#docs-menubar"),
+        null,
       append: "first",
       // Keep page shortcuts from leaking into our control and vice versa.
       isolateEvents: ["keydown", "keyup", "click", "wheel"],
