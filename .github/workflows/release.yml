@@ -60,7 +60,6 @@ jobs:
       # Record provenance (Bun version, lockfile hash, commit, date) and emit
       # SHA256SUMS over the shipped zips. Both feed the release notes.
       - name: Build provenance & checksums
-        id: provenance
         run: |
           BUN_VERSION="$(bun --version)"
           LOCK_SHA="$(sha256sum bun.lock | awk '{print $1}')"
@@ -108,7 +107,7 @@ jobs:
 
       # Publish the GitHub Release with the shipped bytes + checksums attached.
       - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           body_path: release-notes.md
           fail_on_unmatched_files: true

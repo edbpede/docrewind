@@ -95,22 +95,63 @@ function normalizeId(id: string): string {
     .trim();
 }
 
-// Evaluate an SPDX license expression against ALLOWED.
-//   - top-level OR: pass if ANY operand passes
+// Evaluate an SPDX license expression against ALLOWED, honoring parentheses and
+// SPDX operator precedence (AND binds tighter than OR, so `A OR B AND C` parses
+// as `A OR (B AND C)`).
+//   - OR: pass if ANY operand passes
 //   - AND: pass only if ALL operands pass
+//
+// Implemented as a tiny recursive-descent parser over the token stream rather
+// than flat string splitting, which mis-handled nesting and precedence.
 function isCompatible(expr: string): boolean {
-  const cleaned = expr
-    .trim()
-    .replace(/^\(|\)$/g, "")
-    .trim();
-  if (cleaned === "") return false;
-  if (/\bOR\b/i.test(cleaned)) {
-    return cleaned.split(/\s+OR\s+/i).some((part) => isCompatible(part));
+  // Tokenize into parens, AND/OR operators, and license-id atoms.
+  const tokens = expr.match(/\(|\)|\bAND\b|\bOR\b|[^()\s]+/gi);
+  if (!tokens || tokens.length === 0) return false;
+
+  let pos = 0;
+  const peek = (): string | undefined => tokens[pos];
+  const isOp = (t: string | undefined, op: string): boolean =>
+    t !== undefined && t.toUpperCase() === op;
+
+  // orExpr := andExpr (OR andExpr)*
+  function parseOr(): boolean {
+    let result = parseAnd();
+    while (isOp(peek(), "OR")) {
+      pos++; // consume OR
+      const right = parseAnd();
+      result = result || right;
+    }
+    return result;
   }
-  if (/\bAND\b/i.test(cleaned)) {
-    return cleaned.split(/\s+AND\s+/i).every((part) => isCompatible(part));
+
+  // andExpr := atom (AND atom)*
+  function parseAnd(): boolean {
+    let result = parseAtom();
+    while (isOp(peek(), "AND")) {
+      pos++; // consume AND
+      const right = parseAtom();
+      result = result && right;
+    }
+    return result;
   }
-  return ALLOWED.has(normalizeId(cleaned));
+
+  // atom := '(' orExpr ')' | license-id
+  function parseAtom(): boolean {
+    const t = peek();
+    if (t === undefined) return false;
+    if (t === "(") {
+      pos++; // consume (
+      const inner = parseOr();
+      if (peek() === ")") pos++; // consume matching )
+      return inner;
+    }
+    pos++; // consume the license id
+    return ALLOWED.has(normalizeId(t));
+  }
+
+  const value = parseOr();
+  // Reject malformed expressions with leftover tokens (e.g. unbalanced parens).
+  return pos === tokens.length && value;
 }
 
 // Collect package roots: immediate children of each node_modules dir (descending

@@ -82,12 +82,14 @@ vulnerability.
 
    ```sh
    # macOS
-   shasum -a 256 -c SHA256SUMS
+   shasum -a 256 --ignore-missing -c SHA256SUMS
    # Linux
-   sha256sum -c SHA256SUMS
+   sha256sum --ignore-missing -c SHA256SUMS
    ```
 
-   Each line must report `OK`. If verification fails, **do not install** the
+   `SHA256SUMS` covers every release archive, so `--ignore-missing` skips the
+   ones you did not download. Each remaining line must report `OK`. If
+   verification fails, **do not install** the
    archive. (Each release also records its build provenance — Bun version,
    `bun.lock` file hash, git commit, and build date; see
    [`docs/RELEASE.md`](docs/RELEASE.md).)

@@ -63,7 +63,7 @@ UnoCSS styles are applied via the `virtual:uno.css` import at build time.
 
 ## 3. Quality gates (run before every PR)
 
-These are exactly what CI enforces (`.github/workflows/ci.yml`):
+These are the core local quality gates; CI enforces these plus additional workflow checks in `.github/workflows/ci.yml`:
 
 ```sh
 bun run compile          # tsc --noEmit (strict: noUncheckedIndexedAccess, etc.)
