@@ -3,9 +3,10 @@
 # CI. The `test` job runs Phase 6's three-tier test split + coverage gate +
 # network-isolation audit. The sibling `packaging-smoke` job (Phase 7) runs the
 # built-artifact manifest audit + same-environment determinism gate on the zipped
-# extensions. Packaging stays OUT of the `test` job by design; the full
-# tag-triggered release build (provenance + checksums + upload) lives in
-# release.yml — this file does not recreate it.
+# extensions, and uploads those zips as a downloadable `extension-zips` artifact
+# for review convenience. Packaging stays OUT of the `test` job by design; the
+# full tag-triggered release build (provenance + checksums + signed/uploaded
+# release assets) lives in release.yml — this file does not recreate it.
 name: CI
 
 on:
@@ -25,7 +26,7 @@ jobs:
     name: compile · check · test (logic/coverage/vitest) · build · e2e
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Pin Bun to the version the project targets (.augment/rules + @types/bun).
       - name: Setup Bun
@@ -46,6 +47,12 @@ jobs:
       # Non-writing lint/format in CI (the local `check` uses --write).
       - name: Lint & format check
         run: bunx biome ci .
+
+      # Pure-core purity guard (mirrors prek `check-pure-core` pre-commit hook):
+      # fails if #imports/browser.*/wxt leak into the six pure dirs
+      # (decoder/reconstruction/timeline/domain/protocol/fixtures).
+      - name: Pure-core purity guard
+        run: bash scripts/check-pure-core.sh
 
       # Static network-isolation guard (Phase 6 WI-5 / PRD §17): defense-in-depth
       # static lint complementing the runtime e2e audit. Exits non-zero if any
@@ -92,7 +99,7 @@ jobs:
     name: packaging-smoke (verify-manifest · determinism)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -108,6 +115,22 @@ jobs:
       # Build + package both browsers from the one codebase.
       - name: Build & zip both browsers
         run: bun run build && bun run zip && bun run build:firefox && bun run zip:firefox
+
+      # Surface the smoke-built zips as a downloadable CI artifact (Chromium +
+      # Firefox + the Firefox sources bundle). This is a convenience for review;
+      # the authoritative, provenance-signed + checksummed release artifacts are
+      # still produced only by the tag-triggered release.yml.
+      - name: Upload packaged extensions
+        uses: actions/upload-artifact@v4
+        with:
+          name: extension-zips
+          path: .output/*.zip
+          if-no-files-found: error
+          retention-days: 14
+          # WXT writes to .output/ — a dot-prefixed dir that upload-artifact@v4
+          # treats as hidden and skips by default, yielding a spurious
+          # "No files were found" failure. Opt the zips back in.
+          include-hidden-files: true
 
       # Permission/identity/no-remote-code audit on the zipped artifacts.
       - name: Verify built manifests
