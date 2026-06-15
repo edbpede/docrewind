@@ -181,6 +181,16 @@ export default defineConfig({
       // build-visible and verifiable rather than hidden in component logic. The App
       // additionally caps the JS auto-advance cadence (Step 6).
       getCSS: () => `
+/* Drive the native UA color-scheme from the SAME pinned \`.dark\` class that the
+   Seam-E applier toggles on <html>. Without this the document stays at the
+   default \`light\` scheme, so native form controls (<select>, number inputs,
+   checkboxes) and scrollbars render with light-mode chrome — dark glyphs — even
+   under \`.dark\`, where surfaces like \`dr-panel\` only flip the background. That
+   produces dark-on-dark, near-unreadable controls on the otherwise-dark Options
+   page. Setting color-scheme makes every native control follow the theme. */
+:root { color-scheme: light; }
+.dark { color-scheme: dark; }
+
 @media (prefers-reduced-motion: reduce) {
   .tl-fill, .tl-thumb, .tl-track, .progress-fill, .btn-base { transition: none !important; }
   .dr-indeterminate { animation: none !important; }
