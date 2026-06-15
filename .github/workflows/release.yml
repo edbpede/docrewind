@@ -100,6 +100,9 @@ jobs:
             .output/*.zip
             .output/SHA256SUMS
           if-no-files-found: error
+          # .output/ is dot-prefixed; upload-artifact@v4 treats it as hidden and
+          # skips its contents unless we opt in (same fix as ci.yml).
+          include-hidden-files: true
 
       # Publish the GitHub Release with the shipped bytes + checksums attached.
       - name: Publish GitHub Release

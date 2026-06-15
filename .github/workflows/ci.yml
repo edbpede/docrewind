@@ -127,6 +127,10 @@ jobs:
           path: .output/*.zip
           if-no-files-found: error
           retention-days: 14
+          # WXT writes to .output/ — a dot-prefixed dir that upload-artifact@v4
+          # treats as hidden and skips by default, yielding a spurious
+          # "No files were found" failure. Opt the zips back in.
+          include-hidden-files: true
 
       # Permission/identity/no-remote-code audit on the zipped artifacts.
       - name: Verify built manifests
