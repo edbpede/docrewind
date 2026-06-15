@@ -47,6 +47,8 @@ const errorTitles = {
 export const strings = {
   app: {
     title: "DocRewind — revision replay",
+    mastheadEyebrow: "Revision replay",
+    mastheadTitle: "The document, rebuilt from its own revision history.",
     optionsLink: "Settings & privacy",
     loadFailed: "Couldn't load this replay",
     loadFailedHint: "Reload the document tab and activate DocRewind again.",

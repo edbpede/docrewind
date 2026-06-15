@@ -45,21 +45,23 @@ const PlaybackControls: Component<PlaybackControlsProps> = (props) => {
         <span>{strings.controls.restart}</span>
       </button>
 
-      <fieldset class="m-0 ml-auto inline-flex items-center gap-1 border-0 p-0">
-        <legend class="dr-eyebrow mr-1 float-left">{strings.controls.speedGroup}</legend>
-        <Index each={SPEEDS}>
-          {(speed) => (
-            <button
-              type="button"
-              class={props.speed === speed() ? "btn-ghost btn-active" : "btn-ghost"}
-              aria-pressed={props.speed === speed()}
-              aria-label={speedLabel(speed())}
-              onClick={() => props.onSpeed(speed())}
-            >
-              {speedLabel(speed())}
-            </button>
-          )}
-        </Index>
+      <fieldset class="m-0 ml-auto inline-flex items-center gap-2 border-0 p-0">
+        <legend class="dr-eyebrow float-left mr-1">{strings.controls.speedGroup}</legend>
+        <div class="inline-flex items-center gap-0.5 rounded-lg bg-stone-100 p-0.5 dark:bg-stone-800">
+          <Index each={SPEEDS}>
+            {(speed) => (
+              <button
+                type="button"
+                class={props.speed === speed() ? "btn-ghost btn-active" : "btn-ghost"}
+                aria-pressed={props.speed === speed()}
+                aria-label={speedLabel(speed())}
+                onClick={() => props.onSpeed(speed())}
+              >
+                {speedLabel(speed())}
+              </button>
+            )}
+          </Index>
+        </div>
       </fieldset>
     </div>
   );

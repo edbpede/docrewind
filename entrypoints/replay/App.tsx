@@ -33,7 +33,7 @@ import { useThemeSync } from "@/components/theme-sync";
 import { createIdbStore } from "@/lib/db";
 import { asDocId } from "@/lib/domain/ids";
 import type { DecodedRevision, DocId, TimelineEvent } from "@/lib/domain/model";
-import { errorTitle, strings } from "@/lib/i18n/strings";
+import { errorTitle, revisionOf, strings } from "@/lib/i18n/strings";
 import { sendMessage } from "@/lib/messaging";
 import { segmentsAt } from "@/lib/reconstruction/render";
 import { modelAtRevisionIndex } from "@/lib/reconstruction/snapshot";
@@ -86,6 +86,14 @@ const NO_CHECKPOINT_MS = 20_000; // no first checkpoint at all
 const TICK_MS = 120; // playback frame budget (throttled)
 const TICK_MS_REDUCED = 320; // calmer cadence under reduced motion
 let pageSessionSequence = 0;
+
+// A manuscript carries the date it was written. The dateline formatter renders
+// the CURRENT frame's revision time (metadata, never content) as an archival
+// dateline. Built once at module scope so the playback tick never reallocates it.
+const datelineFormat = new Intl.DateTimeFormat(undefined, {
+  dateStyle: "medium",
+  timeStyle: "short",
+});
 
 function createPageSessionId(): string {
   if (typeof globalThis.crypto?.randomUUID === "function") {
@@ -214,8 +222,8 @@ const MessageCard: Component<{
   <main class="mx-auto flex max-w-prose flex-col gap-3 p-8">
     <PrivacyBanner />
     <div class="dr-card flex flex-col gap-2">
-      <h1 class="font-medium text-strike">{props.title}</h1>
-      <p class="text-sm text-stone-700 dark:text-stone-300">{props.body}</p>
+      <h1 class="text-balance font-serif text-lg font-semibold text-strike">{props.title}</h1>
+      <p class="text-pretty text-sm text-stone-700 dark:text-stone-300">{props.body}</p>
       <Show when={props.actionLabel}>
         {(label) => (
           <button type="button" class="btn-primary self-start" onClick={() => props.onAction?.()}>
@@ -463,6 +471,18 @@ const ReplaySurface: Component<{
   const markers = createMemo(() => {
     const data = loaded();
     return data === undefined ? [] : buildMarkers(data.timeline, data.revisions);
+  });
+  // The dateline of the frame in view. `currentIndex` is an applied-count, so the
+  // revision that produced this frame is `revisions[currentIndex - 1]`; index 0 is
+  // the blank page, before anything was written. A lazy memo — no per-tick effect.
+  const dateline = createMemo(() => {
+    const data = loaded();
+    const index = currentIndex();
+    if (data === undefined || index <= 0) {
+      return "";
+    }
+    const time = data.revisions[index - 1]?.time;
+    return time === null || time === undefined ? "" : datelineFormat.format(Number(time));
   });
 
   // ── Retrieval flow: fire start, poll the checkpoint, detect stalls ──────────
@@ -730,26 +750,42 @@ const ReplaySurface: Component<{
             <Suspense fallback={renderProgress()}>
               <Show when={loaded()} fallback={renderProgress()}>
                 {(data) => (
-                  <main class="mx-auto flex max-w-3xl flex-col gap-4 p-6">
-                    <header>
+                  <main class="mx-auto flex max-w-3xl flex-col gap-5 p-6 sm:p-8">
+                    <header class="dr-masthead">
+                      <p class="dr-eyebrow">{strings.app.mastheadEyebrow}</p>
+                      <h1 class="dr-title">{strings.app.mastheadTitle}</h1>
                       <PrivacyBanner approximationNote={strings.privacy.approximationNote} />
                     </header>
-                    <PlaybackControls
-                      playing={playing()}
-                      speed={speed()}
-                      onPlayPause={onPlayPause}
-                      onRestart={() => {
-                        setPlaying(false);
-                        setCurrentIndex(0);
-                      }}
-                      onSpeed={(value) => setSpeed(value)}
-                    />
-                    <Timeline
-                      currentIndex={currentIndex()}
-                      max={maxIndex()}
-                      events={markers()}
-                      onScrub={(index) => setCurrentIndex(index)}
-                    />
+
+                    {/* The margin: transport + the writing-activity stratum, with the
+                        frame's revision count and archival dateline framing the scrubber. */}
+                    <section class="flex flex-col gap-3">
+                      <PlaybackControls
+                        playing={playing()}
+                        speed={speed()}
+                        onPlayPause={onPlayPause}
+                        onRestart={() => {
+                          setPlaying(false);
+                          setCurrentIndex(0);
+                        }}
+                        onSpeed={(value) => setSpeed(value)}
+                      />
+                      <div class="flex flex-col gap-1.5">
+                        <div class="flex items-baseline justify-between gap-3">
+                          <span class="dr-counter">{revisionOf(currentIndex(), maxIndex())}</span>
+                          <Show when={dateline()}>
+                            {(when) => <span class="dr-dateline">{when()}</span>}
+                          </Show>
+                        </div>
+                        <Timeline
+                          currentIndex={currentIndex()}
+                          max={maxIndex()}
+                          events={markers()}
+                          onScrub={(index) => setCurrentIndex(index)}
+                        />
+                      </div>
+                    </section>
+
                     <SummaryInsights
                       revisions={data().revisions}
                       timeline={data().timeline}

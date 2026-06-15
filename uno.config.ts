@@ -101,10 +101,33 @@ export default defineConfig({
 
   shortcuts: {
     // ── Surfaces ────────────────────────────────────────────────────────────
-    "dr-page": "min-h-screen bg-stone-50 text-stone-900 dark:bg-stone-900 dark:text-stone-100",
+    // Cool archival paper. A near-flat stone wash (top a touch lighter than the
+    // foot) gives the page the depth of a sheet under raking light without ever
+    // reading as a "gradient hero". Solid `bg-stone-50` stays as the fallback.
+    "dr-page":
+      "min-h-screen bg-stone-50 bg-gradient-to-b from-stone-50 to-stone-100 " +
+      "text-stone-900 dark:bg-stone-900 dark:from-stone-900 dark:to-stone-950 dark:text-stone-100",
     "dr-panel":
       "rounded-lg border border-stone-200 bg-white dark:border-stone-700 dark:bg-stone-800",
     "dr-card": "dr-panel p-4 shadow-sm",
+
+    // ── Masthead: the archival record header (eyebrow + balanced title) ────────
+    "dr-masthead": "flex flex-col gap-2 border-b border-stone-200/80 pb-4 dark:border-stone-700/80",
+    "dr-title":
+      "text-balance font-serif text-xl font-semibold tracking-tight text-stone-900 dark:text-stone-50",
+
+    // ── The manuscript leaf: an elevated sheet with a graphite binding margin ──
+    // `before:` draws the ruled binding margin — pure decoration (no meaning rides
+    // on it), graphite-neutral so it never collides with the strike/suggest hues.
+    "dr-leaf":
+      "relative rounded-xl bg-white px-6 py-9 ring-1 ring-stone-200 sm:px-12 " +
+      "shadow-[0_18px_40px_-24px_oklch(0%_0_0/0.22)] " +
+      "before:pointer-events-none before:absolute before:inset-y-6 before:left-4 before:w-px " +
+      "before:bg-stone-300/70 sm:before:left-9 dark:bg-stone-800 dark:ring-stone-700 " +
+      "dark:before:bg-stone-600/50",
+    // A dateline reads like the hand-noted date in a manuscript margin.
+    "dr-dateline":
+      "font-mono text-[11px] uppercase tracking-[0.16em] text-stone-500 dark:text-stone-400",
 
     // ── Buttons (focus-visible rings; never color-only — each carries a label) ─
     "btn-base":
@@ -123,18 +146,28 @@ export default defineConfig({
     "btn-active": "bg-revision text-white hover:bg-revision-soft",
 
     // ── Timeline: the signature "writing-activity stratum" + playhead caret ───
+    // The track is a carved channel (inset shadow); the fill is accumulating ink
+    // — an oklch ramp from faded early writing to saturated fresh indigo at the
+    // playhead, interpolated `in oklch` so the ramp stays perceptually even.
     "tl-track":
-      "relative h-2 w-full rounded-full bg-stone-200 dark:bg-stone-700 " +
+      "group relative h-2.5 w-full rounded-full bg-stone-200 dark:bg-stone-700 " +
+      "shadow-[inset_0_1px_2px_oklch(0%_0_0/0.07)] dark:shadow-[inset_0_1px_2px_oklch(0%_0_0/0.25)] " +
       "outline-none focus-visible:ring-2 focus-visible:ring-revision-ring " +
       "focus-visible:ring-offset-2 focus-visible:ring-offset-stone-50 " +
       "dark:focus-visible:ring-offset-stone-900 transition-shadow",
-    "tl-fill": "absolute inset-y-0 left-0 rounded-full bg-revision-soft transition-[width]",
-    // The playhead reads as a writing caret standing on the track.
+    "tl-fill":
+      "absolute inset-y-0 left-0 rounded-full transition-[width] " +
+      "bg-gradient-to-r from-revision-ring via-revision-soft to-revision",
+    // The playhead reads as a writing caret (nib) standing on the track.
     "tl-thumb":
-      "absolute top-1/2 h-5 w-1 -translate-x-1/2 -translate-y-1/2 rounded-sm bg-revision " +
-      "shadow ring-2 ring-white dark:ring-stone-900 transition-[left]",
-    // Event markers — each kind also gets a distinct glyph in the component.
-    "tl-marker": "absolute top-1/2 -translate-x-1/2 -translate-y-1/2 text-[10px] leading-none",
+      "absolute top-1/2 h-6 w-[3px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-revision " +
+      "shadow-[0_1px_3px_oklch(54%_0.13_264/0.45)] ring-2 ring-white dark:ring-stone-900 transition-[left]",
+    // Event markers — each kind also gets a distinct glyph in the component. A
+    // keyboard focus ring makes the jump-to-event buttons operable without a mouse.
+    "tl-marker":
+      "absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-sm text-[11px] leading-none " +
+      "outline-none focus-visible:ring-2 focus-visible:ring-revision-ring focus-visible:ring-offset-1 " +
+      "focus-visible:ring-offset-stone-50 dark:focus-visible:ring-offset-stone-900",
     "tl-marker-session": "text-revision",
     "tl-marker-large": "text-strike",
     "tl-marker-pause": "text-stone-500 dark:text-stone-400",
@@ -151,7 +184,7 @@ export default defineConfig({
 
     // ── Document-rendering primitives (color ALWAYS + a non-color affordance) ──
     "doc-column":
-      "mx-auto max-w-[70ch] whitespace-pre-wrap break-words font-serif text-base leading-relaxed " +
+      "mx-auto max-w-[68ch] whitespace-pre-wrap break-words font-serif text-[1.0625rem] leading-[1.8] " +
       "text-stone-900 dark:text-stone-100",
     "doc-accepted": "text-stone-900 dark:text-stone-100",
     // Suggested insert: color + underline + label affordance.
