@@ -118,7 +118,7 @@ dist
 .wxt/
 
 # Playwright E2E artifacts (traces, screenshots, HTML report).
-test-results/
+test/test-results/
 playwright-report/
 # NOTE: bun.lock is intentionally committed (the Bun text lockfile, stable since
 # Bun 1.2) — it is required for deterministic `bun install --frozen-lockfile`

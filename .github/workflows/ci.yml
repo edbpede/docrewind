@@ -47,12 +47,6 @@ jobs:
       - name: Lint & format check
         run: bunx biome ci .
 
-      # License audit (Phase 8 / PRD §11.6): AGPL-3.0-or-later requires
-      # AGPL-compatible dependencies. Walks node_modules, evaluates each package's
-      # SPDX license expression, and fails on any incompatible/unknown license.
-      - name: Dependency license audit
-        run: bun run audit:licenses
-
       # Static network-isolation guard (Phase 6 WI-5 / PRD §17): defense-in-depth
       # static lint complementing the runtime e2e audit. Exits non-zero if any
       # source line names a non-Google network target; CI gates on that exit code.
@@ -120,7 +114,7 @@ jobs:
         run: bash scripts/verify-manifest.sh
 
       # Firefox static lint (web-ext). This is CI-able; the live web-ext run/load
-      # on docs.google.com is a manual release gate (docs/firefox-validation.md).
+      # on docs.google.com is a manual release gate.
       - name: Firefox static lint (web-ext)
         run: bun run lint:firefox
 

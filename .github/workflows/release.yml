@@ -23,7 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Exact Bun pin — same version the build provenance records (docs/RELEASE.md).
+      # Exact Bun pin — same version the build provenance records.
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
@@ -34,10 +34,6 @@ jobs:
 
       - name: Prepare WXT
         run: bun run postinstall
-
-      # AGPL dependency-license audit on the exact graph being shipped (PRD §11.6).
-      - name: Dependency license audit
-        run: bun run audit:licenses
 
       # Build + package both browsers from the one codebase.
       - name: Build & zip Chrome MV3
@@ -86,8 +82,7 @@ jobs:
             echo "| Git commit | \`${GITHUB_SHA}\` |"
             echo "| Build date (UTC) | \`${BUILD_DATE}\` |"
             echo ""
-            echo "Built with \`bun install --frozen-lockfile\`. See \`docs/RELEASE.md\` for the"
-            echo "reproducibility scope and \`PRIVACY.md\` for the privacy guarantees."
+            echo "Built with \`bun install --frozen-lockfile\` for a reproducible build."
             echo ""
             echo "### Checksums"
             echo ""

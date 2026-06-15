@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
 // Transport contracts for the Google Docs revisions endpoint (plan T2 / §19).
-// CONFIRMED by the §24 live capture (2026-06-12; see docs/protocol-capture.md):
+// CONFIRMED by the §24 live capture (2026-06-12):
 // the grammar is source-confirmed (Appendix A.2) AND the 2026 transport (framing,
 // headers, token, discovery, op-code currency) was observed on the wire. No
 // stop-condition fired. Fields below now carry the captured values; the

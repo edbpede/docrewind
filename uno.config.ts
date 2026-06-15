@@ -17,7 +17,7 @@
 
 import { defineConfig, presetWind4, type SourceCodeTransformer } from "unocss";
 
-// Build-determinism transformer (Phase 7 / docs/RELEASE.md).
+// Build-determinism transformer (Phase 7).
 //
 // presetWind4 emits its `:root,:host { … }` theme-variable block (theme layer)
 // and its `*,::before… { --un-* }` registered-property block (properties layer)

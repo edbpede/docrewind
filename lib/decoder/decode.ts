@@ -199,7 +199,7 @@ interface EntryEnvelope {
 
 // Positional layout of a LIVE changelog tuple, confirmed by the §24 capture
 // (2026-06-12): `[ op, time(ms), sessionId, revisionId, userId, … ]`.
-// See PRD Appendix A.2 and docs/protocol-capture.md Q1.
+// See PRD Appendix A.2.
 const TUPLE_TIME = 1;
 const TUPLE_SESSION_ID = 2;
 const TUPLE_REVISION_ID = 3;

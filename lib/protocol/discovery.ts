@@ -3,7 +3,7 @@
 // Revision-range discovery contract (plan T2 / A.4). There is no "all revisions"
 // call; `start=1&end=-1` is rejected, so a real upper bound is required.
 //
-// CONFIRMED by the §24 live capture (2026-06-12; see docs/protocol-capture.md):
+// CONFIRMED by the §24 live capture (2026-06-12):
 //   • The current revision count is published in the editor bootstrap as
 //     `"revision":N` — a single-request metadata read (the gentlest path, A.9).
 //   • Out-of-range `end` now returns HTTP 400 (the 2014 teardown saw 500); an

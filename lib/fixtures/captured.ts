@@ -3,8 +3,8 @@
 // SANITIZED live-capture fixture (PRD §11.5, §15.3; plan R4 tier [x:live]).
 //
 // Captured 2026-06-12 from a throwaway Google Doc via an authenticated
-// `revisions/load` read during the §24 transport capture (see
-// docs/protocol-capture.md). This is the FIRST fixture taken from the real 2026
+// `revisions/load` read during the §24 transport capture. This is the FIRST
+// fixture taken from the real 2026
 // wire format rather than the hand-authored A.2 grammar — it exercises the live
 // 9-element changelog TUPLE envelope `[op, time, sessionId, revisionId, userId, …]`
 // that the synthetic corpus (corpus.ts, flat-object entries) does not model.

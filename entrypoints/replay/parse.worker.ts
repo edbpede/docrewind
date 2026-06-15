@@ -10,7 +10,7 @@
 //
 // The replay page (Phase 5) instantiates this via
 //   new Worker(new URL("./parse.worker.ts", import.meta.url), { type: "module" })
-// — see docs/phase-4-acceptance.md for the WXT bundling resolve-by-inspection.
+// — WXT resolves the worker bundle by inspecting this constructor pattern.
 
 import { createIdbStore } from "@/lib/db";
 import { asDocId } from "@/lib/domain/ids";

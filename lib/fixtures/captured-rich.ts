@@ -4,8 +4,8 @@
 //
 // Op SHAPES confirmed from a §24 follow-up LIVE capture (2026-06-12, Firefox 151
 // over the firefox-devtools MCP, throwaway "Testdokument" with an image, table,
-// footnote, equation, bulleted list, and a Suggesting-mode tracked change — see
-// docs/protocol-capture.md Q7). The live `revisions/load` changelog for that doc
+// footnote, equation, bulleted list, and a Suggesting-mode tracked change). The
+// live `revisions/load` changelog for that doc
 // (revisions 1..140) surfaced FIVE op codes the decoder had not yet seen on the
 // wire, all isolated via the open-world UnknownOp path:
 //   • ae  — AddEntity        { ty, et:"inline"|"list", id, epm }  (embedded object)
@@ -26,8 +26,8 @@
 // "kix.redacted-*"/"suggest.redacted-*", and the bulky opaque style/entity maps
 // (`sm`/`epm`, ignored by the text decoder) collapsed to `{}`. The full 140-tuple
 // live changelog reconstructs to the document's exact visible text; that
-// end-to-end check was run during capture and the findings recorded in
-// docs/protocol-capture.md — this committed sample keeps the repo free of any
+// end-to-end check was run during capture; this committed sample keeps the repo
+// free of any
 // real session changelog while still exercising the live op grammar.
 
 import type { CapturedFixture } from "./captured";

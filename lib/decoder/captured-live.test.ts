@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
 // End-of-timeline text-equality proof against a REAL captured document
-// (PRD §15.3 MUST; plan R4 tier [x:live]; docs/phase-3-acceptance.md
-// "[BLOCKED:live]"). Runs the sanitized §24 capture (lib/fixtures/captured.ts)
+// (PRD §15.3 MUST; plan R4 tier [x:live]). Runs the sanitized §24 capture
+// (lib/fixtures/captured.ts)
 // through the SAME production pipeline the worker uses
 // (parseFramed → detectSchema → decodeOperations → buildReplayIndex →
 // currentText) and asserts the reconstructed end-of-timeline text equals the

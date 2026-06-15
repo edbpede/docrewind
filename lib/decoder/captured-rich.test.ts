@@ -8,7 +8,7 @@
 // the grammar DOES model (`iss`/`msfd`) decode to their typed variants. Crucially,
 // isolating the unrecognized ops leaves the reconstructed text correct: they
 // contribute no characters, so the surrounding character indices stay aligned.
-// See docs/protocol-capture.md Q7 and lib/fixtures/captured-rich.ts.
+// See lib/fixtures/captured-rich.ts.
 
 import { describe, expect, test } from "bun:test";
 import { CAPTURED_RICH_DOC, RICH_DOC_UNKNOWN_OPCODES } from "../fixtures/captured-rich";

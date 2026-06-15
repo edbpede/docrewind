@@ -10,7 +10,7 @@
 # downloader can verify with `sha256sum -c SHA256SUMS` from inside .output/.
 #
 # Run AFTER `bun run zip` + `bun run zip:firefox`. Build provenance (Bun version,
-# bun.lock sha256, git sha, date) is recorded separately in docs/RELEASE.md.
+# bun.lock sha256, git sha, date) is recorded separately in the release notes.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
