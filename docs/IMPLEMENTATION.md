@@ -464,7 +464,7 @@ This plan **follows `.augment/rules/bun-solid-pro.md`** as the authoritative sou
 - [ ] **Tests:** Bun (pure logic) + Vitest (Solid/storage/browser) + Playwright (Chromium E2E) all green; ≥85% line coverage on parser/reconstruction; Firefox validated manually + `web-ext`.
 - [ ] **Release:** deterministic builds from `--frozen-lockfile`; SHA-256 checksums + provenance published; permission/no-remote-code review passed; AMO source README + CWS statements ready.
 - [x] **Docs:** README, PRIVACY, SECURITY/threat model, CONTRIBUTING (Conventional Commits + DCO), SPDX headers, dependency license audit — all complete.
-- [x] **Privacy invariant:** verified zero non-Google network requests, no telemetry, no accounts, local-only storage (PRD §13). *(Verified by green gates: `e2e/network-isolation.spec.ts` + `scripts/check-no-foreign-hosts.sh` (Phase 6), and `scripts/verify-manifest.sh` confirming `permissions: ["storage"]` + `host_permissions: ["*://docs.google.com/*"]` only (Phase 7). No telemetry/analytics/accounts/remote-code anywhere in the tree.)*
+- [x] **Privacy invariant:** verified zero non-Google network requests, no telemetry, no accounts, local-only storage (PRD §13). *(Verified by green gates: `e2e/network-isolation.spec.ts` for exercised runtime flow, `scripts/check-no-foreign-hosts.sh` for static defense-in-depth over `lib/` + `entrypoints/` (Phase 6), and `scripts/verify-manifest.sh` confirming `permissions: ["storage"]` + `host_permissions: ["*://docs.google.com/*"]` only (Phase 7).)*
 
 ---
 
