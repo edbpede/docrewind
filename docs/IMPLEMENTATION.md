@@ -436,21 +436,21 @@ This plan **follows `.augment/rules/bun-solid-pro.md`** as the authoritative sou
 
 ### Tasks
 
-- [ ] `README.md`: product summary, privacy guarantees (link §13), supported browsers, install-from-release + verify-checksum steps, and a clear "reconstruction from undocumented Google Docs data; may be incomplete" disclaimer (PRD §21).
-- [ ] `PRIVACY.md`: the canonical privacy spec (PRD §13) — no backend, no telemetry, local-only, no accounts, minimal permissions.
-- [ ] `SECURITY.md` + threat model (PRD §14): assets, privacy/technical/user/maintenance risks, and reporting process.
-- [ ] `CONTRIBUTING.md` (created/finished in Phase 0): Bun-only workflow (`bun install`, `bun run dev`, `bun run check`, `bun run test*`), `prek` hooks, **Conventional Commits**, **DCO `Signed-off-by`** (no CLA), and SPDX-header requirement.
-- [ ] Developer docs: a from-clean-machine reproduction guide (clone → `bun install --frozen-lockfile` → `bun run postinstall` → `bun run dev`/`build`/`test`), and `docs/protocol-capture.md`/`docs/firefox-validation.md` finalized.
-- [ ] Prior-art provenance: document the MIT attribution for grammar ported from `harvard-vpal/gdocrevisions`, and the study-for-facts-only status of Draftback/benmarwick sources (PRD §11.6).
-- [ ] License hygiene: confirm `LICENSE` (AGPL-3.0-or-later) and per-file SPDX headers across first-party source; add a CI license-audit step rejecting AGPL-incompatible dependencies (PRD §11.6).
-- [ ] Final verification pass: run `prek run --all-files`, `bun run compile`, `bun run check`, all three test tiers, and both builds; capture outputs into a release/handoff note.
+- [x] `README.md`: product summary, privacy guarantees (link §13), supported browsers, install-from-release + verify-checksum steps, and a clear "reconstruction from undocumented Google Docs data; may be incomplete" disclaimer (PRD §21).
+- [x] `PRIVACY.md`: the canonical privacy spec (PRD §13) — no backend, no telemetry, local-only, no accounts, minimal permissions.
+- [x] `SECURITY.md` + threat model (PRD §14): assets, privacy/technical/user/maintenance risks, and reporting process.
+- [x] `CONTRIBUTING.md` (created/finished in Phase 0): Bun-only workflow (`bun install`, `bun run dev`, `bun run check`, `bun run test*`), `prek` hooks, **Conventional Commits**, **DCO `Signed-off-by`** (no CLA), and SPDX-header requirement. *(Phase-2-pending notes removed; Bun-only dev workflow + SPDX section added.)*
+- [x] Developer docs: a from-clean-machine reproduction guide (clone → `bun install --frozen-lockfile` → `bun run postinstall` → `bun run dev`/`build`/`test`), and `docs/protocol-capture.md`/`docs/firefox-validation.md` finalized. *(`docs/DEVELOPMENT.md` added; capture/validation docs were already finalized in Phases 3.1/6.)*
+- [x] Prior-art provenance: document the MIT attribution for grammar ported from `harvard-vpal/gdocrevisions`, and the study-for-facts-only status of Draftback/benmarwick sources (PRD §11.6). *(`docs/PRIOR-ART.md`.)*
+- [x] License hygiene: confirm `LICENSE` (AGPL-3.0-or-later) and per-file SPDX headers across first-party source; add a CI license-audit step rejecting AGPL-incompatible dependencies (PRD §11.6). *(All 92 TS/TSX + 6 shell scripts carry SPDX; `scripts/license-audit.ts` + `audit:licenses` wired into `ci.yml` and `release.yml`.)*
+- [x] Final verification pass: run `prek run --all-files`, `bun run compile`, `bun run check`, all three test tiers, and both builds; capture outputs into a release/handoff note. *(Captured in `docs/HANDOFF.md`.)*
 
 ### Validation / acceptance criteria
 
-- [ ] `README.md`, `PRIVACY.md`, `SECURITY.md`, `CONTRIBUTING.md` exist and are accurate to the shipped behavior.
-- [ ] A contributor can reproduce a build and run all tests from documented steps on a clean machine.
-- [ ] Per-file SPDX headers present; dependency license audit passes (AGPL-compatible only).
-- [ ] All gates green: `prek run --all-files`, `tsc --noEmit`, `biome check`, Bun logic tests, Vitest, Playwright, Chromium + Firefox builds.
+- [x] `README.md`, `PRIVACY.md`, `SECURITY.md`, `CONTRIBUTING.md` exist and are accurate to the shipped behavior.
+- [x] A contributor can reproduce a build and run all tests from documented steps on a clean machine. *(`docs/DEVELOPMENT.md` — verified by running the documented gates.)*
+- [x] Per-file SPDX headers present; dependency license audit passes (AGPL-compatible only). *(`bun run audit:licenses` green: 661 packages, all compatible.)*
+- [x] All gates green: `prek run --all-files`, `tsc --noEmit`, `biome check`, Bun logic tests, Vitest, Playwright, Chromium + Firefox builds. *(See `docs/HANDOFF.md` verification table.)*
 
 ---
 
@@ -463,7 +463,7 @@ This plan **follows `.augment/rules/bun-solid-pro.md`** as the authoritative sou
 - [ ] **UI:** SolidJS replay tab + options page, UnoCSS presetWind4, `virtual:uno.css` imported once per UI entrypoint; no React-isms; no `vite-plugin-solid` reactivity warnings; keyboard-accessible.
 - [ ] **Tests:** Bun (pure logic) + Vitest (Solid/storage/browser) + Playwright (Chromium E2E) all green; ≥85% line coverage on parser/reconstruction; Firefox validated manually + `web-ext`.
 - [ ] **Release:** deterministic builds from `--frozen-lockfile`; SHA-256 checksums + provenance published; permission/no-remote-code review passed; AMO source README + CWS statements ready.
-- [ ] **Docs:** README, PRIVACY, SECURITY/threat model, CONTRIBUTING (Conventional Commits + DCO), SPDX headers, dependency license audit — all complete.
+- [x] **Docs:** README, PRIVACY, SECURITY/threat model, CONTRIBUTING (Conventional Commits + DCO), SPDX headers, dependency license audit — all complete.
 - [ ] **Privacy invariant:** verified zero non-Google network requests, no telemetry, no accounts, local-only storage (PRD §13).
 
 ---

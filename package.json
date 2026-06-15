@@ -19,6 +19,7 @@
     "test:coverage": "bun test --coverage ./lib/decoder ./lib/reconstruction",
     "test:e2e": "playwright test",
     "check": "biome check --write .",
+    "audit:licenses": "bun run scripts/license-audit.ts",
     "hooks": "prek run --all-files",
     "hooks:install": "prek install --hook-type pre-commit --hook-type commit-msg --hook-type pre-push",
     "postinstall": "wxt prepare"
