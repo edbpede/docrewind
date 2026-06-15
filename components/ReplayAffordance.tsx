@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
 // Replay activation affordance (plan Phase 5 Step 9 / PRD §9.2, §11.2). An
-// unobtrusive floating trigger styled with the design-system button shortcut.
+// unobtrusive trigger that mounts inside the Google Docs titlebar button row so
+// it reads as a native part of the toolbar (styled with the `btn-secondary`
+// design-system shortcut — the bordered, neutral pill that blends with the
+// Share-button group rather than the brand-colored primary button).
 // Solid idioms only: `props.x` (never destructured), `class` (never `className`),
 // no `.map()`/ternary rendering. Activation happens ONLY on the user's explicit
 // click (no auto-load). Icon is paired with text (§9.11).
@@ -24,7 +27,7 @@ const ReplayAffordance: Component<ReplayAffordanceProps> = (props) => {
   return (
     <button
       type="button"
-      class="btn-primary fixed bottom-4 right-4 z-[2147483647] shadow-lg"
+      class="btn-secondary self-center whitespace-nowrap"
       aria-label="Replay this document's revision history"
       on:click={() => props.onActivate()}
     >
