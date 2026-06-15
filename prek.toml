@@ -18,7 +18,7 @@ hooks = [
   { id = "no-commit-to-branch", args = ["--branch", "main"] },
 ]
 
-# Conventional Commits — see CONTRIBUTING.md "Commit Messages".
+# Conventional Commits.
 [[repos]]
 repo = "https://github.com/compilerla/conventional-pre-commit"
 rev = "v4.4.0"
@@ -41,7 +41,7 @@ hooks = [
 #   - vitest / bun-logic-tests / wxt-build run at PRE-PUSH
 # DECISION (plan Phase 0 line 96, unblocked once Phase 7 landed): the `bun run
 # build` smoke gate is now ENABLED at pre-push. Phase 7 confirmed the build is fast
-# (~1-1.5 s, see docs/HANDOFF.md verification table) and reproducible
+# (~1-1.5 s) and reproducible
 # (scripts/verify-reproducible-build.sh), so gating pushes on it is cheap and
 # catches bundle/manifest regressions before they reach the remote. It builds the
 # Chromium MV3 target only (fast smoke); CI still builds BOTH browsers.

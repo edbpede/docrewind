@@ -11,8 +11,7 @@
 #   hash-seeded chunk name, an embedded timestamp, map-iteration-ordered output).
 #
 #   It does NOT prove cross-machine byte reproducibility. That is the PRD §0.9
-#   STRETCH GOAL, documented (with a pinned-container recipe sketch) in
-#   docs/RELEASE.md — not asserted here.
+#   STRETCH GOAL — not asserted here.
 #
 # NORMALIZATION: zip entry order and per-entry mtimes are environment-dependent
 # zip *metadata*, so they are NORMALIZED AWAY rather than asserted stable — we
@@ -113,6 +112,6 @@ done
 
 if [ "$status" -eq 0 ]; then
   echo "OK: same-environment per-file content determinism verified for both extensions."
-  echo "    (Cross-machine byte reproducibility is the PRD §0.9 stretch goal — see docs/RELEASE.md.)"
+  echo "    (Cross-machine byte reproducibility is the PRD §0.9 stretch goal.)"
 fi
 exit "$status"

@@ -9,7 +9,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // LIVE retrieval activation site. The §24 transport capture landed 2026-06-12
 // and NO stop-condition fired (no protobuf, no `batchexecute` wrapper, no
-// page-derived read token, no endpoint restriction — see docs/protocol-capture.md).
+// page-derived read token, no endpoint restriction).
 // The two pure gated stubs have been replaced HERE with the live `ChunkFetcher`
 // (`fetch(url, { credentials: "include" })` + `buildRevisionsLoadUrl`) and the
 // confirmed revision-count discovery. The orchestrator and all of lib/retrieval
