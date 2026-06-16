@@ -28,14 +28,14 @@ export default defineContentScript({
       name: "docrewind-affordance",
       position: "inline",
       // Mount inside the Docs titlebar button group (near Share) so the control
-      // reads as native. The toolbar is built asynchronously and the exact class
-      // can vary, so resolve the anchor lazily with fallbacks; `autoMount` (below)
-      // re-evaluates this until a host appears. `append: "first"` places us at the
-      // start of the row, left of the version-history/comment icons.
-      anchor: () =>
-        document.querySelector(".docs-titlebar-buttons") ??
-        document.querySelector("#docs-titlebar-share-client-button")?.parentElement ??
-        null,
+      // reads as native. The toolbar is built asynchronously, so `autoMount`
+      // (below) observes the DOM and mounts once a host matches. autoMount drives
+      // a MutationObserver off this selector and REJECTS an `Element`/`() => Element`
+      // anchor, so it must be a string. The exact class can vary, so we list a
+      // fallback: `:has(> #…share…)` is the CSS equivalent of the share button's
+      // parent. `append: "first"` places us at the start of the row, left of the
+      // version-history/comment icons.
+      anchor: ".docs-titlebar-buttons, :has(> #docs-titlebar-share-client-button)",
       append: "first",
       // Keep page shortcuts from leaking into our control and vice versa.
       isolateEvents: ["keydown", "keyup", "click", "wheel"],
