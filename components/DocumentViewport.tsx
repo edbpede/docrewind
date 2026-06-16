@@ -18,49 +18,56 @@ export interface DocumentViewportProps {
 }
 
 const DocumentViewport: Component<DocumentViewportProps> = (props) => {
+  // The manuscript leaf: an elevated sheet with a ruled binding margin. Both the
+  // written page and the blank-page note rest on the same paper so scrubbing back
+  // to the start never drops out of the manuscript frame.
   return (
-    <Show
-      when={props.segments.length > 0}
-      fallback={
-        <p class="doc-column italic text-stone-500 dark:text-stone-400">{strings.viewport.empty}</p>
-      }
-    >
-      <article class="doc-column" dir="auto">
-        <For each={props.segments}>
-          {(segment) => (
-            <Switch>
-              <Match when={segment.kind === "accepted-text" && segment}>
-                {(seg) => <span class="doc-accepted">{seg().text}</span>}
-              </Match>
-              <Match when={segment.kind === "suggested-insert" && segment}>
-                {(seg) => (
-                  <span class="doc-suggest">
-                    <span class="sr-only">{strings.viewport.suggestedInsert}: </span>
-                    {seg().text}
-                  </span>
-                )}
-              </Match>
-              <Match when={segment.kind === "marked-for-deletion" && segment}>
-                {(seg) => (
-                  <span class="doc-strike">
-                    <span class="sr-only">{strings.viewport.markedForDeletion}: </span>
-                    {seg().text}
-                  </span>
-                )}
-              </Match>
-              <Match when={segment.kind === "opaque-placeholder" && segment}>
-                {(seg) => (
-                  <span class="doc-opaque" title={seg().label}>
-                    <span aria-hidden="true">▤</span>
-                    <span>{seg().label}</span>
-                  </span>
-                )}
-              </Match>
-            </Switch>
-          )}
-        </For>
-      </article>
-    </Show>
+    <section class="dr-leaf">
+      <Show
+        when={props.segments.length > 0}
+        fallback={
+          <p class="doc-column italic text-stone-500 dark:text-stone-400">
+            {strings.viewport.empty}
+          </p>
+        }
+      >
+        <article class="doc-column" dir="auto">
+          <For each={props.segments}>
+            {(segment) => (
+              <Switch>
+                <Match when={segment.kind === "accepted-text" && segment}>
+                  {(seg) => <span class="doc-accepted">{seg().text}</span>}
+                </Match>
+                <Match when={segment.kind === "suggested-insert" && segment}>
+                  {(seg) => (
+                    <span class="doc-suggest">
+                      <span class="sr-only">{strings.viewport.suggestedInsert}: </span>
+                      {seg().text}
+                    </span>
+                  )}
+                </Match>
+                <Match when={segment.kind === "marked-for-deletion" && segment}>
+                  {(seg) => (
+                    <span class="doc-strike">
+                      <span class="sr-only">{strings.viewport.markedForDeletion}: </span>
+                      {seg().text}
+                    </span>
+                  )}
+                </Match>
+                <Match when={segment.kind === "opaque-placeholder" && segment}>
+                  {(seg) => (
+                    <span class="doc-opaque" title={seg().label}>
+                      <span aria-hidden="true">▤</span>
+                      <span>{seg().label}</span>
+                    </span>
+                  )}
+                </Match>
+              </Switch>
+            )}
+          </For>
+        </article>
+      </Show>
+    </section>
   );
 };
 

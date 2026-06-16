@@ -2,7 +2,9 @@
 //
 // Google Docs content script (plan §1.6 / PRD §9.2, §10.9, §11.2). Detects a
 // document context, extracts its id, and mounts an unobtrusive activation
-// affordance in a STYLE-ISOLATED shadow root. It does NOT auto-load history and
+// affordance in a STYLE-ISOLATED shadow root inside the Docs titlebar button
+// row, so it reads as a native part of the toolbar. It does NOT auto-load
+// history and
 // does NOT own the fetch — clicking asks the background to start retrieval via
 // typed messaging. All `browser.*`/DOM access stays inside `main(ctx)`.
 
@@ -25,7 +27,16 @@ export default defineContentScript({
     const ui = await createShadowRootUi(ctx, {
       name: "docrewind-affordance",
       position: "inline",
-      anchor: "body",
+      // Mount inside the Docs titlebar button group (near Share) so the control
+      // reads as native. The toolbar is built asynchronously and the exact class
+      // can vary, so resolve the anchor lazily with fallbacks; `autoMount` (below)
+      // re-evaluates this until a host appears. `append: "first"` places us at the
+      // start of the row, left of the version-history/comment icons.
+      anchor: () =>
+        document.querySelector(".docs-titlebar-buttons") ??
+        document.querySelector("#docs-titlebar-share-client-button")?.parentElement ??
+        null,
+      append: "first",
       // Keep page shortcuts from leaking into our control and vice versa.
       isolateEvents: ["keydown", "keyup", "click", "wheel"],
       onMount: (container) =>
@@ -56,6 +67,9 @@ export default defineContentScript({
         if (typeof dispose === "function") dispose();
       },
     });
-    ui.mount();
+    // Auto-mount: the Docs toolbar mounts after the content script runs, so
+    // observe the DOM and mount once the anchor exists (and re-mount if Docs
+    // re-renders the titlebar). Replaces the eager `ui.mount()`.
+    ui.autoMount();
   },
 });
