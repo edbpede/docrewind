@@ -47,6 +47,7 @@ const errorTitles = {
 export const strings = {
   app: {
     title: "DocRewind — revision replay",
+    brandName: "DocRewind",
     mastheadEyebrow: "Revision replay",
     mastheadTitle: "The document, rebuilt from its own revision history.",
     optionsLink: "Settings & privacy",

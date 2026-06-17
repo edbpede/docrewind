@@ -8,6 +8,7 @@
 
 import type { Component } from "solid-js";
 import { createResource, createSignal, For, onMount, Show } from "solid-js";
+import BrandMark from "@/components/BrandMark";
 import CacheControls from "@/components/CacheControls";
 import DiagnosticsPreferences from "@/components/DiagnosticsPreferences";
 import PrivacySummary from "@/components/PrivacySummary";
@@ -182,7 +183,10 @@ const OptionsApp: Component = () => {
   return (
     <div class="dr-page">
       <main class="mx-auto flex max-w-2xl flex-col gap-4 p-6">
-        <h1 class="text-xl font-semibold">{strings.options.title}</h1>
+        <div class="flex items-center gap-3">
+          <BrandMark size={36} />
+          <h1 class="text-xl font-semibold">{strings.options.title}</h1>
+        </div>
 
         <PrivacySummary />
 

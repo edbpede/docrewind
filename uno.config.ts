@@ -80,6 +80,16 @@ const shortcuts = {
   "dr-title":
     "text-balance font-serif text-xl font-semibold tracking-tight text-stone-900 dark:text-stone-50",
 
+  // ── Brand mark: the DocRewind logo seated on a fixed "app chip" ────────────
+  // The icon art carries light highlights (#fff/#ebeced) and deep navies, so it
+  // would lose contrast on BOTH the paper-light and stone-dark page. We seat it
+  // on a tile that stays light in both themes (the way an OS launcher icon does),
+  // so the mark reads identically regardless of color scheme. A hair of inset
+  // padding keeps the full-bleed art off the rounded corners.
+  "dr-brandmark":
+    "inline-grid shrink-0 place-items-center overflow-hidden rounded-lg bg-white p-1 " +
+    "ring-1 ring-stone-200 shadow-sm dark:ring-stone-700/80",
+
   // ── The manuscript leaf: an elevated sheet with a graphite binding margin ──
   // `before:` draws the ruled binding margin — pure decoration (no meaning rides
   // on it), graphite-neutral so it never collides with the strike/suggest hues.

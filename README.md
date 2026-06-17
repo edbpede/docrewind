@@ -25,6 +25,17 @@ Load the unpacked build:
 - **Firefox:** open `about:debugging#/runtime/this-firefox`, click **Load
   Temporary Add-on…**, and select the `manifest.json` inside `.output/firefox-mv3`.
 
+### Extension icon
+
+The brand icon lives at `public/icon/docrewind.svg`. The sized PNGs WXT wires into
+the manifest (`public/icon/{16,32,48,96,128}.png`) are **committed** so the build
+stays deterministic and free of a build-time rasterizer. Re-render them only when
+the art changes:
+
+```sh
+./scripts/generate-icons.sh   # needs librsvg (rsvg-convert) or ImageMagick
+```
+
 ## Usage
 
 1. Open a Google Doc you can already access.
