@@ -107,9 +107,11 @@ const SummaryInsights: Component<SummaryInsightsProps> = (rawProps) => {
       <dl class="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <For each={stats()}>
           {(stat) => (
-            <div>
-              <dt class="text-xs text-stone-500 dark:text-stone-400">{stat.label}</dt>
-              <dd class="font-mono text-lg tabular-nums">{stat.value}</dd>
+            <div class="flex flex-col gap-0.5">
+              <dt class="dr-eyebrow">{stat.label}</dt>
+              <dd class="font-mono text-lg tabular-nums text-stone-800 dark:text-stone-100">
+                {stat.value}
+              </dd>
             </div>
           )}
         </For>

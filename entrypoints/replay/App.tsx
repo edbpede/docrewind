@@ -791,12 +791,17 @@ const ReplaySurface: Component<{
                       </div>
                     </section>
 
+                    {/* The leaf is the hero: the rebuilt manuscript sits directly
+                        under its transport, so the controls read as the margin of
+                        the page they drive. */}
+                    <DocumentViewport segments={currentSegments()} />
+
+                    {/* The colophon: content-free insights close the record. */}
                     <SummaryInsights
                       revisions={data().revisions}
                       timeline={data().timeline}
                       realIdentities={showRealIdentities() ?? false}
                     />
-                    <DocumentViewport segments={currentSegments()} />
                     <footer class="pt-2 text-sm">
                       <a
                         class="text-revision underline"

@@ -41,7 +41,7 @@ const PlaybackControls: Component<PlaybackControlsProps> = (props) => {
         aria-label={strings.controls.restart}
         onClick={() => props.onRestart()}
       >
-        <span aria-hidden="true">⤺</span>
+        <span aria-hidden="true">↺</span>
         <span>{strings.controls.restart}</span>
       </button>
 
