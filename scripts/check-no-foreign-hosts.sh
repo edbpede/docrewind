@@ -61,7 +61,7 @@ for f in "${files[@]}"; do
     # fetch target — e.g. fetch("https://github.com/…") — still fails here and
     # must go through the manifest+allowed_host route above.
     line_is_egress=0
-    if printf '%s\n' "$line" | grep -qE 'fetch\(|XMLHttpRequest|WebSocket|EventSource|sendBeacon|importScripts\('; then
+    if printf '%s\n' "$line" | grep -qE '(^|[^[:alnum:]_$])fetch[[:space:]]*\(|XMLHttpRequest|WebSocket|EventSource|sendBeacon|importScripts[[:space:]]*\('; then
       line_is_egress=1
     fi
     while read -r host; do
