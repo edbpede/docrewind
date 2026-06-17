@@ -23,6 +23,7 @@ import {
   Show,
   Suspense,
 } from "solid-js";
+import BrandMark from "@/components/BrandMark";
 import DocumentViewport from "@/components/DocumentViewport";
 import PlaybackControls from "@/components/PlaybackControls";
 import PrivacyBanner from "@/components/PrivacyBanner";
@@ -235,7 +236,10 @@ const MessageCard: Component<{
   <main class="mx-auto flex max-w-prose flex-col gap-3 p-8">
     <PrivacyBanner />
     <div class="dr-card flex flex-col gap-2">
-      <h1 class="text-balance font-serif text-lg font-semibold text-strike">{props.title}</h1>
+      <div class="flex items-center gap-2.5">
+        <BrandMark size={28} />
+        <h1 class="text-balance font-serif text-lg font-semibold text-strike">{props.title}</h1>
+      </div>
       <p class="text-pretty text-sm text-stone-700 dark:text-stone-300">{props.body}</p>
       <Show when={props.actionLabel}>
         {(label) => (
@@ -718,6 +722,10 @@ const ReplaySurface: Component<{
   function renderProgress() {
     return (
       <main class="mx-auto flex max-w-3xl flex-col gap-4 p-6">
+        <div class="flex items-center gap-2.5">
+          <BrandMark size={32} />
+          <span class="dr-eyebrow">{strings.app.brandName}</span>
+        </div>
         <PrivacyBanner />
         <ProgressView
           phase={phase()}
@@ -770,8 +778,13 @@ const ReplaySurface: Component<{
                 {(data) => (
                   <main class="mx-auto flex max-w-3xl flex-col gap-5 p-6 sm:p-8">
                     <header class="dr-masthead">
-                      <p class="dr-eyebrow">{strings.app.mastheadEyebrow}</p>
-                      <h1 class="dr-title">{strings.app.mastheadTitle}</h1>
+                      <div class="flex items-center gap-3">
+                        <BrandMark size={40} />
+                        <div class="flex flex-col gap-1">
+                          <p class="dr-eyebrow">{strings.app.mastheadEyebrow}</p>
+                          <h1 class="dr-title">{strings.app.mastheadTitle}</h1>
+                        </div>
+                      </div>
                       <PrivacyBanner approximationNote={strings.privacy.approximationNote} />
                     </header>
 
