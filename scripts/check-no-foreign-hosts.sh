@@ -55,13 +55,24 @@ for f in "${files[@]}"; do
     case "$trimmed" in
       //*|\**|/\**) continue ;;
     esac
+    # A display-host exemption only applies when the surrounding line is a
+    # user-facing link context, NOT a network call. Lines that invoke `fetch(`
+    # (or other egress APIs) keep a display host on the rule-1 path so a new
+    # fetch target — e.g. fetch("https://github.com/…") — still fails here and
+    # must go through the manifest+allowed_host route above.
+    line_is_egress=0
+    if printf '%s\n' "$line" | grep -qE 'fetch\(|XMLHttpRequest|WebSocket|EventSource|sendBeacon|importScripts\('; then
+      line_is_egress=1
+    fi
     while read -r host; do
       [ -z "$host" ] && continue
       [ "$host" = "$allowed_host" ] && continue
       is_display=0
-      for dh in "${allowed_display_hosts[@]}"; do
-        [ "$host" = "$dh" ] && is_display=1 && break
-      done
+      if [ "$line_is_egress" -eq 0 ]; then
+        for dh in "${allowed_display_hosts[@]}"; do
+          [ "$host" = "$dh" ] && is_display=1 && break
+        done
+      fi
       [ "$is_display" -eq 1 ] && continue
       foreign_urls+="$f: $host"$'\n'
     done < <(printf '%s\n' "$line" | grep -oE 'https?://[A-Za-z0-9.-]+' | sed -E 's#^https?://##')
