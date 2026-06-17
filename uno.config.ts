@@ -256,6 +256,11 @@ const shortcuts = {
 
   // ── Data / chrome typography helpers ──────────────────────────────────────
   "dr-counter": "font-mono text-sm tabular-nums text-stone-600 dark:text-stone-400",
+  // The determinate progress figure: the bar's percentage as a readable number
+  // in the playhead indigo. `tabular-nums` holds the digits steady so the figure
+  // doesn't reflow as it climbs (9% → 10% → 100%).
+  "dr-percent":
+    "font-mono text-base font-semibold tabular-nums text-revision dark:text-revision-ring",
   "dr-eyebrow":
     "font-mono text-[11px] uppercase tracking-[0.16em] text-stone-500 dark:text-stone-400",
 };
@@ -328,13 +333,29 @@ export default defineConfig({
 
 @media (prefers-reduced-motion: reduce) {
   .tl-fill, .tl-thumb, .tl-track, .tl-marker, .tl-cluster, .progress-fill, .btn-base { transition: none !important; }
-  .dr-indeterminate { animation: none !important; }
+  /* Don't freeze the indeterminate bar (a static one-third pill reads as a
+     broken/stalled load). Instead drop the travelling sweep for a vestibular-
+     safe opacity pulse over the FULL track, so reduced-motion users still get a
+     clear "still working" signal while the upper bound is being discovered. */
+  .dr-indeterminate {
+    width: 100% !important;
+    transform: none !important;
+    animation: dr-indeterminate-pulse 1.5s ease-in-out infinite !important;
+  }
 }
+/* "Discovering" is honestly indeterminate — the revision upper bound isn't known
+   yet, so there is no percentage to show. A continuous linear sweep communicates
+   liveness without faking determinate progress; the determinate fill takes over
+   for the "fetching" phase once checkpoints start landing. */
 @keyframes dr-indeterminate-slide {
   0% { transform: translateX(-100%); }
   100% { transform: translateX(300%); }
 }
-.dr-indeterminate { animation: dr-indeterminate-slide 1.2s ease-in-out infinite; }
+@keyframes dr-indeterminate-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+.dr-indeterminate { animation: dr-indeterminate-slide 1.1s linear infinite; }
 `,
     },
   ],

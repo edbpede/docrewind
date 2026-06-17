@@ -10,8 +10,8 @@ import type { RetrievalErrorCategory } from "../retrieval/errors";
 import {
   authorLabel,
   errorTitle,
-  fetchingPercent,
   opaqueLabel,
+  percentLabel,
   revisionOf,
   speedLabel,
   strings,
@@ -68,7 +68,7 @@ describe("strings catalog", () => {
   it("interpolates parameterized accessors", () => {
     expect(revisionOf(12, 340)).toBe("Revision 12 of 340");
     expect(speedLabel(2)).toBe("2×");
-    expect(fetchingPercent(42)).toContain("42%");
+    expect(percentLabel(42)).toBe("42%");
     expect(authorLabel(0)).toBe("Author 1");
   });
 });
