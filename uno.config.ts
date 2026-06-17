@@ -114,7 +114,7 @@ const shortcuts = {
   // — an oklch ramp from faded early writing to saturated fresh indigo at the
   // playhead, interpolated `in oklch` so the ramp stays perceptually even.
   "tl-track":
-    "group relative h-2.5 w-full rounded-full bg-stone-200 dark:bg-stone-700 " +
+    "relative h-2.5 w-full rounded-full bg-stone-200 dark:bg-stone-700 " +
     "shadow-[inset_0_1px_2px_oklch(0%_0_0/0.07)] dark:shadow-[inset_0_1px_2px_oklch(0%_0_0/0.25)] " +
     "outline-none focus-visible:ring-2 focus-visible:ring-revision-ring " +
     "focus-visible:ring-offset-2 focus-visible:ring-offset-stone-50 " +
@@ -228,7 +228,14 @@ const shortcuts = {
   // ── Progress (determinate + indeterminate + error) ────────────────────────
   "progress-track": "h-2 w-full overflow-hidden rounded-full bg-stone-200 dark:bg-stone-700",
   "progress-fill": "h-full rounded-full bg-revision transition-[width]",
-  "progress-indeterminate": "h-full w-1/3 rounded-full bg-revision dr-indeterminate",
+  // Layout only. The `dr-indeterminate` animation class is applied SEPARATELY on
+  // the element (ProgressView) rather than folded in here: it's a preflight class
+  // (keyframes + the slide/pulse rules + the reduced-motion override all live in
+  // the preflight below), not a generatable utility, so embedding it in this
+  // shortcut made UnoCSS warn "unmatched utility" and silently DROP it — leaving
+  // the bar a static one-third pill with no animation. Kept apart, the preflight
+  // `.dr-indeterminate` rules target the element directly and animate as intended.
+  "progress-indeterminate": "h-full w-1/3 rounded-full bg-revision",
 
   // ── PrivacyBanner / reconstruction-warning surface ────────────────────────
   "banner-warning":

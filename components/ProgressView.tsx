@@ -38,7 +38,7 @@ const ProgressView: Component<ProgressViewProps> = (props) => {
         <Match when={props.phase === "discovering"}>
           <p class="dr-eyebrow">{strings.progress.discovering}</p>
           <div class="progress-track">
-            <div class="progress-indeterminate" />
+            <div class="progress-indeterminate dr-indeterminate" />
           </div>
         </Match>
 
