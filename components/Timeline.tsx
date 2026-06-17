@@ -11,18 +11,23 @@
 // array). The leaf never sees a `RevisionId`, so it cannot mix the two scales.
 
 import type { Component } from "solid-js";
-import { createMemo, For, Show } from "solid-js";
+import { createMemo, createSignal, For, Show } from "solid-js";
 import { revisionOf, strings } from "@/lib/i18n/strings";
+
+/** The four kinds of writing-activity mark drawn onto the timeline stratum. */
+export type TimelineMarkerKind = "session" | "large-insertion" | "large-deletion" | "pause";
 
 /** A timeline event projected onto the applied-count axis for rendering. */
 export interface TimelineMarker {
   /** Stable key (kind + anchor) for `<For>`. */
   readonly id: string;
-  readonly kind: "session" | "large-insertion" | "large-deletion" | "pause";
+  readonly kind: TimelineMarkerKind;
   /** Applied-count position in [0, max]. */
   readonly index: number;
   /** Accessible description (i18n) for the marker. */
   readonly label: string;
+  /** Content-free revision data shown on hover/focus (e.g. "+1,240 characters"). */
+  readonly detail?: string;
 }
 
 export interface TimelineProps {
@@ -36,7 +41,8 @@ export interface TimelineProps {
 // hue (§9.11), drawn from a copy-editor's margin vocabulary: a section sign for a
 // writing sitting, a caret-up for a surge of inserted text, a caret-down for a
 // passage cut, and a caesura (the musical rest bar) for a pause between sittings.
-function markerGlyph(kind: TimelineMarker["kind"]): string {
+// Exported so the legend keys each mark to its meaning with the same glyphs.
+export function markerGlyph(kind: TimelineMarkerKind): string {
   switch (kind) {
     case "session":
       return "§";
@@ -53,15 +59,17 @@ function markerGlyph(kind: TimelineMarker["kind"]): string {
   }
 }
 
-function markerClass(kind: TimelineMarker["kind"]): string {
+// The per-kind seal ink (color + border). Split from the marker base so the
+// legend can reuse the same tones on its static seals (`tl-seal`).
+export function markerToneClass(kind: TimelineMarkerKind): string {
   switch (kind) {
     case "session":
-      return "tl-marker tl-marker-session";
+      return "tl-marker-session";
     case "large-insertion":
     case "large-deletion":
-      return "tl-marker tl-marker-large";
+      return "tl-marker-large";
     case "pause":
-      return "tl-marker tl-marker-pause";
+      return "tl-marker-pause";
     default: {
       const _exhaustive: never = kind;
       return _exhaustive;
@@ -75,6 +83,27 @@ const Timeline: Component<TimelineProps> = (props) => {
   const fraction = createMemo(() => (props.max > 0 ? props.currentIndex / props.max : 0));
   const pct = (value: number): string =>
     `${(props.max > 0 ? (value / props.max) * 100 : 0).toFixed(2)}%`;
+
+  // Hover/focus tooltip: a single popover, driven by the active marker id, so the
+  // mark itself stays a thin jump-to button. Set on enter/focus, cleared on
+  // leave/blur — making the revision data reachable by pointer AND keyboard.
+  const [activeId, setActiveId] = createSignal<string | null>(null);
+  const activeMarker = createMemo(() => {
+    const id = activeId();
+    return id === null ? undefined : props.events.find((event) => event.id === id);
+  });
+  // Edge-aware horizontal anchoring: a centered popover near a track end would
+  // spill off the page, so clamp to the marker's left/right edge in the margins.
+  function tipTransform(index: number): string {
+    const frac = props.max > 0 ? index / props.max : 0;
+    if (frac <= 0.12) {
+      return "translateX(0)";
+    }
+    if (frac >= 0.88) {
+      return "translateX(-100%)";
+    }
+    return "translateX(-50%)";
+  }
 
   function scrubFromClientX(clientX: number): void {
     if (track === undefined || props.max <= 0) {
@@ -159,11 +188,18 @@ const Timeline: Component<TimelineProps> = (props) => {
           <Show when={marker.index >= 0 && marker.index <= props.max}>
             <button
               type="button"
-              class={`${markerClass(marker.kind)} p-0`}
+              class={`tl-marker ${markerToneClass(marker.kind)} p-0`}
               style={{ left: pct(marker.index) }}
-              title={marker.label}
-              aria-label={`${marker.label} — ${revisionOf(marker.index, props.max)}`}
+              aria-label={
+                marker.detail === undefined
+                  ? `${marker.label} — ${revisionOf(marker.index, props.max)}`
+                  : `${marker.label} — ${marker.detail} — ${revisionOf(marker.index, props.max)}`
+              }
               onPointerDown={(event) => event.stopPropagation()}
+              onPointerEnter={() => setActiveId(marker.id)}
+              onPointerLeave={() => setActiveId((id) => (id === marker.id ? null : id))}
+              onFocus={() => setActiveId(marker.id)}
+              onBlur={() => setActiveId((id) => (id === marker.id ? null : id))}
               onClick={(event) => {
                 event.stopPropagation();
                 props.onScrub(marker.index);
@@ -174,6 +210,21 @@ const Timeline: Component<TimelineProps> = (props) => {
           </Show>
         )}
       </For>
+      <Show when={activeMarker()}>
+        {(marker) => (
+          <div
+            class="tl-tip"
+            role="tooltip"
+            style={{ left: pct(marker().index), transform: tipTransform(marker().index) }}
+          >
+            <span class="tl-tip-title">{marker().label}</span>
+            <Show when={marker().detail}>
+              {(detail) => <span class="tl-tip-detail">{detail()}</span>}
+            </Show>
+            <span class="tl-tip-rev">{revisionOf(marker().index, props.max)}</span>
+          </div>
+        )}
+      </Show>
       <div class="tl-thumb" style={{ left: pct(props.currentIndex) }} />
     </div>
   );

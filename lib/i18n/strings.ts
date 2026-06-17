@@ -71,6 +71,7 @@ export const strings = {
   },
   timeline: {
     label: "Revision timeline",
+    legendLabel: "Marks",
     markerSession: "Editing session",
     markerLargeInsertion: "Large insertion",
     markerLargeDeletion: "Large deletion",
@@ -158,4 +159,42 @@ export function fetchingPercent(pct: number): string {
 /** Opaque, stable author label (real identities are never surfaced by default). */
 export function authorLabel(index: number): string {
   return `Author ${index + 1}`;
+}
+
+/**
+ * Human, compact duration from milliseconds (e.g. "45s", "12m", "1h 5m"). Pure
+ * and metadata-only — shared by the insights colophon and the timeline tooltips.
+ */
+export function formatDuration(ms: number): string {
+  const totalSeconds = Math.max(0, Math.round(ms / 1000));
+  if (totalSeconds < 60) {
+    return `${totalSeconds}s`;
+  }
+  const totalMinutes = Math.round(totalSeconds / 60);
+  if (totalMinutes < 60) {
+    return `${totalMinutes}m`;
+  }
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}m`;
+}
+
+// ── Timeline-marker detail lines (content-free hover/focus data) ──────────────
+// These describe a marker's revision activity using counts and timing only —
+// never any document text — so the hover tooltip stays within the privacy model.
+
+/** Editing-session detail, e.g. "1,240 inserted · 320 deleted". */
+export function sessionDetail(charsInserted: number, charsDeleted: number): string {
+  return `${charsInserted.toLocaleString()} inserted · ${charsDeleted.toLocaleString()} deleted`;
+}
+
+/** Large-edit detail from a signed char delta, e.g. "+1,240 characters". */
+export function largeEditDetail(charDelta: number): string {
+  const sign = charDelta < 0 ? "−" : "+"; // U+2212 MINUS SIGN for deletions
+  return `${sign}${Math.abs(charDelta).toLocaleString()} characters`;
+}
+
+/** Pause detail from a gap duration, e.g. "12m without edits". */
+export function pauseDetail(durationMs: number): string {
+  return `${formatDuration(durationMs)} without edits`;
 }
