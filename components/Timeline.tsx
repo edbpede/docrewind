@@ -195,6 +195,7 @@ const Timeline: Component<TimelineProps> = (props) => {
                   ? `${marker.label} — ${revisionOf(marker.index, props.max)}`
                   : `${marker.label} — ${marker.detail} — ${revisionOf(marker.index, props.max)}`
               }
+              aria-describedby={activeId() === marker.id ? "tl-tip" : undefined}
               onPointerDown={(event) => event.stopPropagation()}
               onPointerEnter={() => setActiveId(marker.id)}
               onPointerLeave={() => setActiveId((id) => (id === marker.id ? null : id))}
@@ -213,6 +214,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       <Show when={activeMarker()}>
         {(marker) => (
           <div
+            id="tl-tip"
             class="tl-tip"
             role="tooltip"
             style={{ left: pct(marker().index), transform: tipTransform(marker().index) }}

@@ -166,11 +166,11 @@ export function authorLabel(index: number): string {
  * and metadata-only — shared by the insights colophon and the timeline tooltips.
  */
 export function formatDuration(ms: number): string {
-  const totalSeconds = Math.max(0, Math.round(ms / 1000));
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
   if (totalSeconds < 60) {
     return `${totalSeconds}s`;
   }
-  const totalMinutes = Math.round(totalSeconds / 60);
+  const totalMinutes = Math.floor(totalSeconds / 60);
   if (totalMinutes < 60) {
     return `${totalMinutes}m`;
   }
