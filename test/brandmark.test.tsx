@@ -31,4 +31,11 @@ describe("BrandMark", () => {
     expect(chip?.style.width).toBe("40px");
     expect(chip?.style.height).toBe("40px");
   });
+
+  it("falls back to a 36px chip when no size prop is given", () => {
+    const { container } = render(() => <BrandMark />);
+    const chip = container.querySelector("span.dr-brandmark") as HTMLElement | null;
+    expect(chip?.style.width).toBe("36px");
+    expect(chip?.style.height).toBe("36px");
+  });
 });
