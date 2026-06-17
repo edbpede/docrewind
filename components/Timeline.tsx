@@ -18,7 +18,7 @@
 // no measured width (jsdom / first paint) every mark renders on its own.
 
 import type { Component } from "solid-js";
-import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { clusterCountLabel, revisionOf, revisionRangeOf, strings } from "@/lib/i18n/strings";
 
 /** The four kinds of writing-activity mark drawn onto the timeline stratum. */
@@ -187,18 +187,35 @@ function clusterToneClass(cluster: MarkerCluster): string {
   return kinds.size === 1 ? markerToneClass(cluster.members[0]!.kind) : "tl-cluster-mixed";
 }
 
-/** Kind breakdown for a cluster, e.g. "1 editing session · 3 large insertions". */
-function clusterBreakdown(members: readonly TimelineMarker[]): string {
+/** One kind's tally within a cluster — the unit of both the peek ledger and aria. */
+interface ClusterBreakdownRow {
+  readonly kind: TimelineMarkerKind;
+  readonly count: number;
+  /** Count-aware kind name, e.g. "Editing session" / "Large insertions". */
+  readonly label: string;
+}
+
+/**
+ * Per-kind tallies in stable display order. Drives the structured hover-peek
+ * ledger (one chip-row per kind) and, joined, the seal's accessible breakdown —
+ * so the visible rows and the spoken summary can never drift apart.
+ */
+function clusterBreakdownRows(members: readonly TimelineMarker[]): ClusterBreakdownRow[] {
   const counts = new Map<TimelineMarkerKind, number>();
   for (const member of members) {
     counts.set(member.kind, (counts.get(member.kind) ?? 0) + 1);
   }
-  return CLUSTER_KIND_ORDER.filter((kind) => counts.has(kind))
-    .map((kind) => {
-      const count = counts.get(kind)!;
-      const label = CLUSTER_KIND_LABEL[kind];
-      return `${count} ${count === 1 ? label : `${label}s`}`;
-    })
+  return CLUSTER_KIND_ORDER.filter((kind) => counts.has(kind)).map((kind) => {
+    const count = counts.get(kind)!;
+    const base = CLUSTER_KIND_LABEL[kind];
+    return { kind, count, label: count === 1 ? base : `${base}s` };
+  });
+}
+
+/** Kind breakdown for a cluster, e.g. "1 Editing session · 3 Large insertions". */
+function clusterBreakdown(members: readonly TimelineMarker[]): string {
+  return clusterBreakdownRows(members)
+    .map((row) => `${row.count} ${row.label}`)
     .join(" · ");
 }
 
@@ -262,6 +279,51 @@ const Timeline: Component<TimelineProps> = (props) => {
     const id = activeId();
     return id === null ? undefined : clusters().find((cluster) => cluster.id === id);
   });
+
+  // Pinned expansion: clicking a stacked seal opens an interactive panel listing
+  // every mark in the burst as a jump-row. The hover peek is a glance; this is the
+  // reading. Only one panel is open at a time (the active stack's id), and the seal
+  // is remembered so Escape can return focus to it after dismissal.
+  const [pinnedId, setPinnedId] = createSignal<string | null>(null);
+  const pinnedCluster = createMemo(() => {
+    const id = pinnedId();
+    return id === null ? undefined : clusters().find((cluster) => cluster.id === id);
+  });
+  let panelEl: HTMLDivElement | undefined;
+  let pinnedSealEl: HTMLButtonElement | undefined;
+  function closePanel(refocus = false): void {
+    setPinnedId(null);
+    if (refocus) {
+      pinnedSealEl?.focus();
+    }
+  }
+  // While a panel is pinned, a click anywhere outside it (and outside any seal) or
+  // an Escape press dismisses it — the manuscript-margin equivalent of closing a
+  // pulled card. Seal targets are spared so the seal's own click can toggle/switch.
+  createEffect(() => {
+    if (pinnedId() === null || typeof document === "undefined") {
+      return;
+    }
+    const onPointer = (event: PointerEvent): void => {
+      const target = event.target as Element | null;
+      if (target && (target.closest("[data-tl-seal]") || panelEl?.contains(target))) {
+        return;
+      }
+      closePanel();
+    };
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") {
+        closePanel(true);
+      }
+    };
+    document.addEventListener("pointerdown", onPointer, true);
+    document.addEventListener("keydown", onKey, true);
+    onCleanup(() => {
+      document.removeEventListener("pointerdown", onPointer, true);
+      document.removeEventListener("keydown", onKey, true);
+    });
+  });
+
   // Edge-aware horizontal anchoring: a centered popover near a track end would
   // spill off the page, so clamp to the seal's left/right edge in the margins.
   function tipTransform(index: number): string {
@@ -287,6 +349,7 @@ const Timeline: Component<TimelineProps> = (props) => {
   }
 
   function onPointerDown(event: PointerEvent): void {
+    closePanel(); // a scrub on the bare track dismisses any open detail panel
     activePointerId = event.pointerId;
     const target = event.currentTarget as HTMLDivElement;
     target.setPointerCapture(event.pointerId);
@@ -372,6 +435,9 @@ const Timeline: Component<TimelineProps> = (props) => {
               style={{ left: pct(cluster.index) }}
               aria-label={ariaLabel}
               aria-describedby={activeId() === cluster.id ? "tl-tip" : undefined}
+              aria-haspopup={single === undefined ? "dialog" : undefined}
+              aria-expanded={single === undefined ? pinnedId() === cluster.id : undefined}
+              data-tl-seal
               onPointerDown={(event) => event.stopPropagation()}
               onPointerEnter={() => setActiveId(cluster.id)}
               onPointerLeave={() => setActiveId((id) => (id === cluster.id ? null : id))}
@@ -379,7 +445,16 @@ const Timeline: Component<TimelineProps> = (props) => {
               onBlur={() => setActiveId((id) => (id === cluster.id ? null : id))}
               onClick={(event) => {
                 event.stopPropagation();
-                props.onScrub(cluster.jumpIndex);
+                // A singleton is its own detail — a click is a quick jump to it.
+                if (single !== undefined) {
+                  closePanel();
+                  props.onScrub(cluster.jumpIndex);
+                  return;
+                }
+                // A stacked seal opens (or toggles) its expanded jump-list instead
+                // of guessing one target; the rows inside scrub to a chosen frame.
+                pinnedSealEl = event.currentTarget;
+                setPinnedId((id) => (id === cluster.id ? null : cluster.id));
               }}
             >
               {single === undefined
@@ -391,9 +466,13 @@ const Timeline: Component<TimelineProps> = (props) => {
           );
         }}
       </For>
-      <Show when={activeCluster()}>
+      {/* Hover/focus peek — a glance. Suppressed while a panel is pinned so the
+          two surfaces never overlap. A stack shows a per-kind ledger (no more
+          cramped wrapping `·`-run) and hints that a click opens the full list. */}
+      <Show when={pinnedId() === null && activeCluster()}>
         {(cluster) => {
           const summary = createMemo(() => summarizeCluster(cluster(), props.max));
+          const isStack = createMemo(() => cluster().members.length > 1);
           return (
             <div
               id="tl-tip"
@@ -402,10 +481,102 @@ const Timeline: Component<TimelineProps> = (props) => {
               style={{ left: pct(cluster().index), transform: tipTransform(cluster().index) }}
             >
               <span class="tl-tip-title">{summary().title}</span>
-              <Show when={summary().detail}>
-                {(detail) => <span class="tl-tip-detail">{detail()}</span>}
+              <Show
+                when={isStack()}
+                fallback={
+                  <Show when={summary().detail}>
+                    {(detail) => <span class="tl-tip-detail">{detail()}</span>}
+                  </Show>
+                }
+              >
+                <ul class="tl-tip-breakdown">
+                  <For each={clusterBreakdownRows(cluster().members)}>
+                    {(row) => (
+                      <li class="tl-tip-row">
+                        <span class={`tl-chip ${markerToneClass(row.kind)}`} aria-hidden="true">
+                          {markerGlyph(row.kind)}
+                        </span>
+                        <span class="tl-tip-count">{row.count}</span>
+                        <span>{row.label}</span>
+                      </li>
+                    )}
+                  </For>
+                </ul>
               </Show>
               <span class="tl-tip-rev">{summary().rev}</span>
+              <Show when={isStack()}>
+                <span class="tl-tip-hint">{strings.timeline.inspectHint}</span>
+              </Show>
+            </div>
+          );
+        }}
+      </Show>
+      {/* Pinned panel — the reading. Each member is its own jump-row, so a dense
+          burst becomes a navigable index instead of one guessed scrub target. */}
+      <Show when={pinnedCluster()}>
+        {(cluster) => {
+          const summary = createMemo(() => summarizeCluster(cluster(), props.max));
+          return (
+            <div
+              ref={panelEl}
+              class="tl-panel"
+              role="dialog"
+              aria-label={summary().title}
+              style={{ left: pct(cluster().index), transform: tipTransform(cluster().index) }}
+            >
+              <div class="tl-panel-head">
+                <div class="tl-panel-heading">
+                  <span class="tl-panel-title">{summary().title}</span>
+                  <span class="tl-panel-rev">{summary().rev}</span>
+                </div>
+                <button
+                  type="button"
+                  class="tl-panel-close"
+                  aria-label={strings.timeline.closeDetails}
+                  onClick={() => closePanel(true)}
+                >
+                  ×
+                </button>
+              </div>
+              <ul class="tl-panel-list">
+                <For each={cluster().members}>
+                  {(member) => {
+                    const rev = revisionOf(member.index, props.max);
+                    const jumpLabel = `${strings.timeline.jumpTo} ${member.label}${
+                      member.detail ? ` — ${member.detail}` : ""
+                    } — ${rev}`;
+                    return (
+                      <li>
+                        <button
+                          type="button"
+                          class="tl-panel-row"
+                          aria-label={jumpLabel}
+                          onClick={() => {
+                            props.onScrub(member.index);
+                            closePanel(true);
+                          }}
+                        >
+                          <span
+                            class={`tl-chip ${markerToneClass(member.kind)}`}
+                            aria-hidden="true"
+                          >
+                            {markerGlyph(member.kind)}
+                          </span>
+                          <span class="tl-panel-row-main">
+                            <span class="tl-panel-row-kind">{CLUSTER_KIND_LABEL[member.kind]}</span>
+                            <Show when={member.detail}>
+                              {(detail) => <span class="tl-panel-row-detail">{detail()}</span>}
+                            </Show>
+                          </span>
+                          <span class="tl-panel-row-rev" aria-hidden="true">
+                            → {member.index}
+                          </span>
+                        </button>
+                      </li>
+                    );
+                  }}
+                </For>
+              </ul>
             </div>
           );
         }}

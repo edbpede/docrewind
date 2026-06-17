@@ -128,7 +128,7 @@ describe("replay UI components", () => {
     expect(screen.queryByRole("tooltip")).toBeNull();
   });
 
-  it("stacks colliding markers into one counted seal that jumps to the burst", async () => {
+  it("stacks colliding markers into one counted seal and expands it on click", async () => {
     const onScrub = vi.fn();
     // A lone session early, then a tight burst of four marks at the tail — at the
     // mocked 600px width the burst collides into a single stacked seal.
@@ -149,12 +149,28 @@ describe("replay UI components", () => {
     // Color is never the sole tell — the breakdown rides the accessible name.
     expect(stack.getAttribute("aria-label")).toContain("2 Large insertions");
     expect(stack.textContent).toBe("4");
+    expect(stack.getAttribute("aria-haspopup")).toBe("dialog");
 
+    // Hover peeks the burst's span without committing to a jump.
     await fireEvent.pointerEnter(stack);
     expect(screen.getByText("Revisions 145–148 of 148")).toBeTruthy();
+    await fireEvent.pointerLeave(stack);
 
+    // Clicking the stack expands it into a panel of per-mark jump rows rather than
+    // scrubbing to a guessed frame — the reader picks the exact mark to land on.
     await fireEvent.click(stack);
-    expect(onScrub).toHaveBeenCalledWith(145); // jumps to where the burst began
+    expect(onScrub).not.toHaveBeenCalled();
+    expect(stack.getAttribute("aria-expanded")).toBe("true");
+    const panel = screen.getByRole("dialog", { name: /4 marks/ });
+    expect(panel).toBeTruthy();
+
+    // Each member is its own jump target; choosing one scrubs to that frame.
+    const jump = screen.getByRole("button", {
+      name: /Jump to Large insertion — Revision 145 of 148/,
+    });
+    await fireEvent.click(jump);
+    expect(onScrub).toHaveBeenCalledWith(145);
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("clusterMarkers chains colliding marks and leaves distant ones singleton", () => {

@@ -162,14 +162,59 @@ const shortcuts = {
   // The hover/focus tooltip: a small paper card lifted above the hovered seal,
   // carrying the mark's name, its content-free revision data, and the frame it
   // jumps to. `pointer-events-none` so it never intercepts a scrub; positioned by
-  // the leaf via inline `left`/`transform` (edge-clamped near the track ends).
+  // the leaf via inline `left`/`transform` (edge-clamped near the track ends). A
+  // stacked seal trades the old cramped `·`-run for a ledger: one chip-row per
+  // kind, so nothing wraps mid-phrase, plus a hint that a click opens the full list.
   "tl-tip":
-    "pointer-events-none absolute bottom-[calc(100%+0.6rem)] z-20 flex max-w-[15rem] flex-col gap-0.5 " +
-    "rounded-md border border-stone-200 bg-white px-2.5 py-1.5 " +
-    "shadow-[0_8px_24px_-10px_oklch(0%_0_0/0.35)] dark:border-stone-700 dark:bg-stone-800",
-  "tl-tip-title": "font-sans text-xs font-semibold text-stone-800 dark:text-stone-100",
+    "pointer-events-none absolute bottom-[calc(100%+0.6rem)] z-20 flex w-max max-w-[17rem] flex-col gap-1.5 " +
+    "rounded-lg border border-stone-200 bg-white px-3 py-2 " +
+    "shadow-[0_10px_30px_-12px_oklch(0%_0_0/0.4)] dark:border-stone-700 dark:bg-stone-800",
+  "tl-tip-title": "font-sans text-[13px] font-semibold text-stone-800 dark:text-stone-100",
   "tl-tip-detail": "font-mono text-[11px] tabular-nums text-stone-500 dark:text-stone-400",
   "tl-tip-rev": "font-mono text-[11px] tabular-nums text-revision dark:text-revision-ring",
+  // The stacked-seal breakdown: a quiet ledger of kind-rows (chip · count · name).
+  "tl-tip-breakdown": "m-0 flex list-none flex-col gap-1 p-0",
+  "tl-tip-row": "flex items-center gap-2 text-xs text-stone-600 dark:text-stone-300",
+  "tl-tip-count":
+    "font-mono text-[11px] font-semibold tabular-nums text-stone-800 dark:text-stone-100",
+  "tl-tip-hint":
+    "mt-0.5 border-t border-stone-200/70 pt-1 font-sans text-[10px] uppercase tracking-wide " +
+    "text-stone-400 dark:border-stone-700 dark:text-stone-500",
+  // A small static seal reused inside tip-rows and panel-rows (the marker stamp
+  // without the track positioning). The kind tone supplies its border + ink.
+  "tl-chip":
+    "inline-grid size-[15px] shrink-0 place-items-center rounded-full border bg-white text-[11px] " +
+    "leading-none shadow-[0_1px_1px_oklch(0%_0_0/0.12)] dark:bg-stone-800",
+
+  // The pinned detail panel: clicking a stacked seal lifts this interactive card —
+  // a manuscript ledger of every mark in the burst, each row a jump-to-frame button.
+  // Unlike the hover peek it accepts the pointer (no `pointer-events-none`), caps its
+  // height and scrolls, and is dismissed by Escape / an outside click / its close mark.
+  "tl-panel":
+    "absolute bottom-[calc(100%+0.6rem)] z-30 flex max-h-[15rem] w-[17rem] flex-col overflow-hidden " +
+    "rounded-lg border border-stone-200 bg-white " +
+    "shadow-[0_18px_48px_-16px_oklch(0%_0_0/0.5)] dark:border-stone-700 dark:bg-stone-800",
+  "tl-panel-head":
+    "flex items-start justify-between gap-3 border-b border-stone-200/80 px-3 py-2 dark:border-stone-700",
+  "tl-panel-heading": "flex flex-col gap-0.5",
+  // Same treatment as the hover tip's title/rev — aliased to one source.
+  "tl-panel-title": "tl-tip-title",
+  "tl-panel-rev": "tl-tip-rev",
+  "tl-panel-close":
+    "grid size-6 shrink-0 place-items-center rounded-md text-lg leading-none text-stone-400 " +
+    "transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-700 dark:hover:text-stone-100 " +
+    "outline-none focus-visible:ring-2 focus-visible:ring-revision-ring",
+  "tl-panel-list": "m-0 flex list-none flex-col gap-0.5 overflow-y-auto p-1.5",
+  "tl-panel-row":
+    "flex w-full cursor-pointer items-center gap-2.5 rounded-md border-0 bg-transparent px-2 py-1.5 text-left " +
+    "transition-colors hover:bg-stone-100 dark:hover:bg-stone-700/70 " +
+    "outline-none focus-visible:ring-2 focus-visible:ring-revision-ring focus-visible:ring-inset",
+  "tl-panel-row-main": "flex min-w-0 flex-1 flex-col gap-0.5",
+  "tl-panel-row-kind": "font-sans text-xs font-medium text-stone-700 dark:text-stone-200",
+  "tl-panel-row-detail":
+    "truncate font-mono text-[11px] tabular-nums text-stone-500 dark:text-stone-400",
+  "tl-panel-row-rev":
+    "shrink-0 font-mono text-[11px] tabular-nums text-revision dark:text-revision-ring",
 
   // The marginalia key: a quiet wrapped row naming each seal-mark in view. A
   // static `tl-seal` mirrors the marker's stamp (sans the absolute positioning
