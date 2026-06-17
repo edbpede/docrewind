@@ -197,8 +197,9 @@ const shortcuts = {
   "tl-panel-head":
     "flex items-start justify-between gap-3 border-b border-stone-200/80 px-3 py-2 dark:border-stone-700",
   "tl-panel-heading": "flex flex-col gap-0.5",
-  "tl-panel-title": "font-sans text-[13px] font-semibold text-stone-800 dark:text-stone-100",
-  "tl-panel-rev": "font-mono text-[11px] tabular-nums text-revision dark:text-revision-ring",
+  // Same treatment as the hover tip's title/rev — aliased to one source.
+  "tl-panel-title": "tl-tip-title",
+  "tl-panel-rev": "tl-tip-rev",
   "tl-panel-close":
     "grid size-6 shrink-0 place-items-center rounded-md text-lg leading-none text-stone-400 " +
     "transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-700 dark:hover:text-stone-100 " +
