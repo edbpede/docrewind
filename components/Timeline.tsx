@@ -183,8 +183,8 @@ export function clusterMarkers(
 
 /** Graphite seal class for a mixed-kind cluster; the kind tone for a uniform one. */
 function clusterToneClass(cluster: MarkerCluster): string {
-  const tones = new Set(cluster.members.map((m) => markerToneClass(m.kind)));
-  return tones.size === 1 ? [...tones][0]! : "tl-cluster-mixed";
+  const kinds = new Set(cluster.members.map((m) => m.kind));
+  return kinds.size === 1 ? markerToneClass(cluster.members[0]!.kind) : "tl-cluster-mixed";
 }
 
 /** Kind breakdown for a cluster, e.g. "1 editing session · 3 large insertions". */
