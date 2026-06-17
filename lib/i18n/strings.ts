@@ -146,6 +146,19 @@ export function revisionOf(current: number, total: number): string {
   return `Revision ${current} of ${total}`;
 }
 
+/**
+ * Range value-text for a stacked cluster of marks, e.g. "Revisions 140–148 of
+ * 148". Collapses to the single-frame form when the burst spans one revision.
+ */
+export function revisionRangeOf(start: number, end: number, total: number): string {
+  return start === end ? revisionOf(start, total) : `Revisions ${start}–${end} of ${total}`;
+}
+
+/** Stacked-seal title for a collision cluster, e.g. "5 marks" (n is always ≥ 2). */
+export function clusterCountLabel(n: number): string {
+  return `${n} marks`;
+}
+
 /** Speed multiplier label, e.g. "2×". */
 export function speedLabel(multiplier: number): string {
   return `${multiplier}×`;
