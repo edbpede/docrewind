@@ -141,6 +141,24 @@ const shortcuts = {
   "tl-marker-large": "border-strike text-strike",
   "tl-marker-pause": "border-stone-300 text-stone-500 dark:border-stone-600 dark:text-stone-400",
 
+  // A stacked seal: where individual marks would collide into an unreadable pile,
+  // they fuse into one slightly-larger paper seal carrying the COUNT in tabular
+  // figures. Two faint offset paper silhouettes behind it (the layered box-shadow)
+  // read as several seals pressed together — a non-color "many" affordance that
+  // survives grayscale (§9.11) and turns a dense burst into legible signal. The
+  // count is the glyph; the kind breakdown rides the hover/focus tooltip + aria.
+  "tl-cluster":
+    "absolute top-1/2 grid size-[18px] -translate-x-1/2 -translate-y-1/2 place-items-center " +
+    "rounded-full border bg-white font-mono text-[10px] font-semibold leading-none tabular-nums " +
+    "cursor-pointer transition-transform hover:scale-110 dark:bg-stone-800 " +
+    "shadow-[1.5px_1.5px_0_-0.5px_oklch(89%_0_0),-1.5px_-1.5px_0_-0.5px_oklch(94%_0_0),0_1px_3px_oklch(0%_0_0/0.22)] " +
+    "dark:shadow-[1.5px_1.5px_0_-0.5px_oklch(33%_0_0),-1.5px_-1.5px_0_-0.5px_oklch(29%_0_0),0_1px_3px_oklch(0%_0_0/0.4)] " +
+    "outline-none focus-visible:ring-2 focus-visible:ring-revision-ring focus-visible:ring-offset-1 " +
+    "focus-visible:ring-offset-stone-50 dark:focus-visible:ring-offset-stone-900",
+  // Mixed-kind clusters drop to graphite ink (no single kind owns the seal); the
+  // breakdown in the tooltip carries which kinds, so color is never the sole tell.
+  "tl-cluster-mixed": "border-stone-400 text-stone-700 dark:border-stone-500 dark:text-stone-200",
+
   // The hover/focus tooltip: a small paper card lifted above the hovered seal,
   // carrying the mark's name, its content-free revision data, and the frame it
   // jumps to. `pointer-events-none` so it never intercepts a scrub; positioned by
@@ -264,7 +282,7 @@ export default defineConfig({
 .dark { color-scheme: dark; }
 
 @media (prefers-reduced-motion: reduce) {
-  .tl-fill, .tl-thumb, .tl-track, .tl-marker, .progress-fill, .btn-base { transition: none !important; }
+  .tl-fill, .tl-thumb, .tl-track, .tl-marker, .tl-cluster, .progress-fill, .btn-base { transition: none !important; }
   .dr-indeterminate { animation: none !important; }
 }
 @keyframes dr-indeterminate-slide {

@@ -1,9 +1,25 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import SummaryInsights from "@/components/SummaryInsights";
-import Timeline, { type TimelineMarker } from "@/components/Timeline";
+import Timeline, { clusterMarkers, type TimelineMarker } from "@/components/Timeline";
 import TimelineLegend from "@/components/TimelineLegend";
+
+// jsdom ships no ResizeObserver, and the Timeline only stacks colliding seals
+// once it has a measured width. This mock reports a fixed 600px track and fires
+// synchronously on observe, so component tests can exercise the stacked path.
+const MOCK_TRACK_WIDTH = 600;
+class ResizeObserverMock {
+  constructor(private readonly callback: ResizeObserverCallback) {}
+  observe(): void {
+    this.callback(
+      [{ contentRect: { width: MOCK_TRACK_WIDTH, height: 10 } } as ResizeObserverEntry],
+      this as unknown as ResizeObserver,
+    );
+  }
+  unobserve(): void {}
+  disconnect(): void {}
+}
 import { asRevisionId, asUserId } from "@/lib/domain/ids";
 import type { DecodedRevision } from "@/lib/domain/model";
 
@@ -22,7 +38,11 @@ function revision(
 }
 
 describe("replay UI components", () => {
-  afterEach(() => cleanup());
+  beforeEach(() => vi.stubGlobal("ResizeObserver", ResizeObserverMock));
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
 
   it("scrubs the timeline with pointer input", async () => {
     const onScrub = vi.fn();
@@ -105,6 +125,66 @@ describe("replay UI components", () => {
 
     await fireEvent.pointerLeave(marker);
     expect(screen.queryByRole("tooltip")).toBeNull();
+  });
+
+  it("stacks colliding markers into one counted seal that jumps to the burst", async () => {
+    const onScrub = vi.fn();
+    // A lone session early, then a tight burst of four marks at the tail — at the
+    // mocked 600px width the burst collides into a single stacked seal.
+    const events: TimelineMarker[] = [
+      { id: "session-73", kind: "session", index: 73, label: "Editing session" },
+      { id: "ins-145", kind: "large-insertion", index: 145, label: "Large insertion" },
+      { id: "del-146", kind: "large-deletion", index: 146, label: "Large deletion" },
+      { id: "ins-147", kind: "large-insertion", index: 147, label: "Large insertion" },
+      { id: "session-148", kind: "session", index: 148, label: "Editing session" },
+    ];
+    render(() => <Timeline currentIndex={0} max={148} events={events} onScrub={onScrub} />);
+
+    // The four-mark burst is one button; the early session stays its own seal.
+    const stack = screen.getByRole("button", { name: /4 marks/ });
+    expect(screen.getByRole("button", { name: /Editing session — Revision 73 of 148/ })).toBeTruthy();
+    // Color is never the sole tell — the breakdown rides the accessible name.
+    expect(stack.getAttribute("aria-label")).toContain("2 Large insertions");
+    expect(stack.textContent).toBe("4");
+
+    await fireEvent.pointerEnter(stack);
+    expect(screen.getByText("Revisions 145–148 of 148")).toBeTruthy();
+
+    await fireEvent.click(stack);
+    expect(onScrub).toHaveBeenCalledWith(145); // jumps to where the burst began
+  });
+
+  it("clusterMarkers chains colliding marks and leaves distant ones singleton", () => {
+    const events: TimelineMarker[] = [
+      { id: "a", kind: "session", index: 10, label: "a" },
+      { id: "b", kind: "large-insertion", index: 11, label: "b" },
+      { id: "c", kind: "pause", index: 80, label: "c" },
+    ];
+    // width 200, max 100 -> pxOf = index * 2: a=20, b=22 (gap 2 < 18 -> stack), c=160.
+    const clusters = clusterMarkers(events, 100, 200);
+    expect(clusters).toHaveLength(2);
+    expect(clusters[0]?.members.map((m) => m.id)).toEqual(["a", "b"]);
+    expect(clusters[0]?.jumpIndex).toBe(10);
+    expect(clusters[0]?.span).toEqual({ start: 10, end: 11 });
+    expect(clusters[1]?.members.map((m) => m.id)).toEqual(["c"]);
+  });
+
+  it("clusterMarkers never stacks without a measured width", () => {
+    const events: TimelineMarker[] = [
+      { id: "a", kind: "session", index: 10, label: "a" },
+      { id: "b", kind: "large-insertion", index: 11, label: "b" },
+    ];
+    expect(clusterMarkers(events, 100, 0)).toHaveLength(2);
+  });
+
+  it("clusterMarkers drops out-of-range anchors", () => {
+    const events: TimelineMarker[] = [
+      { id: "lo", kind: "session", index: -1, label: "lo" },
+      { id: "ok", kind: "pause", index: 50, label: "ok" },
+      { id: "hi", kind: "session", index: 101, label: "hi" },
+    ];
+    const clusters = clusterMarkers(events, 100, 200);
+    expect(clusters.flatMap((c) => c.members.map((m) => m.id))).toEqual(["ok"]);
   });
 
   it("lists only the marker kinds present, in stable order", () => {
