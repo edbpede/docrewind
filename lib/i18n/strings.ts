@@ -76,6 +76,9 @@ export const strings = {
     markerLargeInsertion: "Large insertion",
     markerLargeDeletion: "Large deletion",
     markerPause: "Pause",
+    inspectHint: "Click to inspect",
+    closeDetails: "Close details",
+    jumpTo: "Jump to",
   },
   viewport: {
     suggestedInsert: "Suggested insertion",
