@@ -44,3 +44,7 @@ the art changes:
    the replay tab.
 4. Play, pause, change speed, or scrub the timeline. Clear cached data anytime
    from the options page.
+
+Clicking the toolbar icon opens a small popup with a one-line description and
+quick access to **Options** and an **About** panel (version, author, license,
+source). It opens no document data and requests no extra permissions.
