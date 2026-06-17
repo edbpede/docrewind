@@ -20,6 +20,7 @@ class ResizeObserverMock {
   unobserve(): void {}
   disconnect(): void {}
 }
+
 import { asRevisionId, asUserId } from "@/lib/domain/ids";
 import type { DecodedRevision } from "@/lib/domain/model";
 
@@ -142,7 +143,9 @@ describe("replay UI components", () => {
 
     // The four-mark burst is one button; the early session stays its own seal.
     const stack = screen.getByRole("button", { name: /4 marks/ });
-    expect(screen.getByRole("button", { name: /Editing session — Revision 73 of 148/ })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: /Editing session — Revision 73 of 148/ }),
+    ).toBeTruthy();
     // Color is never the sole tell — the breakdown rides the accessible name.
     expect(stack.getAttribute("aria-label")).toContain("2 Large insertions");
     expect(stack.textContent).toBe("4");

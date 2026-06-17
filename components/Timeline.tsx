@@ -243,7 +243,9 @@ const Timeline: Component<TimelineProps> = (props) => {
     if (typeof ResizeObserver !== "undefined") {
       const observer = new ResizeObserver((entries) => {
         const measured = entries[0]?.contentRect.width;
-        setTrackWidth(measured !== undefined && measured > 0 ? measured : el.getBoundingClientRect().width);
+        setTrackWidth(
+          measured !== undefined && measured > 0 ? measured : el.getBoundingClientRect().width,
+        );
       });
       observer.observe(el);
       onCleanup(() => observer.disconnect());
@@ -380,7 +382,11 @@ const Timeline: Component<TimelineProps> = (props) => {
                 props.onScrub(cluster.jumpIndex);
               }}
             >
-              {single === undefined ? (count > 99 ? "99+" : String(count)) : markerGlyph(single.kind)}
+              {single === undefined
+                ? count > 99
+                  ? "99+"
+                  : String(count)
+                : markerGlyph(single.kind)}
             </button>
           );
         }}
