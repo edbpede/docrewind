@@ -141,6 +141,27 @@ const shortcuts = {
   "tl-marker-large": "border-strike text-strike",
   "tl-marker-pause": "border-stone-300 text-stone-500 dark:border-stone-600 dark:text-stone-400",
 
+  // The hover/focus tooltip: a small paper card lifted above the hovered seal,
+  // carrying the mark's name, its content-free revision data, and the frame it
+  // jumps to. `pointer-events-none` so it never intercepts a scrub; positioned by
+  // the leaf via inline `left`/`transform` (edge-clamped near the track ends).
+  "tl-tip":
+    "pointer-events-none absolute bottom-[calc(100%+0.6rem)] z-20 flex max-w-[15rem] flex-col gap-0.5 " +
+    "rounded-md border border-stone-200 bg-white px-2.5 py-1.5 " +
+    "shadow-[0_8px_24px_-10px_oklch(0%_0_0/0.35)] dark:border-stone-700 dark:bg-stone-800",
+  "tl-tip-title": "font-sans text-xs font-semibold text-stone-800 dark:text-stone-100",
+  "tl-tip-detail": "font-mono text-[11px] tabular-nums text-stone-500 dark:text-stone-400",
+  "tl-tip-rev": "font-mono text-[11px] tabular-nums text-revision dark:text-revision-ring",
+
+  // The marginalia key: a quiet wrapped row naming each seal-mark in view. A
+  // static `tl-seal` mirrors the marker's stamp (sans the absolute positioning
+  // and hover lift) so the legend and the stratum read as one vocabulary.
+  "tl-legend": "m-0 flex flex-wrap items-center gap-x-4 gap-y-1.5 p-0",
+  "tl-legend-item": "inline-flex items-center gap-1.5 text-xs text-stone-600 dark:text-stone-300",
+  "tl-seal":
+    "inline-grid size-4 place-items-center rounded-full border bg-white text-[12px] leading-none " +
+    "shadow-[0_1px_2px_oklch(0%_0_0/0.18)] dark:bg-stone-800",
+
   // ── Progress (determinate + indeterminate + error) ────────────────────────
   "progress-track": "h-2 w-full overflow-hidden rounded-full bg-stone-200 dark:bg-stone-700",
   "progress-fill": "h-full rounded-full bg-revision transition-[width]",

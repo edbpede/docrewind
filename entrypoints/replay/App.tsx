@@ -29,11 +29,19 @@ import PrivacyBanner from "@/components/PrivacyBanner";
 import ProgressView, { type ProgressPhase } from "@/components/ProgressView";
 import SummaryInsights from "@/components/SummaryInsights";
 import Timeline, { type TimelineMarker } from "@/components/Timeline";
+import TimelineLegend from "@/components/TimelineLegend";
 import { useThemeSync } from "@/components/theme-sync";
 import { createIdbStore } from "@/lib/db";
 import { asDocId } from "@/lib/domain/ids";
 import type { DecodedRevision, DocId, TimelineEvent } from "@/lib/domain/model";
-import { errorTitle, revisionOf, strings } from "@/lib/i18n/strings";
+import {
+  errorTitle,
+  largeEditDetail,
+  pauseDetail,
+  revisionOf,
+  sessionDetail,
+  strings,
+} from "@/lib/i18n/strings";
 import { sendMessage } from "@/lib/messaging";
 import { segmentsAt } from "@/lib/reconstruction/render";
 import { modelAtRevisionIndex } from "@/lib/reconstruction/snapshot";
@@ -177,26 +185,31 @@ function buildMarkers(
     let anchor: number;
     let kind: TimelineMarker["kind"];
     let label: string;
+    let detail: string;
     switch (event.kind) {
       case "session":
         anchor = Number(event.span.start);
         kind = "session";
         label = strings.timeline.markerSession;
+        detail = sessionDetail(event.charsInserted, event.charsDeleted);
         break;
       case "large-insertion":
         anchor = Number(event.atRevision);
         kind = "large-insertion";
         label = strings.timeline.markerLargeInsertion;
+        detail = largeEditDetail(event.charDelta);
         break;
       case "large-deletion":
         anchor = Number(event.atRevision);
         kind = "large-deletion";
         label = strings.timeline.markerLargeDeletion;
+        detail = largeEditDetail(event.charDelta);
         break;
       case "pause":
         anchor = Number(event.afterRevision);
         kind = "pause";
         label = strings.timeline.markerPause;
+        detail = pauseDetail(event.durationMs);
         break;
       default: {
         const _exhaustive: never = event;
@@ -206,7 +219,7 @@ function buildMarkers(
     }
     const index = indexByRevision.get(anchor);
     if (index !== undefined) {
-      markers.push({ id: `${kind}-${anchor}`, kind, index, label });
+      markers.push({ id: `${kind}-${anchor}`, kind, index, label, detail });
     }
   }
   return markers;
@@ -788,6 +801,7 @@ const ReplaySurface: Component<{
                           events={markers()}
                           onScrub={(index) => setCurrentIndex(index)}
                         />
+                        <TimelineLegend events={markers()} />
                       </div>
                     </section>
 

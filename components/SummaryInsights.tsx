@@ -9,25 +9,11 @@
 import type { Component } from "solid-js";
 import { createMemo, For, mergeProps, Show } from "solid-js";
 import type { DecodedRevision, TimelineEvent } from "@/lib/domain/model";
-import { authorLabel, strings } from "@/lib/i18n/strings";
+import { authorLabel, formatDuration, strings } from "@/lib/i18n/strings";
 
 interface AuthorLabel {
   readonly key: string;
   readonly label: string;
-}
-
-function formatDuration(ms: number): string {
-  const totalSeconds = Math.max(0, Math.round(ms / 1000));
-  if (totalSeconds < 60) {
-    return `${totalSeconds}s`;
-  }
-  const totalMinutes = Math.round(totalSeconds / 60);
-  if (totalMinutes < 60) {
-    return `${totalMinutes}m`;
-  }
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}m`;
 }
 
 export interface SummaryInsightsProps {
