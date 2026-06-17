@@ -11,7 +11,7 @@
 
 import type { Component } from "solid-js";
 import { createMemo, Match, Switch } from "solid-js";
-import { errorTitle, fetchingPercent, strings } from "@/lib/i18n/strings";
+import { errorTitle, percentLabel, strings } from "@/lib/i18n/strings";
 import { type RetrievalErrorCategory, retrievalError } from "@/lib/retrieval/errors";
 
 export type ProgressPhase = "discovering" | "fetching" | "error";
@@ -43,7 +43,14 @@ const ProgressView: Component<ProgressViewProps> = (props) => {
         </Match>
 
         <Match when={props.phase === "fetching"}>
-          <p class="dr-eyebrow">{fetchingPercent(props.pct)}</p>
+          {/* Label and figure are separate typographic roles: the tracked
+              eyebrow names the work, the tabular-nums figure (in the bar's own
+              indigo) carries the number — baseline-aligned like the replay
+              counter/dateline row, so it reads as part of the same record. */}
+          <div class="flex items-baseline justify-between gap-3">
+            <p class="dr-eyebrow">{strings.progress.fetching}</p>
+            <span class="dr-percent">{percentLabel(props.pct)}</span>
+          </div>
           <div
             class="progress-track"
             role="progressbar"

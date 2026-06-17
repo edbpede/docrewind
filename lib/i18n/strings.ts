@@ -167,9 +167,11 @@ export function speedLabel(multiplier: number): string {
   return `${multiplier}×`;
 }
 
-/** Determinate progress label, e.g. "Fetching revisions — 42%". */
-export function fetchingPercent(pct: number): string {
-  return `${strings.progress.fetching} — ${pct}%`;
+/** Determinate progress figure, e.g. "42%". Rendered as a tabular-nums readout
+ *  beside the "Fetching revisions" label, so the label and the number are
+ *  separate typographic roles rather than one run of text. */
+export function percentLabel(pct: number): string {
+  return `${pct}%`;
 }
 
 /** Opaque, stable author label (real identities are never surfaced by default). */
