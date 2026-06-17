@@ -69,9 +69,13 @@ const shortcuts = {
   // Cool archival paper. A near-flat stone wash (top a touch lighter than the
   // foot) gives the page the depth of a sheet under raking light without ever
   // reading as a "gradient hero". Solid `bg-stone-50` stays as the fallback.
-  "dr-page":
-    "min-h-screen bg-stone-50 bg-gradient-to-b from-stone-50 to-stone-100 " +
+  // `dr-surface` is the wash+ink alone (no sizing) so non-page surfaces — e.g.
+  // the fixed-width toolbar popup — share ONE source of truth for the paper;
+  // `dr-page` composes it with `min-h-screen` for the full-height pages.
+  "dr-surface":
+    "bg-stone-50 bg-gradient-to-b from-stone-50 to-stone-100 " +
     "text-stone-900 dark:bg-stone-900 dark:from-stone-900 dark:to-stone-950 dark:text-stone-100",
+  "dr-page": "dr-surface min-h-screen",
   "dr-panel": "rounded-lg border border-stone-200 bg-white dark:border-stone-700 dark:bg-stone-800",
   "dr-card": "dr-panel p-4 shadow-sm",
 

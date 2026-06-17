@@ -131,6 +131,28 @@ export const strings = {
     diagnosticsDefault: "Default",
     diagnosticsStructural: "Structural",
   },
+  popup: {
+    tagline: "Replay a Google Doc's revision history — locally.",
+    description:
+      "DocRewind reconstructs a document from its own edit history and plays it back, " +
+      "entirely on this device. Open a Google Doc, then activate DocRewind from the page " +
+      "to begin.",
+    privacyNote: "Local-first · no account · no telemetry",
+    optionsButton: "Options",
+    aboutButton: "About",
+    backButton: "Back",
+    backHint: "Back to overview",
+    aboutHeading: "About DocRewind",
+    versionLabel: "Version",
+    authorLabel: "Author",
+    licenseLabel: "License",
+    sourceLabel: "Source",
+    licenseValue: "AGPL-3.0-or-later",
+    authorHandle: "edbpede",
+    authorUrl: "https://github.com/edbpede",
+    sourceText: "github.com/edbpede/docrewind",
+    sourceUrl: "https://github.com/edbpede/docrewind",
+  },
 } as const;
 
 // ── Parameterized accessors ──────────────────────────────────────────────────
