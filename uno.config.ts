@@ -62,6 +62,120 @@ const sortUnoVarBlocks: SourceCodeTransformer = {
   },
 };
 
+// The design-system shortcuts, hoisted to a module const so `safelist` below can
+// be derived from the keys (see the safelist note in defineConfig).
+const shortcuts = {
+  // ── Surfaces ────────────────────────────────────────────────────────────
+  // Cool archival paper. A near-flat stone wash (top a touch lighter than the
+  // foot) gives the page the depth of a sheet under raking light without ever
+  // reading as a "gradient hero". Solid `bg-stone-50` stays as the fallback.
+  "dr-page":
+    "min-h-screen bg-stone-50 bg-gradient-to-b from-stone-50 to-stone-100 " +
+    "text-stone-900 dark:bg-stone-900 dark:from-stone-900 dark:to-stone-950 dark:text-stone-100",
+  "dr-panel": "rounded-lg border border-stone-200 bg-white dark:border-stone-700 dark:bg-stone-800",
+  "dr-card": "dr-panel p-4 shadow-sm",
+
+  // ── Masthead: the archival record header (eyebrow + balanced title) ────────
+  "dr-masthead": "flex flex-col gap-2 border-b border-stone-200/80 pb-4 dark:border-stone-700/80",
+  "dr-title":
+    "text-balance font-serif text-xl font-semibold tracking-tight text-stone-900 dark:text-stone-50",
+
+  // ── The manuscript leaf: an elevated sheet with a graphite binding margin ──
+  // `before:` draws the ruled binding margin — pure decoration (no meaning rides
+  // on it), graphite-neutral so it never collides with the strike/suggest hues.
+  "dr-leaf":
+    "relative rounded-xl bg-white px-6 py-9 ring-1 ring-stone-200 sm:px-12 " +
+    "shadow-[0_18px_40px_-24px_oklch(0%_0_0/0.22)] " +
+    "before:pointer-events-none before:absolute before:inset-y-6 before:left-4 before:w-px " +
+    "before:bg-stone-300/70 sm:before:left-9 dark:bg-stone-800 dark:ring-stone-700 " +
+    "dark:before:bg-stone-600/50",
+  // A dateline reads like the hand-noted date in a manuscript margin.
+  // Same visual treatment as the masthead eyebrow — aliased to one source.
+  "dr-dateline": "dr-eyebrow",
+
+  // ── Buttons (focus-visible rings; never color-only — each carries a label) ─
+  "btn-base":
+    "inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium " +
+    "transition-colors outline-none focus-visible:ring-2 focus-visible:ring-revision-ring " +
+    "focus-visible:ring-offset-2 focus-visible:ring-offset-stone-50 " +
+    "dark:focus-visible:ring-offset-stone-900 disabled:opacity-50 disabled:cursor-not-allowed",
+  "btn-primary": "btn-base bg-revision text-white hover:bg-revision-soft",
+  "btn-secondary":
+    "btn-base border border-stone-300 bg-white text-stone-800 hover:bg-stone-100 " +
+    "dark:border-stone-600 dark:bg-stone-800 dark:text-stone-100 dark:hover:bg-stone-700",
+  "btn-ghost":
+    "btn-base bg-transparent text-stone-700 hover:bg-stone-200/70 " +
+    "dark:text-stone-200 dark:hover:bg-stone-700/70",
+  // Pressed/active toggle state for play/pause + speed (paired with text/icon).
+  "btn-active": "bg-revision text-white hover:bg-revision-soft",
+
+  // ── Timeline: the signature "writing-activity stratum" + playhead caret ───
+  // The track is a carved channel (inset shadow); the fill is accumulating ink
+  // — an oklch ramp from faded early writing to saturated fresh indigo at the
+  // playhead, interpolated `in oklch` so the ramp stays perceptually even.
+  "tl-track":
+    "group relative h-2.5 w-full rounded-full bg-stone-200 dark:bg-stone-700 " +
+    "shadow-[inset_0_1px_2px_oklch(0%_0_0/0.07)] dark:shadow-[inset_0_1px_2px_oklch(0%_0_0/0.25)] " +
+    "outline-none focus-visible:ring-2 focus-visible:ring-revision-ring " +
+    "focus-visible:ring-offset-2 focus-visible:ring-offset-stone-50 " +
+    "dark:focus-visible:ring-offset-stone-900 transition-shadow",
+  "tl-fill":
+    "absolute inset-y-0 left-0 rounded-full transition-[width] " +
+    "bg-gradient-to-r from-revision-ring via-revision-soft to-revision",
+  // The playhead reads as a writing caret (nib) standing on the track.
+  "tl-thumb":
+    "absolute top-1/2 h-6 w-[3px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-revision " +
+    "shadow-[0_1px_3px_oklch(54%_0.13_264/0.45)] ring-2 ring-white dark:ring-stone-900 transition-[left]",
+  // Event markers read as marginalia seals pressed onto the writing stratum: a
+  // small paper-faced stamp standing proud of the track, carrying a per-kind
+  // editorial pen-mark (§ caret-up caret-down caesura) in a per-kind ink. Color
+  // is ALWAYS paired with both the glyph and the seal ring, so the kind survives
+  // grayscale (§9.11). A keyboard focus ring makes each a jump-to-event button.
+  "tl-marker":
+    "absolute top-1/2 grid size-4 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full " +
+    "border bg-white text-[12px] leading-none cursor-pointer transition-transform hover:scale-110 " +
+    "shadow-[0_1px_2px_oklch(0%_0_0/0.18)] dark:bg-stone-800 " +
+    "outline-none focus-visible:ring-2 focus-visible:ring-revision-ring focus-visible:ring-offset-1 " +
+    "focus-visible:ring-offset-stone-50 dark:focus-visible:ring-offset-stone-900",
+  "tl-marker-session": "border-revision text-revision",
+  "tl-marker-large": "border-strike text-strike",
+  "tl-marker-pause": "border-stone-300 text-stone-500 dark:border-stone-600 dark:text-stone-400",
+
+  // ── Progress (determinate + indeterminate + error) ────────────────────────
+  "progress-track": "h-2 w-full overflow-hidden rounded-full bg-stone-200 dark:bg-stone-700",
+  "progress-fill": "h-full rounded-full bg-revision transition-[width]",
+  "progress-indeterminate": "h-full w-1/3 rounded-full bg-revision dr-indeterminate",
+
+  // ── PrivacyBanner / reconstruction-warning surface ────────────────────────
+  "banner-warning":
+    "flex items-start gap-2 rounded-md border-l-4 border-caution bg-caution-soft " +
+    "px-3 py-2 text-sm text-stone-800 dark:bg-caution-softDark dark:text-stone-100",
+
+  // ── Document-rendering primitives (color ALWAYS + a non-color affordance) ──
+  "doc-column":
+    "mx-auto max-w-[68ch] whitespace-pre-wrap break-words font-serif text-[1.0625rem] leading-[1.8] " +
+    "text-stone-900 dark:text-stone-100",
+  "doc-accepted": "text-stone-900 dark:text-stone-100",
+  // Suggested insert: color + underline + label affordance.
+  "doc-suggest":
+    "rounded-sm bg-suggest-soft text-suggest underline decoration-suggest decoration-dotted " +
+    "underline-offset-2 dark:bg-suggest-softDark dark:text-suggest",
+  // Marked for deletion: color + line-through + label affordance.
+  "doc-strike":
+    "rounded-sm bg-strike-soft text-strike line-through decoration-strike " +
+    "dark:bg-strike-softDark dark:text-strike",
+  // Opaque structures: an inline labeled chip carrying icon + text (never bare).
+  "doc-opaque":
+    "mx-0.5 inline-flex items-center gap-1 rounded border border-stone-300 bg-stone-100 " +
+    "px-1.5 py-0.5 align-baseline font-sans text-xs text-stone-600 " +
+    "dark:border-stone-600 dark:bg-stone-700 dark:text-stone-300",
+
+  // ── Data / chrome typography helpers ──────────────────────────────────────
+  "dr-counter": "font-mono text-sm tabular-nums text-stone-600 dark:text-stone-400",
+  "dr-eyebrow":
+    "font-mono text-[11px] uppercase tracking-[0.16em] text-stone-500 dark:text-stone-400",
+};
+
 export default defineConfig({
   // `dark: "class"` pins class-based dark mode (Wind4's default, pinned so the
   // `.dark` toggle — not the OS media query — is the single source of truth).
@@ -99,113 +213,17 @@ export default defineConfig({
     },
   },
 
-  shortcuts: {
-    // ── Surfaces ────────────────────────────────────────────────────────────
-    // Cool archival paper. A near-flat stone wash (top a touch lighter than the
-    // foot) gives the page the depth of a sheet under raking light without ever
-    // reading as a "gradient hero". Solid `bg-stone-50` stays as the fallback.
-    "dr-page":
-      "min-h-screen bg-stone-50 bg-gradient-to-b from-stone-50 to-stone-100 " +
-      "text-stone-900 dark:bg-stone-900 dark:from-stone-900 dark:to-stone-950 dark:text-stone-100",
-    "dr-panel":
-      "rounded-lg border border-stone-200 bg-white dark:border-stone-700 dark:bg-stone-800",
-    "dr-card": "dr-panel p-4 shadow-sm",
-
-    // ── Masthead: the archival record header (eyebrow + balanced title) ────────
-    "dr-masthead": "flex flex-col gap-2 border-b border-stone-200/80 pb-4 dark:border-stone-700/80",
-    "dr-title":
-      "text-balance font-serif text-xl font-semibold tracking-tight text-stone-900 dark:text-stone-50",
-
-    // ── The manuscript leaf: an elevated sheet with a graphite binding margin ──
-    // `before:` draws the ruled binding margin — pure decoration (no meaning rides
-    // on it), graphite-neutral so it never collides with the strike/suggest hues.
-    "dr-leaf":
-      "relative rounded-xl bg-white px-6 py-9 ring-1 ring-stone-200 sm:px-12 " +
-      "shadow-[0_18px_40px_-24px_oklch(0%_0_0/0.22)] " +
-      "before:pointer-events-none before:absolute before:inset-y-6 before:left-4 before:w-px " +
-      "before:bg-stone-300/70 sm:before:left-9 dark:bg-stone-800 dark:ring-stone-700 " +
-      "dark:before:bg-stone-600/50",
-    // A dateline reads like the hand-noted date in a manuscript margin.
-    // Same visual treatment as the masthead eyebrow — aliased to one source.
-    "dr-dateline": "dr-eyebrow",
-
-    // ── Buttons (focus-visible rings; never color-only — each carries a label) ─
-    "btn-base":
-      "inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium " +
-      "transition-colors outline-none focus-visible:ring-2 focus-visible:ring-revision-ring " +
-      "focus-visible:ring-offset-2 focus-visible:ring-offset-stone-50 " +
-      "dark:focus-visible:ring-offset-stone-900 disabled:opacity-50 disabled:cursor-not-allowed",
-    "btn-primary": "btn-base bg-revision text-white hover:bg-revision-soft",
-    "btn-secondary":
-      "btn-base border border-stone-300 bg-white text-stone-800 hover:bg-stone-100 " +
-      "dark:border-stone-600 dark:bg-stone-800 dark:text-stone-100 dark:hover:bg-stone-700",
-    "btn-ghost":
-      "btn-base bg-transparent text-stone-700 hover:bg-stone-200/70 " +
-      "dark:text-stone-200 dark:hover:bg-stone-700/70",
-    // Pressed/active toggle state for play/pause + speed (paired with text/icon).
-    "btn-active": "bg-revision text-white hover:bg-revision-soft",
-
-    // ── Timeline: the signature "writing-activity stratum" + playhead caret ───
-    // The track is a carved channel (inset shadow); the fill is accumulating ink
-    // — an oklch ramp from faded early writing to saturated fresh indigo at the
-    // playhead, interpolated `in oklch` so the ramp stays perceptually even.
-    "tl-track":
-      "group relative h-2.5 w-full rounded-full bg-stone-200 dark:bg-stone-700 " +
-      "shadow-[inset_0_1px_2px_oklch(0%_0_0/0.07)] dark:shadow-[inset_0_1px_2px_oklch(0%_0_0/0.25)] " +
-      "outline-none focus-visible:ring-2 focus-visible:ring-revision-ring " +
-      "focus-visible:ring-offset-2 focus-visible:ring-offset-stone-50 " +
-      "dark:focus-visible:ring-offset-stone-900 transition-shadow",
-    "tl-fill":
-      "absolute inset-y-0 left-0 rounded-full transition-[width] " +
-      "bg-gradient-to-r from-revision-ring via-revision-soft to-revision",
-    // The playhead reads as a writing caret (nib) standing on the track.
-    "tl-thumb":
-      "absolute top-1/2 h-6 w-[3px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-revision " +
-      "shadow-[0_1px_3px_oklch(54%_0.13_264/0.45)] ring-2 ring-white dark:ring-stone-900 transition-[left]",
-    // Event markers — each kind also gets a distinct glyph in the component. A
-    // keyboard focus ring makes the jump-to-event buttons operable without a mouse.
-    "tl-marker":
-      "absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-sm text-[11px] leading-none " +
-      "outline-none focus-visible:ring-2 focus-visible:ring-revision-ring focus-visible:ring-offset-1 " +
-      "focus-visible:ring-offset-stone-50 dark:focus-visible:ring-offset-stone-900",
-    "tl-marker-session": "text-revision",
-    "tl-marker-large": "text-strike",
-    "tl-marker-pause": "text-stone-500 dark:text-stone-400",
-
-    // ── Progress (determinate + indeterminate + error) ────────────────────────
-    "progress-track": "h-2 w-full overflow-hidden rounded-full bg-stone-200 dark:bg-stone-700",
-    "progress-fill": "h-full rounded-full bg-revision transition-[width]",
-    "progress-indeterminate": "h-full w-1/3 rounded-full bg-revision dr-indeterminate",
-
-    // ── PrivacyBanner / reconstruction-warning surface ────────────────────────
-    "banner-warning":
-      "flex items-start gap-2 rounded-md border-l-4 border-caution bg-caution-soft " +
-      "px-3 py-2 text-sm text-stone-800 dark:bg-caution-softDark dark:text-stone-100",
-
-    // ── Document-rendering primitives (color ALWAYS + a non-color affordance) ──
-    "doc-column":
-      "mx-auto max-w-[68ch] whitespace-pre-wrap break-words font-serif text-[1.0625rem] leading-[1.8] " +
-      "text-stone-900 dark:text-stone-100",
-    "doc-accepted": "text-stone-900 dark:text-stone-100",
-    // Suggested insert: color + underline + label affordance.
-    "doc-suggest":
-      "rounded-sm bg-suggest-soft text-suggest underline decoration-suggest decoration-dotted " +
-      "underline-offset-2 dark:bg-suggest-softDark dark:text-suggest",
-    // Marked for deletion: color + line-through + label affordance.
-    "doc-strike":
-      "rounded-sm bg-strike-soft text-strike line-through decoration-strike " +
-      "dark:bg-strike-softDark dark:text-strike",
-    // Opaque structures: an inline labeled chip carrying icon + text (never bare).
-    "doc-opaque":
-      "mx-0.5 inline-flex items-center gap-1 rounded border border-stone-300 bg-stone-100 " +
-      "px-1.5 py-0.5 align-baseline font-sans text-xs text-stone-600 " +
-      "dark:border-stone-600 dark:bg-stone-700 dark:text-stone-300",
-
-    // ── Data / chrome typography helpers ──────────────────────────────────────
-    "dr-counter": "font-mono text-sm tabular-nums text-stone-600 dark:text-stone-400",
-    "dr-eyebrow":
-      "font-mono text-[11px] uppercase tracking-[0.16em] text-stone-500 dark:text-stone-400",
-  },
+  // Shortcuts live in a module const (above) so `safelist` can list them all.
+  shortcuts,
+  // WHY safelist: @wxt-dev/unocss has every HTML entrypoint import the SAME
+  // `virtual:uno.css`, which Vite dedups to ONE shared CSS chunk (the build's
+  // "imported multiple times … using the first occurrence" warning). Shortcut
+  // GENERATION then keys off whichever entry is scanned first, so shortcuts used
+  // only by replay-page components (the timeline channel, the leaf, progress, the
+  // banner) were silently dropped from the shipped chunk and rendered UNSTYLED.
+  // Safelisting every shortcut forces all of them into the shared chunk no matter
+  // the entry order; insertion order is stable, so the determinism contract holds.
+  safelist: Object.keys(shortcuts),
 
   preflights: [
     {
@@ -225,7 +243,7 @@ export default defineConfig({
 .dark { color-scheme: dark; }
 
 @media (prefers-reduced-motion: reduce) {
-  .tl-fill, .tl-thumb, .tl-track, .progress-fill, .btn-base { transition: none !important; }
+  .tl-fill, .tl-thumb, .tl-track, .tl-marker, .progress-fill, .btn-base { transition: none !important; }
   .dr-indeterminate { animation: none !important; }
 }
 @keyframes dr-indeterminate-slide {

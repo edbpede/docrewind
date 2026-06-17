@@ -32,17 +32,20 @@ export interface TimelineProps {
   readonly onScrub: (index: number) => void;
 }
 
-/** Glyph per marker kind — a non-color affordance paired with the marker hue. */
+// An editorial pen-mark per kind — a non-color affordance paired with the seal
+// hue (§9.11), drawn from a copy-editor's margin vocabulary: a section sign for a
+// writing sitting, a caret-up for a surge of inserted text, a caret-down for a
+// passage cut, and a caesura (the musical rest bar) for a pause between sittings.
 function markerGlyph(kind: TimelineMarker["kind"]): string {
   switch (kind) {
     case "session":
-      return "●";
+      return "§";
     case "large-insertion":
-      return "▲";
+      return "⌃";
     case "large-deletion":
-      return "▼";
+      return "⌄";
     case "pause":
-      return "▮";
+      return "‖";
     default: {
       const _exhaustive: never = kind;
       return _exhaustive;
@@ -156,7 +159,7 @@ const Timeline: Component<TimelineProps> = (props) => {
           <Show when={marker.index >= 0 && marker.index <= props.max}>
             <button
               type="button"
-              class={`${markerClass(marker.kind)} cursor-pointer border-0 bg-transparent p-0`}
+              class={`${markerClass(marker.kind)} p-0`}
               style={{ left: pct(marker.index) }}
               title={marker.label}
               aria-label={`${marker.label} — ${revisionOf(marker.index, props.max)}`}
