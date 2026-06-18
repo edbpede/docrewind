@@ -48,7 +48,7 @@ function readBootstrapText(): string {
   let text = "";
   for (const script of document.scripts) {
     const content = script.textContent;
-    if (content?.includes("ogi")) {
+    if (content?.includes("ogi") || content?.includes("oui")) {
       text += content;
     }
   }

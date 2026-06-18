@@ -31,7 +31,7 @@ export default defineConfig({
       "lib/retrieval/**",
       "lib/worker/**",
       "lib/docs-url/**",
-      // Phase 5 pure modules (render/load/theme/i18n) are Bun-only (`test:logic`).
+      // Phase 5 pure modules (replay/i18n/identity/theme) are Bun-only (`test:logic`).
       "lib/replay/**",
       "lib/i18n/**",
       "lib/identity/**",

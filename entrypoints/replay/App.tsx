@@ -283,13 +283,18 @@ const ReplaySurface: Component<{
   // The self-identity harvest runs in the Docs content script on the same click
   // that opens this page, so the cache may be written just after this page boots.
   // Watch the store so a late resolution still reaches the colophon without a
-  // manual refresh.
-  const [identities, { refetch: refetchIdentities }] = createResource(() =>
-    resolvedIdentities.getValue(),
+  // manual refresh. The load and watch are gated behind the opt-in: in the opaque
+  // (default) path we never ingest harvested names into the reactive graph, and a
+  // user who opted out keeps the cache out of the graph even if stale entries linger.
+  const [identities, { refetch: refetchIdentities }] = createResource(
+    () => showRealIdentities() ?? false,
+    (enabled) => (enabled ? resolvedIdentities.getValue() : {}),
   );
   onMount(() => {
     const unwatch = resolvedIdentities.watch(() => {
-      void refetchIdentities();
+      if (showRealIdentities()) {
+        void refetchIdentities();
+      }
     });
     onCleanup(unwatch);
   });

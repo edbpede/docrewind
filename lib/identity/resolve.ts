@@ -31,6 +31,11 @@ export type IdentityMap = Readonly<Record<string, ResolvedIdentity>>;
 
 const EMAIL_RE = /[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/;
 
+/** Escape regex metacharacters so a captured value can be matched literally. */
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 /**
  * Parse a Google account-switcher label into a name + email. The OneGoogle bar
  * renders these as e.g. `"Google Account: Ada Lovelace\n(ada@example.com)"`; the
@@ -43,8 +48,13 @@ export function parseAccountLabel(label: string): { name: string; email: string 
     return null;
   }
   const email = label.match(EMAIL_RE)?.[0] ?? null;
+  // Drop only the parenthesised group that holds the captured email, so legitimate
+  // display names containing parentheses (e.g. an embedded role) survive. With no
+  // email present we fall back to removing any parenthesised group.
+  const dropParens =
+    email !== null ? new RegExp(`\\(\\s*${escapeRegExp(email)}\\s*\\)`, "g") : /\([^)]*\)/g;
   let name = label
-    .replace(/\([^)]*\)/g, " ") // drop the parenthesised "(email)" group
+    .replace(dropParens, " ")
     .replace(/^[^:]*:/, " ") // drop a leading localized "Google Account:" prefix
     .replace(/\s+/g, " ")
     .trim();

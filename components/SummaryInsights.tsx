@@ -91,9 +91,8 @@ const SummaryInsights: Component<SummaryInsightsProps> = (rawProps) => {
     for (const revision of props.revisions) {
       if (revision.userId !== null && !seen.includes(revision.userId)) {
         seen.push(revision.userId);
-        const resolved = props.identities[revision.userId];
         const label = props.realIdentities
-          ? (resolved?.name ?? revision.userId)
+          ? (props.identities[revision.userId]?.name ?? revision.userId)
           : authorLabel(seen.length - 1);
         projected.push({ key: revision.userId, label });
       }
