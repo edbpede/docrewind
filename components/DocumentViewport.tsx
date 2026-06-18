@@ -42,6 +42,7 @@ const DocumentViewport: Component<DocumentViewportProps> = (props) => {
                 <Match when={segment.kind === "suggested-insert" && segment}>
                   {(seg) => (
                     <span class="doc-suggest" title={strings.viewport.suggestedInsert}>
+                      <span class="sr-only">{strings.viewport.suggestedInsert}: </span>
                       {seg().text}
                     </span>
                   )}
@@ -49,6 +50,7 @@ const DocumentViewport: Component<DocumentViewportProps> = (props) => {
                 <Match when={segment.kind === "marked-for-deletion" && segment}>
                   {(seg) => (
                     <span class="doc-strike" title={strings.viewport.markedForDeletion}>
+                      <span class="sr-only">{strings.viewport.markedForDeletion}: </span>
                       {seg().text}
                     </span>
                   )}
