@@ -27,7 +27,14 @@
 import { createIdbStore } from "@/lib/db";
 import { asRevisionId } from "@/lib/domain/ids";
 import type { DocId, RawPayload, RevisionId } from "@/lib/domain/model";
-import { mergeIdentities, parseTilesParams, parseUserMap } from "@/lib/identity/resolve";
+import {
+  attachCollaboratorEmails,
+  mergeIdentities,
+  parseDriveShareAcl,
+  parseTilesHovercardIds,
+  parseTilesParams,
+  parseUserMap,
+} from "@/lib/identity/resolve";
 import { onMessage } from "@/lib/messaging";
 import type { RevisionRangeDiscovery } from "@/lib/protocol/discovery";
 import { buildRevisionsLoadUrl, buildRevisionsTilesUrl } from "@/lib/protocol/endpoints";
@@ -243,6 +250,26 @@ export default defineBackground(() => {
     return `${DOCS_ORIGIN}/document${userSegment}/d/${docId}/edit`;
   };
 
+  // The sharing-ACL document URL (A.5 multi-account aware). A same-origin, credentialed
+  // GET that returns the full ACL — including collaborator `emailAddress` — but ONLY when
+  // the viewer can manage sharing; readers get a reduced/empty ACL, so the email join
+  // degrades silently. `authuser` selects the signed-in account (mirrors `buildEditUrl`'s
+  // `/u/{N}/` slot); the remaining params match Docs' own Share-dialog init request.
+  const buildDriveShareUrl = (docId: DocId, userIndex: number | null): string => {
+    const query = new URLSearchParams({
+      id: docId,
+      command: "init_share",
+      foreignService: "kix",
+      gaiaService: "writely",
+      shareService: "kix",
+      subapp: "10",
+      hl: "en-GB",
+      origin: DOCS_ORIGIN,
+      authuser: String(userIndex ?? 0),
+    });
+    return `${DOCS_ORIGIN}/drivesharing/driveshare?${query.toString()}`;
+  };
+
   // Build the replay-page query string. OMITS `u` entirely when userIndex is null
   // (so the page's strict parse reads `null`, never a wrong `/u/0/` account slot);
   // appends `&u=<n>` only for a real integer.
@@ -260,9 +287,12 @@ export default defineBackground(() => {
   // their names come from the `revisions/tiles` `userMap` — the same feed Docs' native
   // version history uses. We read the short-lived `token`+`ouid` from the edit-page
   // bootstrap, fetch tiles same-origin (existing `docs.google.com` host permission — no
-  // new endpoint host, no new scope), and merge the names into the SESSION cache.
-  // Entirely best-effort: any miss leaves the opaque "Author N" labels untouched, and
-  // nothing is fetched or stored when the toggle is off.
+  // new endpoint host, no new scope), and merge the names into the SESSION cache. Their
+  // EMAIL is then joined in from the same-origin sharing ACL (`drivesharing/driveshare`),
+  // but only surfaces where the viewer can manage sharing — exactly the addresses Google
+  // already shows this viewer in its Share dialog. Entirely best-effort: any miss leaves
+  // the opaque "Author N" labels (or just the name) untouched, and nothing is fetched or
+  // stored when the toggle is off.
   const harvestCollaboratorIdentities = async (
     docId: DocId,
     userIndex: number | null,
@@ -289,12 +319,34 @@ export default defineBackground(() => {
       if (!tilesResponse.ok) {
         return;
       }
-      const incoming = parseUserMap(parseFramed(await tilesResponse.text()));
+      // Deframe once: names/colours come from the userMap, and the hovercard ids are
+      // the join key to the sharing-ACL emails below.
+      const framed = parseFramed(await tilesResponse.text());
+      const incoming = parseUserMap(framed);
       if (Object.keys(incoming).length === 0) {
         return;
       }
+      const hovercardByToken = parseTilesHovercardIds(framed);
+      // Best-effort: collaborator emails come from the sharing ACL, surfaced only when the
+      // viewer can manage sharing. Any failure (no rights / drift / non-ok) leaves names
+      // intact and simply yields no emails — `emailByGaia` stays `{}`.
+      let emailByGaia: Readonly<Record<string, string>> = {};
+      try {
+        const aclResponse = await fetch(buildDriveShareUrl(docId, userIndex), {
+          credentials: "include",
+          signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+        });
+        if (aclResponse.ok) {
+          emailByGaia = parseDriveShareAcl(await aclResponse.text());
+        }
+      } catch {
+        // No manage-share rights / endpoint drift — names stay; emails just don't resolve.
+      }
+      const enriched = attachCollaboratorEmails(incoming, hovercardByToken, emailByGaia);
       const current = await resolvedIdentities.getValue();
-      await resolvedIdentities.setValue(mergeIdentities(current, incoming));
+      // `mergeIdentities` preserves an existing email, so the self-path address is never
+      // clobbered by this name+email harvest.
+      await resolvedIdentities.setValue(mergeIdentities(current, enriched));
       // Mark resolved only on success, so a transient failure can retry next replay.
       identitiesHarvested.add(docId);
     } catch {

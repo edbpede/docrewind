@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { describe, expect, test } from "bun:test";
 import {
+  attachCollaboratorEmails,
   mergeIdentities,
   parseAccountLabel,
+  parseDriveShareAcl,
   parseOwnGaia,
+  parseTilesHovercardIds,
   parseTilesParams,
   parseUserMap,
   resolveSelfIdentity,
@@ -242,5 +245,271 @@ describe("withSelfIdentity", () => {
   test("is a no-op (null) when the self identity carries no email to add", () => {
     const current = { "0728": { userId: "0728", name: "Mofo Ker", email: null } };
     expect(withSelfIdentity(current, { userId: "0728", name: "Mofo Ker", email: null })).toBeNull();
+  });
+});
+
+describe("parseTilesHovercardIds", () => {
+  test("maps each token to its peopleHovercardId, skipping entries without one", () => {
+    expect(
+      parseTilesHovercardIds({
+        userMap: {
+          "03089517982426497767": { name: "RB Boot", peopleHovercardId: "104941268820871967559" },
+          "12090495620932845773": {
+            name: "Mr Torrint",
+            peopleHovercardId: "  109650672404104410772  ",
+          },
+          noHover: { name: "Nameless" },
+          blank: { name: "Blank", peopleHovercardId: "   " },
+          notRecord: "nope",
+        },
+      }),
+    ).toEqual({
+      "03089517982426497767": "104941268820871967559",
+      "12090495620932845773": "109650672404104410772",
+    });
+  });
+
+  test("tolerates a malformed or absent payload without throwing", () => {
+    expect(parseTilesHovercardIds(null)).toEqual({});
+    expect(parseTilesHovercardIds({})).toEqual({});
+    expect(parseTilesHovercardIds({ userMap: [] })).toEqual({});
+    expect(parseTilesHovercardIds("nope")).toEqual({});
+  });
+});
+
+describe("parseDriveShareAcl", () => {
+  // The live `drivesharing/driveshare` blob is deeply escaped JSON (`\"`), fields
+  // alphabetical. `esc` reproduces that escaping over readable JSON. Captured shape
+  // 2026-06-18: two active user perms, one group (skipped), one deleted user (skipped).
+  const esc = (json: string) => json.replace(/"/g, '\\"');
+  const acl = esc(
+    '{"permissions":[' +
+      '{"capabilities":{"canShare":true},"deleted":false,"domain":"gmail.com",' +
+      '"emailAddress":"cautiosreboot0402@gmail.com","id":"06332265589177339962",' +
+      '"isCollaboratorAccount":false,"role":"writer","type":"user",' +
+      '"userId":"104941268820871967559"},' +
+      '{"capabilities":{"canShare":false},"deleted":false,"domain":"gmail.com",' +
+      '"emailAddress":"s14s14s14mail@gmail.com","id":"06332265589177339963",' +
+      '"isCollaboratorAccount":false,"role":"writer","type":"user",' +
+      '"userId":"109650672404104410772"},' +
+      '{"capabilities":{},"deleted":false,"emailAddress":"team@example.com",' +
+      '"id":"77","role":"reader","type":"group","userId":"222"},' +
+      '{"capabilities":{},"deleted":true,"domain":"gmail.com",' +
+      '"emailAddress":"left@gmail.com","id":"88","type":"user","userId":"333"}' +
+      "]}",
+  );
+
+  test("returns {gaia→email} for active user perms only (skips groups + deleted)", () => {
+    expect(parseDriveShareAcl(acl)).toEqual({
+      "104941268820871967559": "cautiosreboot0402@gmail.com",
+      "109650672404104410772": "s14s14s14mail@gmail.com",
+    });
+  });
+
+  test("keeps an active perm that directly follows a deleted one", () => {
+    // The look-back must be scoped to the current object: a DELETED perm sitting just
+    // before an ACTIVE one must not leak its `"deleted":true` flag forward and suppress it.
+    const deletedThenActive = esc(
+      '{"permissions":[' +
+        '{"capabilities":{},"deleted":true,"domain":"gmail.com",' +
+        '"emailAddress":"left@gmail.com","id":"88","type":"user","userId":"333"},' +
+        '{"capabilities":{"canShare":true},"deleted":false,"domain":"gmail.com",' +
+        '"emailAddress":"cautiosreboot0402@gmail.com","id":"06332265589177339962",' +
+        '"isCollaboratorAccount":false,"role":"writer","type":"user",' +
+        '"userId":"104941268820871967559"}' +
+        "]}",
+    );
+    expect(parseDriveShareAcl(deletedThenActive)).toEqual({
+      "104941268820871967559": "cautiosreboot0402@gmail.com",
+    });
+  });
+
+  test("extracts emails when a key precedes `permissions` in the wrapper object", () => {
+    // Drive API v3 PermissionList emits `kind` FIRST, so the live wrapper is
+    // `{"kind":"drive#permissionList","permissions":[…]}`. Anchoring on the array opener
+    // (not the literal `{"permissions":[`) means a preceding key no longer hides the ACL.
+    const precedingKey = esc(
+      '{"kind":"drive#permissionList","permissions":[' +
+        '{"deleted":false,"emailAddress":"cautiosreboot0402@gmail.com",' +
+        '"type":"user","userId":"104941268820871967559"}' +
+        "]}",
+    );
+    expect(parseDriveShareAcl(precedingKey)).toEqual({
+      "104941268820871967559": "cautiosreboot0402@gmail.com",
+    });
+  });
+
+  test("extracts emails when the marker carries whitespace (pretty-printed JSON)", () => {
+    // A literal `{"permissions":[` marker fails the instant the serializer inserts spaces
+    // around the colon or brackets; the whitespace-tolerant `"permissions"\s*:\s*\[` anchor
+    // matches the pretty-printed form too.
+    const prettyPrinted = esc(
+      '{ "permissions" : [ ' +
+        '{ "deleted": false, "emailAddress": "s14s14s14mail@gmail.com", ' +
+        '"type": "user", "userId": "109650672404104410772" } ' +
+        "] }",
+    );
+    expect(parseDriveShareAcl(prettyPrinted)).toEqual({
+      "109650672404104410772": "s14s14s14mail@gmail.com",
+    });
+  });
+
+  test("excludes a deleted perm whose field value before emailAddress contains a '{'", () => {
+    // Structural defect the regex-window approach was vulnerable to: a field value carrying
+    // a literal `{` (here a displayName-like field, alphabetically between deleted and
+    // emailAddress) used to defeat the `{`-anchored look-back and leak the deleted email.
+    const deletedWithBrace = esc(
+      '{"permissions":[' +
+        '{"capabilities":{},"deleted":true,"displayName":"Team {Alpha}","domain":"gmail.com",' +
+        '"emailAddress":"left@gmail.com","id":"88","type":"user","userId":"333"}' +
+        "]}",
+    );
+    expect(parseDriveShareAcl(deletedWithBrace)).toEqual({});
+  });
+
+  test("keeps an active perm whose field value contains a '{'", () => {
+    const activeWithBrace = esc(
+      '{"permissions":[' +
+        '{"capabilities":{"canShare":true},"deleted":false,"displayName":"Team {Beta}",' +
+        '"domain":"gmail.com","emailAddress":"keep@gmail.com","id":"99","type":"user",' +
+        '"userId":"444"}' +
+        "]}",
+    );
+    expect(parseDriveShareAcl(activeWithBrace)).toEqual({ "444": "keep@gmail.com" });
+  });
+
+  test("extracts emails when the array is embedded in surrounding HTML", () => {
+    // The real response is a ~78 KB HTML document: markup + other JSON before the ACL and
+    // a later `]}` / markup after it. A greedy slice over-captures to the trailing `]}`
+    // and JSON.parse throws → all emails lost; the balanced-span walk stops at the ACL's
+    // own close.
+    const embedded =
+      "<!DOCTYPE html><html><body><script>var x = [1, 2];</script>" +
+      esc(
+        '{"permissions":[' +
+          '{"deleted":false,"emailAddress":"cautiosreboot0402@gmail.com",' +
+          '"type":"user","userId":"104941268820871967559"}' +
+          "]}",
+      ) +
+      '<div data-foo="[trailing]">later</div>{"unrelated":[9]}</body></html>';
+    expect(parseDriveShareAcl(embedded)).toEqual({
+      "104941268820871967559": "cautiosreboot0402@gmail.com",
+    });
+  });
+
+  test("extracts emails when a permission carries a nested-array field", () => {
+    // A naive lazy `*?` slice stops at the FIRST `]}`, truncating after a nested array
+    // field (here `permissionDetails`) and losing the perm. The balanced-span walk tracks
+    // depth, so the nested `]` does not close the outer object early.
+    const nestedArray = esc(
+      '{"permissions":[' +
+        '{"deleted":false,"emailAddress":"s14s14s14mail@gmail.com",' +
+        '"permissionDetails":[{"role":"writer","permissionType":"user"}],' +
+        '"type":"user","userId":"109650672404104410772"}' +
+        "]}",
+    );
+    expect(parseDriveShareAcl(nestedArray)).toEqual({
+      "109650672404104410772": "s14s14s14mail@gmail.com",
+    });
+  });
+
+  test("rejects a non-numeric userId (the real Gaia id is always digits)", () => {
+    const nonNumericId = esc(
+      '{"permissions":[' +
+        '{"deleted":false,"emailAddress":"spoof@gmail.com",' +
+        '"type":"user","userId":"not-a-gaia-id"}' +
+        "]}",
+    );
+    expect(parseDriveShareAcl(nonNumericId)).toEqual({});
+  });
+
+  test("ignores an unrelated earlier `permissions` array that shadows the real ACL", () => {
+    // The ~78 KB blob can carry an unrelated `"permissions":[…]` (app config / capability list)
+    // BEFORE the real sharing ACL. First-match-wins would slice that decoy and drop every email.
+    // Merging every array's extraction skips the numeric decoy (it yields nothing) and resolves
+    // the real ACL regardless of order.
+    const shadowed = esc(
+      '{"config":{"permissions":[1,2,3]}}' +
+        '{"permissions":[' +
+        '{"deleted":false,"emailAddress":"cautiosreboot0402@gmail.com",' +
+        '"type":"user","userId":"104941268820871967559"}' +
+        "]}",
+    );
+    expect(parseDriveShareAcl(shadowed)).toEqual({
+      "104941268820871967559": "cautiosreboot0402@gmail.com",
+    });
+  });
+
+  test("extracts the real ACL when a type-keyed decoy array precedes it (no short-circuit)", () => {
+    // Regression for reviewer 3438249973: a decoy `"permissions"` array that DOES contain a
+    // `type`-keyed object (so an `isAclCandidate`-style predicate would accept it) but is NOT a
+    // real user ACL — e.g. a feature-flag list — placed BEFORE the real ACL. First-match-wins
+    // would slice the decoy, find no user perms, return {}, and never reach the real ACL.
+    // Merging every array's extraction means the decoy contributes nothing and the real email
+    // still surfaces.
+    const decoyWithType = esc(
+      '{"config":{"permissions":[{"type":"feature","name":"beta"}]}}' +
+        '{"permissions":[' +
+        '{"deleted":false,"emailAddress":"cautiosreboot0402@gmail.com",' +
+        '"type":"user","userId":"104941268820871967559"}' +
+        "]}",
+    );
+    expect(parseDriveShareAcl(decoyWithType)).toEqual({
+      "104941268820871967559": "cautiosreboot0402@gmail.com",
+    });
+  });
+
+  test("returns {} when the only `permissions` array is unrelated (yields no user emails)", () => {
+    const onlyDecoy = esc('{"config":{"permissions":[{"foo":true},{"bar":1}]}}');
+    expect(parseDriveShareAcl(onlyDecoy)).toEqual({});
+    // A type-keyed-but-non-user decoy alone also yields nothing.
+    const onlyTypedDecoy = esc('{"config":{"permissions":[{"type":"feature","name":"beta"}]}}');
+    expect(parseDriveShareAcl(onlyTypedDecoy)).toEqual({});
+  });
+
+  test("tolerates malformed/empty input without throwing", () => {
+    expect(parseDriveShareAcl("")).toEqual({});
+    expect(parseDriveShareAcl("no acl here")).toEqual({});
+    // @ts-expect-error — exercises the runtime non-string guard
+    expect(parseDriveShareAcl(null)).toEqual({});
+  });
+});
+
+describe("attachCollaboratorEmails", () => {
+  const identities = {
+    tokA: { userId: "tokA", name: "RB Boot", email: null, color: "#673AB7" },
+    tokB: { userId: "tokB", name: "Mr Torrint", email: null },
+    self: { userId: "self", name: "Mofo Ker", email: "flylocious@gmail.com" },
+  };
+  const hovercardByToken = { tokA: "gaiaA", tokB: "gaiaB", self: "gaiaSelf" };
+
+  test("fills the email when the join resolves, preserving name + colour", () => {
+    expect(
+      attachCollaboratorEmails(identities, hovercardByToken, {
+        gaiaA: "cautiosreboot0402@gmail.com",
+        gaiaSelf: "someoneelse@gmail.com",
+      }),
+    ).toEqual({
+      tokA: {
+        userId: "tokA",
+        name: "RB Boot",
+        email: "cautiosreboot0402@gmail.com",
+        color: "#673AB7",
+      },
+      // No ACL entry for gaiaB → stays null.
+      tokB: { userId: "tokB", name: "Mr Torrint", email: null },
+      // A pre-existing (self) email is preserved, never overwritten by the ACL.
+      self: { userId: "self", name: "Mofo Ker", email: "flylocious@gmail.com" },
+    });
+  });
+
+  test("leaves email null when the token has no hovercard id to join on", () => {
+    expect(
+      attachCollaboratorEmails(
+        { x: { userId: "x", name: "X", email: null } },
+        {},
+        { g: "e@x.com" },
+      ),
+    ).toEqual({ x: { userId: "x", name: "X", email: null } });
   });
 });

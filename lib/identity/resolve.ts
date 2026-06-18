@@ -175,6 +175,205 @@ export function parseUserMap(tilesPayload: unknown): IdentityMap {
   return out;
 }
 
+/**
+ * From a deframed `revisions/tiles` payload, return `{ authorToken → peopleHovercardId }`.
+ * The `peopleHovercardId` is the collaborator's real Gaia id — the join key to the sharing
+ * ACL (the changelog token at tuple `[2]` is a *different* obfuscated id, so this bridge is
+ * what lets an ACL email be attached to a changelog author). Tolerant by construction
+ * (open-world, R-series): a non-record payload, a missing/!record `userMap`, and entries
+ * lacking a string `peopleHovercardId` are all skipped — never a throw.
+ */
+export function parseTilesHovercardIds(tilesPayload: unknown): Readonly<Record<string, string>> {
+  const userMap = isRecord(tilesPayload) ? tilesPayload.userMap : undefined;
+  if (!isRecord(userMap)) {
+    return {};
+  }
+  const out: Record<string, string> = {};
+  for (const [token, entry] of Object.entries(userMap)) {
+    if (token.length === 0 || !isRecord(entry)) {
+      continue;
+    }
+    const hovercardId =
+      typeof entry.peopleHovercardId === "string" ? entry.peopleHovercardId.trim() : "";
+    if (hovercardId.length === 0) {
+      continue;
+    }
+    out[token] = hovercardId;
+  }
+  return out;
+}
+
+// ── Collaborator EMAIL resolution via the `drivesharing/driveshare` ACL ───────
+//
+// Reverse-engineered live 2026-06-18: the same-origin, credentialed GET
+// `docs.google.com/drivesharing/driveshare?…&command=init_share` returns ~78 KB of
+// HTML with deeply-escaped embedded JSON carrying the full sharing ACL — but ONLY
+// when the viewer can manage sharing (owner / editor-with-share); a reader gets a
+// reduced/empty ACL. Each permission object (fields alphabetical) carries
+// `emailAddress`, `type:"user"`, `deleted`, and `userId` (the real Gaia id). That
+// `userId` === the tiles `peopleHovercardId`, so joining ACL→tiles→changelog token
+// surfaces a collaborator's email on the same data Google already shows this viewer
+// in its own Share dialog (no People/Drive API, no new scope). Tolerant + best-effort
+// like the tiles path: a miss only costs the (optional) email row.
+
+// The ACL is embedded in a ~78 KB HTML document (module header) with markup and other JSON
+// before AND after it, so we cannot match it with a single greedy/lazy regex: greedy
+// `[\s\S]*` over-captures to the last `]}` in the whole document, while lazy `[\s\S]*?`
+// stops at the FIRST `]}` and truncates if any permission carries a nested array. Instead we
+// anchor on the permissions array opener with a whitespace-tolerant regex, then walk the
+// `[…]` forward tracking bracket depth — ignoring structural characters inside JSON string
+// literals — to slice exactly that array and parse it directly. Parsing the array (not its
+// enclosing object) means we depend on neither `permissions` being the first key nor compact
+// serialization: a leading `{"kind":…,"permissions":[` or pretty-printed `{ "permissions" : [`
+// both resolve, where the old literal `{"permissions":[` marker silently missed them.
+//
+// We scan ALL `"permissions":[` matches in document order (not just the first) and MERGE every
+// array's extraction, because an unrelated `"permissions"` array (app config / capability list)
+// may appear in the same blob. We do not select one array via a shape predicate: any such
+// predicate is either too broad (a decoy carrying a `type`-keyed object short-circuits onto an
+// empty extraction and the real ACL is never reached) or too tight (it skips a real ACL holding
+// only group/domain entries). Merging sidesteps the choice — a decoy contributes nothing (it has
+// no active `type:"user"` + digit-`userId` + email entries that survive extraction) while the real
+// ACL contributes its emails, so array order and decoys no longer matter and no validity predicate
+// is needed. Narrowing the anchor to the wrapper instead (e.g. `{"permissions":[`) was rejected
+// for a separate reason: it reintroduces a first-key + compact-serialization dependency. The `g`
+// flag is kept on a local clone of the regex per call so its `lastIndex` state is never shared.
+//
+// Residual accepted limitation: a decoy array whose entries are themselves active `type:"user"` +
+// digit `userId` + `emailAddress` would be merged in — but such an entry is indistinguishable from
+// a real ACL entry by any heuristic and is not a realistic shape for non-ACL config data.
+const ACL_ARRAY_ANCHOR_RE = /"permissions"\s*:\s*\[/;
+
+/**
+ * Return the substring of `text` spanning the balanced `open`/`close` pair that begins at
+ * `start` (which must index an opening `open` char), walking forward until depth returns to
+ * zero. String literals are skipped wholesale (including their escaped quotes), so brackets/
+ * braces that appear inside an `emailAddress`, display name, URL, etc. never miscount. Returns
+ * null when the span never closes (truncated input). Used for both `{…}` objects and `[…]`
+ * arrays — pass the matching pair.
+ */
+function balancedSpan(text: string, start: number, open: string, close: string): string | null {
+  let depth = 0;
+  let inString = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (ch === "\\") {
+        i++; // skip the escaped character (e.g. `\"`, `\\`) — it can't close the string
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+    } else if (ch === open) {
+      depth++;
+    } else if (ch === close) {
+      depth--;
+      if (depth === 0) {
+        return text.slice(start, i + 1);
+      }
+    }
+  }
+  return null;
+}
+
+/** A single ACL permission object — only the fields we consume are typed; the feed carries more. */
+interface AclPermission {
+  readonly type?: unknown;
+  readonly deleted?: unknown;
+  readonly emailAddress?: unknown;
+  readonly userId?: unknown;
+}
+
+/** Reduce a parsed ACL array to `{ gaiaUserId → email }` for active user permissions. */
+function extractAclEmails(permissions: readonly unknown[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const perm of permissions as readonly AclPermission[]) {
+    if (!isRecord(perm)) {
+      continue;
+    }
+    // Skip deleted perms and non-user (group/domain) entries; require an email and a
+    // digit-only Gaia id (the real userId is always numeric; guard against anything else).
+    if (perm.deleted === true || perm.type !== "user") {
+      continue;
+    }
+    const { emailAddress, userId } = perm;
+    if (typeof emailAddress === "string" && typeof userId === "string" && /^\d+$/.test(userId)) {
+      out[userId] = emailAddress;
+    }
+  }
+  return out;
+}
+
+/**
+ * Parse `drivesharing/driveshare` HTML into `{ gaiaUserId → email }` for active user
+ * permissions. The blob is deeply escaped, so we first un-escape `\"`→`"`, then scan EVERY
+ * `"permissions":[` array opener (whitespace-tolerant anchor) in document order: for each we
+ * slice exactly that `[…]` array via a string-literal-aware balanced-bracket walk and
+ * `JSON.parse` it directly — reading each permission's fields structurally rather than with
+ * field-order-dependent regex windows, and depending on neither the array being the enclosing
+ * object's first key nor compact serialization. We MERGE every array's extraction rather than
+ * selecting one: an unrelated `"permissions"` array contributes nothing (its entries don't
+ * survive the user/email/digit-userId filters), so it can neither shadow the real ACL nor depend
+ * on array order — see the anchor note for why a single-array shape predicate was rejected. We
+ * keep an entry only when it is `type:"user"`, not `deleted`, and carries both an `emailAddress`
+ * and a digit-only `userId`. Non-string / no-match / malformed input → `{}`; never throws (every
+ * parse is wrapped).
+ */
+export function parseDriveShareAcl(html: string): Readonly<Record<string, string>> {
+  if (typeof html !== "string" || html.length === 0) {
+    return {};
+  }
+  const unescaped = html.replace(/\\"/g, '"');
+  // Local global regex so its `lastIndex` state is per-call, never shared across invocations.
+  const anchor = new RegExp(ACL_ARRAY_ANCHOR_RE.source, "g");
+  const out: Record<string, string> = {};
+  let match: RegExpExecArray | null = anchor.exec(unescaped);
+  while (match !== null) {
+    // The match ends on the opening `[`; slice the balanced array from there.
+    const arrayStart = match.index + match[0].length - 1;
+    const blob = balancedSpan(unescaped, arrayStart, "[", "]");
+    if (blob !== null) {
+      let permissions: unknown;
+      try {
+        permissions = JSON.parse(blob);
+      } catch {
+        // Malformed slice — skip this candidate and keep scanning; never throw (a miss only
+        // costs the optional email row, see module header).
+        permissions = undefined;
+      }
+      if (Array.isArray(permissions)) {
+        Object.assign(out, extractAclEmails(permissions));
+      }
+    }
+    match = anchor.exec(unescaped);
+  }
+  return out;
+}
+
+/**
+ * Attach collaborator emails to an {@link IdentityMap} by joining through the tiles
+ * hovercard ids: for each token, look up its `peopleHovercardId`, then the ACL email for
+ * that Gaia id. The email is filled ONLY when both lookups succeed AND the entry's email
+ * is currently `null` — so the self-path email (resolved from the account label) is never
+ * overwritten. Returns a new map; pure join, no I/O.
+ */
+export function attachCollaboratorEmails(
+  identities: IdentityMap,
+  hovercardByToken: Readonly<Record<string, string>>,
+  emailByGaia: Readonly<Record<string, string>>,
+): IdentityMap {
+  const out: Record<string, ResolvedIdentity> = {};
+  for (const [token, identity] of Object.entries(identities)) {
+    const gaiaId = hovercardByToken[token];
+    const email = gaiaId !== undefined ? emailByGaia[gaiaId] : undefined;
+    out[token] = identity.email === null && email !== undefined ? { ...identity, email } : identity;
+  }
+  return out;
+}
+
 // The editor bootstrap publishes the per-session revisions/tiles credentials inside
 // an `"info_params":{ "token":"…:<ms>", "ouid":"<digits>" }` block. The token is
 // short-lived (it embeds a millisecond timestamp) so it must be read fresh per

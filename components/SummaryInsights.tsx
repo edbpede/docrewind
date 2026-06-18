@@ -11,7 +11,8 @@
 // lifts a small detail card with content-free attributes only (display name, the
 // viewer's own email when known, a revision count, and the active window). Email is
 // resolvable solely for the viewer themselves; the version-history feed that names
-// collaborators carries no address, so a collaborator's card shows "Not available".
+// collaborators carries no address (confirmed live against the wire format), so the
+// email row is shown ONLY when an address is known and is omitted entirely otherwise.
 
 import type { Component } from "solid-js";
 import { createMemo, createSignal, For, mergeProps, onCleanup, onMount, Show } from "solid-js";
@@ -244,12 +245,14 @@ const SummaryInsights: Component<SummaryInsightsProps> = (rawProps) => {
                           </Show>
                           {author.label}
                         </p>
-                        <div class="author-pop-row">
-                          <span class="author-pop-key">{strings.insights.authorEmail}</span>
-                          <span class="author-pop-val">
-                            {author.email ?? strings.insights.authorEmailUnknown}
-                          </span>
-                        </div>
+                        <Show when={author.email}>
+                          {(email) => (
+                            <div class="author-pop-row">
+                              <span class="author-pop-key">{strings.insights.authorEmail}</span>
+                              <span class="author-pop-val">{email()}</span>
+                            </div>
+                          )}
+                        </Show>
                         <div class="author-pop-row">
                           <span class="author-pop-key">{strings.insights.authorEdits}</span>
                           <span class="author-pop-val">{author.edits}</span>
