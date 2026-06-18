@@ -55,7 +55,7 @@ export interface RevisionsTilesParams {
  * Build the `revisions/tiles` URL whose `)]}'`-framed `{ tileInfo, userMap, firstRev }`
  * body maps changelog author tokens to real display names (reverse-engineered live
  * 2026-06-18). The `token` + `ouid` are mandatory — without them the endpoint returns
- * an HTTP 400 HTML error page rather than JSON. Used only on the opt-in identity path.
+ * an HTTP 400 HTML error page rather than JSON. Used on the real-identities path (default-on with opt-out).
  */
 export function buildRevisionsTilesUrl(params: RevisionsTilesParams): string {
   if (params.userIndex !== null && (!Number.isInteger(params.userIndex) || params.userIndex < 0)) {

@@ -27,6 +27,7 @@ import {
   realIdentities,
   removePendingDestructiveStorageClear,
   removePendingStorageMaintenance,
+  resolvedIdentities,
   type StorageBudget,
   storageBudget,
   type Theme,
@@ -95,6 +96,11 @@ const OptionsApp: Component = () => {
   function onIdentities(next: boolean): void {
     mutateIdentities(next);
     void realIdentities.setValue(next);
+    // Opting out falls back to opaque labels: drop the resolved-name cache so the
+    // privacy promise is instantaneous, not deferred to session end (lib/settings.ts).
+    if (!next) {
+      void resolvedIdentities.removeValue();
+    }
   }
 
   function onBudget(field: "perDocumentBytes" | "globalCapBytes", mib: number): void {

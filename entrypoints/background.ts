@@ -77,6 +77,13 @@ export default defineBackground(() => {
     .setAccessLevel?.({ accessLevel: "TRUSTED_AND_UNTRUSTED_CONTEXTS" })
     .catch(() => {});
 
+  // One-time cleanup: an earlier release cached resolved identities under
+  // `local:resolvedIdentities` (on disk). The cache is now session-scoped, so the
+  // legacy on-disk key is orphaned — drop it so resolved names don't outlive the
+  // session for users upgrading from that build. Best-effort and idempotent.
+  // WXT strips the area prefix, so the on-disk key is the bare `resolvedIdentities`.
+  void browser.storage.local.remove("resolvedIdentities").catch(() => {});
+
   // Per-document cancellation flags for in-flight retrievals.
   const cancelledDocs = new Set<string>();
   // Docs whose identity userMap has already been harvested in THIS service-worker

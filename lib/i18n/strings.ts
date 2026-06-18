@@ -129,7 +129,8 @@ export const strings = {
     realIdentitiesHint:
       "On by default. Resolves author names from the document's version-history data " +
       "(a same-origin request to Google) and keeps them only for this browser session — " +
-      'never written to disk or sent anywhere. Turn off to show opaque "Author N" labels.',
+      "never written to disk; no data is sent anywhere except that same-origin Google request. " +
+      'Turn off to show opaque "Author N" labels.',
     perDocumentCapLabel: "Per-document cap (MB)",
     globalCapLabel: "Global cap (MB)",
     diagnosticsDefault: "Default",
