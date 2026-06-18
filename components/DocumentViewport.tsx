@@ -3,9 +3,11 @@
 // DocumentViewport (plan Phase 5 Step 5d / PRD §9.6). Renders the reconstructed
 // document as a sequence of `Segment`s — never raw response bodies. Each state
 // pairs color with a non-color affordance: suggestions get a dotted underline,
-// deletions a strike, opaque structures a labeled chip (§9.11). Non-accepted runs
-// carry a `title` so the descriptive label surfaces on hover (and as an accessible-
-// name fallback) without cluttering the rendered text. The reading column uses
+// deletions a strike, opaque structures a labeled chip (§9.11). The suggest/strike
+// runs surface their descriptive label via a `data-doc-tip` attribute, painted by an
+// instant CSS :hover tooltip (uno.config.ts) — NOT the native `title`, whose built-in
+// ~1s appearance delay (reset on every scroll) made the label feel unresponsive. The
+// inline `sr-only` span carries the same text for assistive tech. The reading column uses
 // `dir="auto"` for RTL scripts (§9.12). NON-VIRTUALIZED in Phase 5; segments are
 // length-changing across frames, so `<For>` (reference-keyed) is correct.
 
@@ -41,7 +43,7 @@ const DocumentViewport: Component<DocumentViewportProps> = (props) => {
                 </Match>
                 <Match when={segment.kind === "suggested-insert" && segment}>
                   {(seg) => (
-                    <span class="doc-suggest" title={strings.viewport.suggestedInsert}>
+                    <span class="doc-suggest" data-doc-tip={strings.viewport.suggestedInsert}>
                       <span class="sr-only">{strings.viewport.suggestedInsert}: </span>
                       {seg().text}
                     </span>
@@ -49,7 +51,7 @@ const DocumentViewport: Component<DocumentViewportProps> = (props) => {
                 </Match>
                 <Match when={segment.kind === "marked-for-deletion" && segment}>
                   {(seg) => (
-                    <span class="doc-strike" title={strings.viewport.markedForDeletion}>
+                    <span class="doc-strike" data-doc-tip={strings.viewport.markedForDeletion}>
                       <span class="sr-only">{strings.viewport.markedForDeletion}: </span>
                       {seg().text}
                     </span>

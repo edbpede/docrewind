@@ -402,6 +402,9 @@ export default defineConfig({
 
 @media (prefers-reduced-motion: reduce) {
   .tl-fill, .tl-thumb, .tl-track, .tl-marker, .tl-cluster, .progress-fill, .btn-base { transition: none !important; }
+  /* The reading-column affordance tooltip below fades in; drop the fade (it still
+     appears instantly on hover) so reduced-motion users get no transition at all. */
+  .doc-suggest::after, .doc-strike::after { transition: none !important; }
   /* Don't freeze the indeterminate bar (a static one-third pill reads as a
      broken/stalled load). Instead drop the travelling sweep for a vestibular-
      safe opacity pulse over the FULL track, so reduced-motion users still get a
@@ -425,6 +428,50 @@ export default defineConfig({
   50% { opacity: 1; }
 }
 .dr-indeterminate { animation: dr-indeterminate-slide 1.1s linear infinite; }
+
+/* Reading-column affordance tooltips (suggested insertion / marked for deletion).
+   These non-accepted runs previously surfaced their label through the native
+   \`title\` attribute, whose tooltip is OS/browser-timed: it appears only after a
+   built-in ~0.5–1s hover dwell AND resets that timer on every scroll, so right
+   after scrolling the label felt unresponsive (the reported "hold for ~1s, worse
+   after scrolling" symptom). The label is content-free chrome — §9.6 affordances
+   must read instantly — so it is moved off \`title\` and onto a CSS :hover
+   pseudo-element that paints the moment the pointer enters and re-resolves on
+   scroll-under-cursor, at zero JS / main-thread cost. The text rides a
+   \`data-doc-tip\` attribute (i18n stays single-source); the inline \`sr-only\` span
+   keeps carrying the same text for assistive tech. The seal/author popovers
+   (\`tl-tip\`, \`author-pop\`) were already instant (pointerenter-driven, no debounce)
+   and are unaffected. */
+.doc-suggest, .doc-strike { position: relative; }
+.doc-suggest::after, .doc-strike::after {
+  content: attr(data-doc-tip);
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 0.4rem);
+  transform: translateX(-50%);
+  z-index: 20;
+  width: max-content;
+  max-width: 16rem;
+  pointer-events: none;
+  border-radius: 0.5rem;
+  border: 1px solid oklch(92.3% 0.003 48.7);
+  background: #fff;
+  padding: 0.125rem 0.5rem;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: oklch(37.4% 0.01 67.6);
+  box-shadow: 0 10px 30px -12px oklch(0% 0 0/0.4);
+  opacity: 0;
+  transition: opacity 100ms ease-out;
+}
+.doc-suggest:hover::after, .doc-strike:hover::after { opacity: 1; }
+.dark .doc-suggest::after, .dark .doc-strike::after {
+  border-color: oklch(37.4% 0.01 67.6);
+  background: oklch(26.8% 0.007 34.3);
+  color: oklch(97% 0.001 106.4);
+}
 `,
     },
   ],
