@@ -61,7 +61,6 @@ describe("strings catalog", () => {
     expect(strings.insights.duration).toBe("Replay duration");
     expect(strings.insights.attributionCaveat.length).toBeGreaterThan(0);
     expect(strings.insights.authorEmail.length).toBeGreaterThan(0);
-    expect(strings.insights.authorEmailUnknown.length).toBeGreaterThan(0);
     expect(strings.insights.authorEdits.length).toBeGreaterThan(0);
     expect(strings.insights.authorActive.length).toBeGreaterThan(0);
     expect(strings.options.title.length).toBeGreaterThan(0);

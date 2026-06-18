@@ -323,4 +323,51 @@ describe("replay UI components", () => {
     expect(screen.getByText("Author 1")).toBeTruthy();
     expect(screen.queryByText("Ada Lovelace")).toBeNull();
   });
+
+  it("shows the email row in the detail card only when an address is known", () => {
+    render(() => (
+      <SummaryInsights
+        revisions={[revision(1, 1_000, asUserId("07280646734247216338"))]}
+        timeline={[]}
+        realIdentities={true}
+        identities={{
+          "07280646734247216338": {
+            userId: "07280646734247216338",
+            name: "Ada Lovelace",
+            email: "ada@example.com",
+          },
+        }}
+      />
+    ));
+    // The card is revealed by pinning the chip (click); the known email then shows.
+    fireEvent.click(screen.getByRole("button", { name: /Ada Lovelace/ }));
+    expect(screen.getByText("Email")).toBeTruthy();
+    expect(screen.getByText("ada@example.com")).toBeTruthy();
+  });
+
+  it("omits the email row entirely for an author with no known address", () => {
+    // Collaborators carry name + colour but no email (the wire format has none), so
+    // the row is dropped rather than rendered with a "Not available" placeholder.
+    render(() => (
+      <SummaryInsights
+        revisions={[revision(1, 1_000, asUserId("03089517982426497767"))]}
+        timeline={[]}
+        realIdentities={true}
+        identities={{
+          "03089517982426497767": {
+            userId: "03089517982426497767",
+            name: "RB Boot",
+            email: null,
+            color: "#673AB7",
+          },
+        }}
+      />
+    ));
+    fireEvent.click(screen.getByRole("button", { name: /RB Boot/ }));
+    // The card opened (the revision-count row is present)...
+    expect(screen.getByText("Revisions")).toBeTruthy();
+    // ...but with no address, neither the Email label nor any placeholder is rendered.
+    expect(screen.queryByText("Email")).toBeNull();
+    expect(screen.queryByText("Not available")).toBeNull();
+  });
 });
