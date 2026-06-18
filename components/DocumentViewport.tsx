@@ -80,12 +80,23 @@ function highlightStyle(color: string, kind: Segment["kind"]): JSX.CSSProperties
 }
 
 const DocumentViewport: Component<DocumentViewportProps> = (props) => {
-  // The author key a segment is attributed to (the run's first char's insert revision
-  // → its author), or null for opaque placeholders / unattributed runs.
-  const authorKeyOf = (segment: Segment): string | null =>
-    "fromRevision" in segment
-      ? (props.authorKeyByRevision?.get(Number(segment.fromRevision)) ?? null)
-      : null;
+  // The author key(s) a segment is attributed to. A run coalesces contiguous
+  // same-kind chars regardless of which revision wrote each, so it can straddle
+  // revisions with different authors (A opens it, B appends to its tail). The
+  // model only exposes the run's two endpoints (`fromRevision` / `toRevision`),
+  // so we attribute to whichever authors those endpoints map to — mirroring the
+  // caret, which already consults both. Opaque placeholders / unattributed runs
+  // contribute no keys. A `Set` so a single-revision run yields one key.
+  const authorKeysOf = (segment: Segment): ReadonlySet<string> => {
+    const keys = new Set<string>();
+    if ("fromRevision" in segment) {
+      const from = props.authorKeyByRevision?.get(Number(segment.fromRevision));
+      if (from !== undefined) keys.add(from);
+      const to = props.authorKeyByRevision?.get(Number(segment.toRevision));
+      if (to !== undefined) keys.add(to);
+    }
+    return keys;
+  };
 
   // The index of the run the caret trails: the LAST run the current revision touched —
   // either one it OPENED (`fromRevision`) or one it EXTENDED at the tail (`toRevision`,
@@ -148,7 +159,7 @@ const DocumentViewport: Component<DocumentViewportProps> = (props) => {
                 return (
                   highlight !== undefined &&
                   highlight !== null &&
-                  authorKeyOf(segment) === highlight.key
+                  authorKeysOf(segment).has(highlight.key)
                 );
               };
               const attrStyle = (): JSX.CSSProperties | undefined =>

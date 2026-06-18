@@ -104,7 +104,15 @@ const SummaryInsights: Component<SummaryInsightsProps> = (rawProps) => {
   // `deriveAuthors` so this colophon and the replay surface's authorship attribution read
   // the IDENTICAL opaque keys, "Author N" numbering, and colours.
   const authors = createMemo<readonly AuthorEntry[]>(() =>
-    deriveAuthors(props.revisions, props.realIdentities, props.identities),
+    // Read `realIdentities` first (always a dep), then `identities` ONLY when it's on. In
+    // opaque mode `deriveAuthors` ignores identities, so passing the stable `{}` here skips
+    // subscribing to the identity cache — and the false→true flip still recomputes because
+    // `realIdentities` itself is the dep that fires, at which point identities is read.
+    deriveAuthors(
+      props.revisions,
+      props.realIdentities,
+      props.realIdentities ? props.identities : {},
+    ),
   );
 
   // Detail-card visibility: a chip reveals its card on hover/focus (`hovered`) or stays
