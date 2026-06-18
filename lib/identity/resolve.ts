@@ -216,49 +216,104 @@ export function parseTilesHovercardIds(tilesPayload: unknown): Readonly<Record<s
 // in its own Share dialog (no People/Drive API, no new scope). Tolerant + best-effort
 // like the tiles path: a miss only costs the (optional) email row.
 
-// One `type:"user"` permission object: capture its `emailAddress` then, without
-// crossing into the NEXT permission's `emailAddress`, its adjacent `"type":"user","userId"`
-// pair (alphabetical field order makes type+userId adjacent — see the live capture). The
-// no-cross-emailAddress guard confines a match to a single object, so a group/domain entry
-// (type !== "user") can never be mis-paired with a following user's id.
-const ACL_USER_PERMISSION_RE =
-  /"emailAddress":"([^"]+)"(?:(?!"emailAddress")[\s\S]){0,2000}?"type":"user","userId":"(\d+)"/g;
+// The ACL object is embedded in a ~78 KB HTML document (module header) with markup and
+// other JSON before AND after it, so we cannot match it with a single greedy/lazy regex:
+// greedy `[\s\S]*` over-captures to the last `]}` in the whole document, while lazy
+// `[\s\S]*?` stops at the FIRST `]}` and truncates if any permission carries a nested
+// array. Instead we anchor on the `{"permissions":[` marker and walk forward tracking
+// brace/bracket depth — ignoring structural characters inside JSON string literals — to
+// find the matching close of that exact object.
+const ACL_MARKER = '{"permissions":[';
+
+/**
+ * Return the substring of `text` spanning the JSON object that begins at `start` (which
+ * must index an opening `{`), walking forward until brace depth returns to zero. String
+ * literals are skipped wholesale (including their escaped quotes), so braces/brackets that
+ * appear inside an `emailAddress`, display name, URL, etc. never miscount. Returns null
+ * when the object never closes (truncated input).
+ */
+function balancedObjectSpan(text: string, start: number): string | null {
+  let depth = 0;
+  let inString = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (ch === "\\") {
+        i++; // skip the escaped character (e.g. `\"`, `\\`) — it can't close the string
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+    } else if (ch === "{") {
+      depth++;
+    } else if (ch === "}") {
+      depth--;
+      if (depth === 0) {
+        return text.slice(start, i + 1);
+      }
+    }
+  }
+  return null;
+}
+
+/** A single ACL permission object — only the fields we consume are typed; the feed carries more. */
+interface AclPermission {
+  readonly type?: unknown;
+  readonly deleted?: unknown;
+  readonly emailAddress?: unknown;
+  readonly userId?: unknown;
+}
 
 /**
  * Parse `drivesharing/driveshare` HTML into `{ gaiaUserId → email }` for active user
- * permissions. The blob is deeply escaped, so we first un-escape `\"`→`"`. Entries that
- * are not `type:"user"` (groups/domains) never match the pair regex; entries flagged
- * `"deleted":true` are skipped via a short look-back (the field sits just before
- * `emailAddress` in the alphabetical object). Non-string / no-match input → `{}`; never
- * throws.
+ * permissions. The blob is deeply escaped, so we first un-escape `\"`→`"`, locate the
+ * `{"permissions":[…]}` object via a string-literal-aware balanced-span walk, and
+ * `JSON.parse` exactly that slice — reading each permission's fields structurally rather
+ * than with field-order-dependent regex windows. We keep an entry only when it is
+ * `type:"user"`, not `deleted`, and carries both an `emailAddress` and a digit-only
+ * `userId`. Non-string / no-match / malformed input → `{}`; never throws (the parse is wrapped).
  */
 export function parseDriveShareAcl(html: string): Readonly<Record<string, string>> {
   if (typeof html !== "string" || html.length === 0) {
     return {};
   }
   const unescaped = html.replace(/\\"/g, '"');
+  const start = unescaped.indexOf(ACL_MARKER);
+  if (start === -1) {
+    return {};
+  }
+  const blob = balancedObjectSpan(unescaped, start);
+  if (blob === null) {
+    return {};
+  }
+  let permissions: unknown;
+  try {
+    permissions = (JSON.parse(blob) as { permissions?: unknown }).permissions;
+  } catch {
+    // Malformed slice — degrade to empty, never throw: a miss only costs the optional
+    // email row (see module header).
+    return {};
+  }
+  if (!Array.isArray(permissions)) {
+    return {};
+  }
   const out: Record<string, string> = {};
-  ACL_USER_PERMISSION_RE.lastIndex = 0;
-  for (
-    let match = ACL_USER_PERMISSION_RE.exec(unescaped);
-    match !== null;
-    match = ACL_USER_PERMISSION_RE.exec(unescaped)
-  ) {
-    const email = match[1];
-    const userId = match[2];
-    if (email === undefined || userId === undefined) {
+  for (const perm of permissions as readonly AclPermission[]) {
+    if (!isRecord(perm)) {
       continue;
     }
-    // `"deleted":true` precedes `emailAddress` (deleted < domain < emailAddress), so it
-    // lives in the look-back. Anchor that window at the start of the CURRENT permission
-    // object — the nearest preceding `{` — so an adjacent DELETED entry that happens to sit
-    // just before this one can't bleed its flag in and suppress a valid active permission.
-    const objectStart = unescaped.lastIndexOf("{", match.index);
-    const preceding = unescaped.slice(objectStart === -1 ? 0 : objectStart, match.index);
-    if (/"deleted":true/.test(preceding)) {
+    // Skip deleted perms and non-user (group/domain) entries; require an email and a
+    // digit-only Gaia id (the real userId is always numeric; guard against anything else).
+    if (perm.deleted === true || perm.type !== "user") {
       continue;
     }
-    out[userId] = email;
+    const { emailAddress, userId } = perm;
+    if (typeof emailAddress === "string" && typeof userId === "string" && /^\d+$/.test(userId)) {
+      out[userId] = emailAddress;
+    }
   }
   return out;
 }

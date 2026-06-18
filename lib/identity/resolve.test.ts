@@ -324,6 +324,75 @@ describe("parseDriveShareAcl", () => {
     });
   });
 
+  test("excludes a deleted perm whose field value before emailAddress contains a '{'", () => {
+    // Structural defect the regex-window approach was vulnerable to: a field value carrying
+    // a literal `{` (here a displayName-like field, alphabetically between deleted and
+    // emailAddress) used to defeat the `{`-anchored look-back and leak the deleted email.
+    const deletedWithBrace = esc(
+      '{"permissions":[' +
+        '{"capabilities":{},"deleted":true,"displayName":"Team {Alpha}","domain":"gmail.com",' +
+        '"emailAddress":"left@gmail.com","id":"88","type":"user","userId":"333"}' +
+        "]}",
+    );
+    expect(parseDriveShareAcl(deletedWithBrace)).toEqual({});
+  });
+
+  test("keeps an active perm whose field value contains a '{'", () => {
+    const activeWithBrace = esc(
+      '{"permissions":[' +
+        '{"capabilities":{"canShare":true},"deleted":false,"displayName":"Team {Beta}",' +
+        '"domain":"gmail.com","emailAddress":"keep@gmail.com","id":"99","type":"user",' +
+        '"userId":"444"}' +
+        "]}",
+    );
+    expect(parseDriveShareAcl(activeWithBrace)).toEqual({ "444": "keep@gmail.com" });
+  });
+
+  test("extracts emails when the array is embedded in surrounding HTML", () => {
+    // The real response is a ~78 KB HTML document: markup + other JSON before the ACL and
+    // a later `]}` / markup after it. A greedy slice over-captures to the trailing `]}`
+    // and JSON.parse throws → all emails lost; the balanced-span walk stops at the ACL's
+    // own close.
+    const embedded =
+      "<!DOCTYPE html><html><body><script>var x = [1, 2];</script>" +
+      esc(
+        '{"permissions":[' +
+          '{"deleted":false,"emailAddress":"cautiosreboot0402@gmail.com",' +
+          '"type":"user","userId":"104941268820871967559"}' +
+          "]}",
+      ) +
+      '<div data-foo="[trailing]">later</div>{"unrelated":[9]}</body></html>';
+    expect(parseDriveShareAcl(embedded)).toEqual({
+      "104941268820871967559": "cautiosreboot0402@gmail.com",
+    });
+  });
+
+  test("extracts emails when a permission carries a nested-array field", () => {
+    // A naive lazy `*?` slice stops at the FIRST `]}`, truncating after a nested array
+    // field (here `permissionDetails`) and losing the perm. The balanced-span walk tracks
+    // depth, so the nested `]` does not close the outer object early.
+    const nestedArray = esc(
+      '{"permissions":[' +
+        '{"deleted":false,"emailAddress":"s14s14s14mail@gmail.com",' +
+        '"permissionDetails":[{"role":"writer","permissionType":"user"}],' +
+        '"type":"user","userId":"109650672404104410772"}' +
+        "]}",
+    );
+    expect(parseDriveShareAcl(nestedArray)).toEqual({
+      "109650672404104410772": "s14s14s14mail@gmail.com",
+    });
+  });
+
+  test("rejects a non-numeric userId (the real Gaia id is always digits)", () => {
+    const nonNumericId = esc(
+      '{"permissions":[' +
+        '{"deleted":false,"emailAddress":"spoof@gmail.com",' +
+        '"type":"user","userId":"not-a-gaia-id"}' +
+        "]}",
+    );
+    expect(parseDriveShareAcl(nonNumericId)).toEqual({});
+  });
+
   test("tolerates malformed/empty input without throwing", () => {
     expect(parseDriveShareAcl("")).toEqual({});
     expect(parseDriveShareAcl("no acl here")).toEqual({});
