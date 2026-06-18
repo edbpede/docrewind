@@ -242,7 +242,7 @@ export function parseTilesHovercardIds(tilesPayload: unknown): Readonly<Record<s
 // Residual accepted limitation: a decoy array whose entries are themselves active `type:"user"` +
 // digit `userId` + `emailAddress` would be merged in — but such an entry is indistinguishable from
 // a real ACL entry by any heuristic and is not a realistic shape for non-ACL config data.
-const ACL_ARRAY_ANCHOR_RE = /"permissions"\s*:\s*\[/g;
+const ACL_ARRAY_ANCHOR_RE = /"permissions"\s*:\s*\[/;
 
 /**
  * Return the substring of `text` spanning the balanced `open`/`close` pair that begins at
