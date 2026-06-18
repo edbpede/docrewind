@@ -423,6 +423,28 @@ describe("parseDriveShareAcl", () => {
     expect(parseDriveShareAcl(nonNumericId)).toEqual({});
   });
 
+  test("ignores an unrelated earlier `permissions` array that shadows the real ACL", () => {
+    // The ~78 KB blob can carry an unrelated `"permissions":[…]` (app config / capability list)
+    // BEFORE the real sharing ACL. First-match-wins would slice that decoy, find no user perms,
+    // and drop every email. Scanning all matches and validating each (≥1 type-keyed entry) skips
+    // the decoy and resolves the real ACL.
+    const shadowed = esc(
+      '{"config":{"permissions":[1,2,3]}}' +
+        '{"permissions":[' +
+        '{"deleted":false,"emailAddress":"cautiosreboot0402@gmail.com",' +
+        '"type":"user","userId":"104941268820871967559"}' +
+        "]}",
+    );
+    expect(parseDriveShareAcl(shadowed)).toEqual({
+      "104941268820871967559": "cautiosreboot0402@gmail.com",
+    });
+  });
+
+  test("returns {} when the only `permissions` array is unrelated (no type-keyed entries)", () => {
+    const onlyDecoy = esc('{"config":{"permissions":[{"foo":true},{"bar":1}]}}');
+    expect(parseDriveShareAcl(onlyDecoy)).toEqual({});
+  });
+
   test("tolerates malformed/empty input without throwing", () => {
     expect(parseDriveShareAcl("")).toEqual({});
     expect(parseDriveShareAcl("no acl here")).toEqual({});

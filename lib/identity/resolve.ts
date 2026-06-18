@@ -226,7 +226,24 @@ export function parseTilesHovercardIds(tilesPayload: unknown): Readonly<Record<s
 // enclosing object) means we depend on neither `permissions` being the first key nor compact
 // serialization: a leading `{"kind":…,"permissions":[` or pretty-printed `{ "permissions" : [`
 // both resolve, where the old literal `{"permissions":[` marker silently missed them.
-const ACL_ARRAY_ANCHOR_RE = /"permissions"\s*:\s*\[/;
+//
+// We scan ALL `"permissions":[` matches in document order (not just the first) and use the
+// first that parses to a valid ACL array, because an unrelated earlier `"permissions"` array
+// (app config / capability list) in the same blob would otherwise shadow the real ACL and drop
+// every email. Narrowing the anchor to the wrapper instead (e.g. `{"permissions":[`) was
+// rejected: it reintroduces a first-key + compact-serialization dependency. The `g` flag is
+// kept on a local clone of the regex per call so its `lastIndex` state is never shared.
+const ACL_ARRAY_ANCHOR_RE = /"permissions"\s*:\s*\[/g;
+
+/**
+ * Does a parsed array look like a sharing ACL? Real ACL entries (user/group/domain/anyone) each
+ * carry a string `type`; unrelated config/numeric arrays do not. We require ≥1 such entry — loose
+ * enough to accept an ACL that legitimately holds only group/domain/deleted entries (it then
+ * yields no emails), tight enough to skip a shadowing array of numbers or plain objects.
+ */
+function isAclCandidate(arr: readonly unknown[]): boolean {
+  return arr.some((el) => isRecord(el) && typeof el.type === "string");
+}
 
 /**
  * Return the substring of `text` spanning the balanced `open`/`close` pair that begins at
@@ -271,43 +288,8 @@ interface AclPermission {
   readonly userId?: unknown;
 }
 
-/**
- * Parse `drivesharing/driveshare` HTML into `{ gaiaUserId → email }` for active user
- * permissions. The blob is deeply escaped, so we first un-escape `\"`→`"`, locate the
- * `"permissions":[` array opener with a whitespace-tolerant anchor, slice exactly that
- * `[…]` array via a string-literal-aware balanced-bracket walk, and `JSON.parse` the array
- * directly — reading each permission's fields structurally rather than with field-order-
- * dependent regex windows, and depending on neither the array being the enclosing object's
- * first key nor compact serialization. We keep an entry only when it is `type:"user"`, not
- * `deleted`, and carries both an `emailAddress` and a digit-only `userId`. Non-string /
- * no-match / malformed input → `{}`; never throws (the parse is wrapped).
- */
-export function parseDriveShareAcl(html: string): Readonly<Record<string, string>> {
-  if (typeof html !== "string" || html.length === 0) {
-    return {};
-  }
-  const unescaped = html.replace(/\\"/g, '"');
-  const anchor = ACL_ARRAY_ANCHOR_RE.exec(unescaped);
-  if (anchor === null) {
-    return {};
-  }
-  // The match ends on the opening `[`; slice the balanced array from there.
-  const arrayStart = anchor.index + anchor[0].length - 1;
-  const blob = balancedSpan(unescaped, arrayStart, "[", "]");
-  if (blob === null) {
-    return {};
-  }
-  let permissions: unknown;
-  try {
-    permissions = JSON.parse(blob);
-  } catch {
-    // Malformed slice — degrade to empty, never throw: a miss only costs the optional
-    // email row (see module header).
-    return {};
-  }
-  if (!Array.isArray(permissions)) {
-    return {};
-  }
+/** Reduce a parsed ACL array to `{ gaiaUserId → email }` for active user permissions. */
+function extractAclEmails(permissions: readonly unknown[]): Record<string, string> {
   const out: Record<string, string> = {};
   for (const perm of permissions as readonly AclPermission[]) {
     if (!isRecord(perm)) {
@@ -324,6 +306,49 @@ export function parseDriveShareAcl(html: string): Readonly<Record<string, string
     }
   }
   return out;
+}
+
+/**
+ * Parse `drivesharing/driveshare` HTML into `{ gaiaUserId → email }` for active user
+ * permissions. The blob is deeply escaped, so we first un-escape `\"`→`"`, then scan EVERY
+ * `"permissions":[` array opener (whitespace-tolerant anchor) in document order: for each we
+ * slice exactly that `[…]` array via a string-literal-aware balanced-bracket walk and
+ * `JSON.parse` it directly — reading each permission's fields structurally rather than with
+ * field-order-dependent regex windows, and depending on neither the array being the enclosing
+ * object's first key nor compact serialization. The first array that parses to a valid ACL
+ * (see {@link isAclCandidate}) wins, so an unrelated earlier `"permissions"` array can't shadow
+ * the real one. We keep an entry only when it is `type:"user"`, not `deleted`, and carries both
+ * an `emailAddress` and a digit-only `userId`. Non-string / no-match / malformed input → `{}`;
+ * never throws (every parse is wrapped).
+ */
+export function parseDriveShareAcl(html: string): Readonly<Record<string, string>> {
+  if (typeof html !== "string" || html.length === 0) {
+    return {};
+  }
+  const unescaped = html.replace(/\\"/g, '"');
+  // Local global regex so its `lastIndex` state is per-call, never shared across invocations.
+  const anchor = new RegExp(ACL_ARRAY_ANCHOR_RE.source, "g");
+  let match: RegExpExecArray | null = anchor.exec(unescaped);
+  while (match !== null) {
+    // The match ends on the opening `[`; slice the balanced array from there.
+    const arrayStart = match.index + match[0].length - 1;
+    const blob = balancedSpan(unescaped, arrayStart, "[", "]");
+    if (blob !== null) {
+      let permissions: unknown;
+      try {
+        permissions = JSON.parse(blob);
+      } catch {
+        // Malformed slice — skip this candidate and keep scanning; never throw (a miss only
+        // costs the optional email row, see module header).
+        permissions = undefined;
+      }
+      if (Array.isArray(permissions) && isAclCandidate(permissions)) {
+        return extractAclEmails(permissions);
+      }
+    }
+    match = anchor.exec(unescaped);
+  }
+  return {};
 }
 
 /**
