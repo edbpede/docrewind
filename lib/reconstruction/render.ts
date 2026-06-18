@@ -26,6 +26,11 @@ import type { DocumentModel, SuggestionState } from "./model";
  * that opened it, `toRevision` the revision that most recently extended its tail.
  * The replay caret uses the pair to find the run the current revision touched (it
  * either opened a fresh run or appended onto an existing one).
+ *
+ * `revisions` lists EVERY revision that contributed a char to the run (deduped,
+ * order-insignificant), including the ones in the middle that `fromRevision` /
+ * `toRevision` don't name. Author highlighting needs this so a contributor whose
+ * edit landed inside a coalesced run is attributed, not just the two endpoints.
  */
 export type Segment =
   | {
@@ -33,18 +38,21 @@ export type Segment =
       readonly text: string;
       readonly fromRevision: number;
       readonly toRevision: number;
+      readonly revisions: readonly number[];
     }
   | {
       readonly kind: "suggested-insert";
       readonly text: string;
       readonly fromRevision: number;
       readonly toRevision: number;
+      readonly revisions: readonly number[];
     }
   | {
       readonly kind: "marked-for-deletion";
       readonly text: string;
       readonly fromRevision: number;
       readonly toRevision: number;
+      readonly revisions: readonly number[];
     }
   | {
       readonly kind: "opaque-placeholder";
@@ -76,6 +84,9 @@ interface TextRun {
   text: string;
   fromRevision: number;
   toRevision: number;
+  // Every revision that wrote a char into this run, deduped. Endpoints alone
+  // miss contributors whose edit coalesced into the middle of the run.
+  revisions: Set<number>;
 }
 
 /**
@@ -103,6 +114,7 @@ export function segmentsAt(model: DocumentModel): readonly Segment[] {
         text: run.text,
         fromRevision: run.fromRevision,
         toRevision: run.toRevision,
+        revisions: [...run.revisions],
       });
       run = null;
     }
@@ -139,6 +151,7 @@ export function segmentsAt(model: DocumentModel): readonly Segment[] {
           // Coalescing across revisions: the run's tail now belongs to this char's
           // revision, so the caret can find the run a later revision extended.
           run.toRevision = el.insertRevision;
+          run.revisions.add(el.insertRevision);
         } else {
           flush();
           run = {
@@ -146,6 +159,7 @@ export function segmentsAt(model: DocumentModel): readonly Segment[] {
             text: el.char,
             fromRevision: el.insertRevision,
             toRevision: el.insertRevision,
+            revisions: new Set([el.insertRevision]),
           };
         }
         break;

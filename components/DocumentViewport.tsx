@@ -82,18 +82,18 @@ function highlightStyle(color: string, kind: Segment["kind"]): JSX.CSSProperties
 const DocumentViewport: Component<DocumentViewportProps> = (props) => {
   // The author key(s) a segment is attributed to. A run coalesces contiguous
   // same-kind chars regardless of which revision wrote each, so it can straddle
-  // revisions with different authors (A opens it, B appends to its tail). The
-  // model only exposes the run's two endpoints (`fromRevision` / `toRevision`),
-  // so we attribute to whichever authors those endpoints map to — mirroring the
-  // caret, which already consults both. Opaque placeholders / unattributed runs
+  // revisions with different authors — not just at its endpoints but in the
+  // middle too (A opens it, B edits inside it, C appends to its tail). The
+  // segment's `revisions` lists every contributing revision, so we attribute to
+  // every author those revisions map to. Opaque placeholders / unattributed runs
   // contribute no keys. A `Set` so a single-revision run yields one key.
   const authorKeysOf = (segment: Segment): ReadonlySet<string> => {
     const keys = new Set<string>();
-    if ("fromRevision" in segment) {
-      const from = props.authorKeyByRevision?.get(Number(segment.fromRevision));
-      if (from !== undefined) keys.add(from);
-      const to = props.authorKeyByRevision?.get(Number(segment.toRevision));
-      if (to !== undefined) keys.add(to);
+    if ("revisions" in segment) {
+      for (const revision of segment.revisions) {
+        const key = props.authorKeyByRevision?.get(Number(revision));
+        if (key !== undefined) keys.add(key);
+      }
     }
     return keys;
   };

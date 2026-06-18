@@ -396,8 +396,8 @@ describe("replay UI components", () => {
 
   it("paints a colour-coded writing caret after the current revision's run", () => {
     const segments: Segment[] = [
-      { kind: "accepted-text", text: "Hello ", fromRevision: 1, toRevision: 1 },
-      { kind: "accepted-text", text: "world", fromRevision: 2, toRevision: 2 },
+      { kind: "accepted-text", text: "Hello ", fromRevision: 1, toRevision: 1, revisions: [1] },
+      { kind: "accepted-text", text: "world", fromRevision: 2, toRevision: 2, revisions: [2] },
     ];
     const { container } = render(() => (
       <DocumentViewport segments={segments} caret={{ revision: 2, color: "#ff0000" }} />
@@ -413,7 +413,7 @@ describe("replay UI components", () => {
     // Revision 5 appended onto a run opened by revision 1 — the coalesced run keeps
     // fromRevision=1 but toRevision=5, so the caret must still follow the active frame.
     const segments: Segment[] = [
-      { kind: "accepted-text", text: "Hello", fromRevision: 1, toRevision: 5 },
+      { kind: "accepted-text", text: "Hello", fromRevision: 1, toRevision: 5, revisions: [1, 5] },
     ];
     const { container } = render(() => (
       <DocumentViewport segments={segments} caret={{ revision: 5, color: "#00ff00" }} />
@@ -423,7 +423,7 @@ describe("replay UI components", () => {
 
   it("paints no caret on a frame whose revision left no visible run", () => {
     const segments: Segment[] = [
-      { kind: "accepted-text", text: "Hello", fromRevision: 1, toRevision: 1 },
+      { kind: "accepted-text", text: "Hello", fromRevision: 1, toRevision: 1, revisions: [1] },
     ];
     // A pure-deletion frame: the current revision (7) has no run of its own on screen.
     const { container } = render(() => (
@@ -434,8 +434,8 @@ describe("replay UI components", () => {
 
   it("highlights only the foregrounded author's runs and links them for a11y", () => {
     const segments: Segment[] = [
-      { kind: "accepted-text", text: "by Ada", fromRevision: 1, toRevision: 1 },
-      { kind: "accepted-text", text: "by Boot", fromRevision: 2, toRevision: 2 },
+      { kind: "accepted-text", text: "by Ada", fromRevision: 1, toRevision: 1, revisions: [1] },
+      { kind: "accepted-text", text: "by Boot", fromRevision: 2, toRevision: 2, revisions: [2] },
     ];
     const authorKeyByRevision = new Map<number, string>([
       [1, "ada"],
@@ -462,7 +462,7 @@ describe("replay UI components", () => {
 
   it("renders no highlight or description when no author is foregrounded", () => {
     const segments: Segment[] = [
-      { kind: "accepted-text", text: "plain", fromRevision: 1, toRevision: 1 },
+      { kind: "accepted-text", text: "plain", fromRevision: 1, toRevision: 1, revisions: [1] },
     ];
     render(() => (
       <DocumentViewport
