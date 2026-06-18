@@ -101,6 +101,13 @@ export const strings = {
     duration: "Replay duration",
     durationUnknown: "—",
     attributionCaveat: "Attribution may be incomplete.",
+    // Author detail card (hover/click on a contributor chip). Content-free: a name,
+    // the viewer's own email when known, and counts/timing only — never document text.
+    authorDetailsHint: "Show contributor details",
+    authorEmail: "Email",
+    authorEmailUnknown: "Not available",
+    authorEdits: "Revisions",
+    authorActive: "Active",
   },
   options: {
     title: "DocRewind settings",
@@ -244,4 +251,34 @@ export function largeEditDetail(charDelta: number): string {
 /** Pause detail from a gap duration, e.g. "12m without edits". */
 export function pauseDetail(durationMs: number): string {
   return `${formatDuration(durationMs)} without edits`;
+}
+
+// ── Author detail card range (content-free contributor timing) ────────────────
+
+/** One epoch-ms stamp as a localized "medium date + short time" (e.g. "Jun 16, 2026, 10:02 AM"). */
+function formatStamp(ms: number): string {
+  return new Date(ms).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+}
+
+/**
+ * A contributor's active window from first→last edit, e.g.
+ * "Jun 16, 2026, 10:02 AM – 11:40 AM" (same day collapses the trailing date) or the
+ * single stamp when first === last. Timestamps only — no document text — so it stays
+ * within the content-free insights model.
+ */
+export function authorActiveRange(firstMs: number, lastMs: number): string {
+  // The decoder admits any finite number, but values beyond the Date epoch bound
+  // (±8.64e15 ms) render as "Invalid Date". Out-of-range stamps degrade to blank.
+  if (Math.abs(firstMs) > 8.64e15 || Math.abs(lastMs) > 8.64e15) {
+    return "";
+  }
+  const first = formatStamp(firstMs);
+  if (firstMs === lastMs) {
+    return first;
+  }
+  const sameDay = new Date(firstMs).toDateString() === new Date(lastMs).toDateString();
+  const last = sameDay
+    ? new Date(lastMs).toLocaleString(undefined, { timeStyle: "short" })
+    : formatStamp(lastMs);
+  return `${first} – ${last}`; // U+2013 EN DASH
 }

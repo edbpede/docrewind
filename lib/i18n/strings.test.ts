@@ -8,6 +8,7 @@ import { describe, expect, it } from "bun:test";
 import type { OpaqueStructure } from "../decoder/types";
 import type { RetrievalErrorCategory } from "../retrieval/errors";
 import {
+  authorActiveRange,
   authorLabel,
   errorTitle,
   opaqueLabel,
@@ -59,6 +60,10 @@ describe("strings catalog", () => {
     expect(strings.timeline.label).toBe("Revision timeline");
     expect(strings.insights.duration).toBe("Replay duration");
     expect(strings.insights.attributionCaveat.length).toBeGreaterThan(0);
+    expect(strings.insights.authorEmail.length).toBeGreaterThan(0);
+    expect(strings.insights.authorEmailUnknown.length).toBeGreaterThan(0);
+    expect(strings.insights.authorEdits.length).toBeGreaterThan(0);
+    expect(strings.insights.authorActive.length).toBeGreaterThan(0);
     expect(strings.options.title.length).toBeGreaterThan(0);
     expect(strings.options.keepRawHint).toContain("once no replay or decode is using it");
     expect(strings.options.perDocumentCapLabel).toBe("Per-document cap (MB)");
@@ -70,5 +75,13 @@ describe("strings catalog", () => {
     expect(speedLabel(2)).toBe("2×");
     expect(percentLabel(42)).toBe("42%");
     expect(authorLabel(0)).toBe("Author 1");
+  });
+
+  it("formats a contributor's active range", () => {
+    const t0 = Date.UTC(2026, 5, 16, 9, 2, 0);
+    // A single instant collapses to one stamp; a window renders a dashed range.
+    expect(authorActiveRange(t0, t0)).not.toContain("–");
+    const ranged = authorActiveRange(t0, t0 + 90 * 60 * 1000);
+    expect(ranged).toContain("–");
   });
 });
