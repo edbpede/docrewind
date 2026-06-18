@@ -373,7 +373,15 @@ export default defineConfig({
   // chunk, the `<li>` falls back to `position: static`, and the card resolves its
   // containing block to <body> — painting itself off-screen so it never appears.
   // Safelist it explicitly so the card always anchors to its chip.
-  safelist: [...Object.keys(shortcuts), "relative"],
+  //
+  // `sr-only` is the same hazard for a bare accessibility utility: it labels the
+  // non-accepted runs in DocumentViewport (and a <legend> in DiagnosticsPreferences)
+  // for screen readers while the descriptive text stays off the visible page. When
+  // the first-scanned entry never emits a standalone `sr-only`, the rule is dropped
+  // from the shipped chunk, the spans lose their visually-hidden clip, and the label
+  // ("Suggested insertion: ", "Marked for deletion: ") paints inline in the reading
+  // column during replay. Safelist it so the labels stay screen-reader-only.
+  safelist: [...Object.keys(shortcuts), "relative", "sr-only"],
 
   preflights: [
     {
