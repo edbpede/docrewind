@@ -221,11 +221,14 @@ const OptionsApp: Component = () => {
           <label class="flex items-center gap-2">
             <input
               type="checkbox"
-              checked={showIdentities() ?? false}
+              checked={showIdentities() ?? true}
               onChange={(event) => onIdentities(event.currentTarget.checked)}
             />
             <span>{strings.options.realIdentitiesLabel}</span>
           </label>
+          <p class="text-xs text-stone-600 dark:text-stone-400">
+            {strings.options.realIdentitiesHint}
+          </p>
 
           <label class="flex items-center justify-between gap-3">
             <span>{strings.options.perDocumentCapLabel}</span>

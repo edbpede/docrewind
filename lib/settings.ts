@@ -136,19 +136,25 @@ export const keepRawData = storage.defineItem<boolean>("local:keepRawData", {
   fallback: true,
 });
 
-/** Whether to surface real account identities vs. opaque ids (PRD §9.7). Default off. */
+/**
+ * Whether to surface real account identities vs. opaque "Author N" labels (PRD §9.7).
+ * Default ON: the names are data the viewer is already authorized to see (Docs' own
+ * version history shows them) and resolution is same-origin and on-device. The opt-OUT
+ * switch lets a privacy-conscious user fall back to opaque labels (and clears the cache).
+ */
 export const realIdentities = storage.defineItem<boolean>("local:realIdentities", {
-  fallback: false,
+  fallback: true,
 });
 
 /**
  * Cache of resolved author identities, keyed by the opaque author token (Gaia id).
- * Populated ONLY when `realIdentities` is on — the content script reads the
- * signed-in account label already present on the Docs page (no network) and
- * caches it here for the replay surface. Content-free by default: this stays an
- * empty object unless the user has explicitly opted in.
+ * SESSION-scoped (`storage.session`) on purpose: it is held in memory only, never
+ * written to disk, and auto-cleared when the browsing session ends — so resolved
+ * names are as transient as the live Docs UI. Populated from the version-history
+ * `userMap` (background) and, as a best-effort bonus, the signed-in account label
+ * (content script). Empty when `realIdentities` is off (resolution is skipped).
  */
-export const resolvedIdentities = storage.defineItem<IdentityMap>("local:resolvedIdentities", {
+export const resolvedIdentities = storage.defineItem<IdentityMap>("session:resolvedIdentities", {
   fallback: {},
 });
 

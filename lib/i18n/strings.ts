@@ -125,7 +125,11 @@ export const strings = {
     themeDark: "Dark",
     keepRawLabel: "Keep raw data for re-decoding",
     keepRawHint: "When disabled, raw data is discarded once no replay or decode is using it.",
-    realIdentitiesLabel: "Show real account identities",
+    realIdentitiesLabel: "Show real author names",
+    realIdentitiesHint:
+      "On by default. Resolves author names from the document's version-history data " +
+      "(a same-origin request to Google) and keeps them only for this browser session — " +
+      'never written to disk or sent anywhere. Turn off to show opaque "Author N" labels.',
     perDocumentCapLabel: "Per-document cap (MB)",
     globalCapLabel: "Global cap (MB)",
     diagnosticsDefault: "Default",
@@ -197,7 +201,8 @@ export function percentLabel(pct: number): string {
   return `${pct}%`;
 }
 
-/** Opaque, stable author label (real identities are never surfaced by default). */
+/** Opaque, stable author label — the fallback when a real name is unresolved or
+ * when identity display is turned off. */
 export function authorLabel(index: number): string {
   return `Author ${index + 1}`;
 }

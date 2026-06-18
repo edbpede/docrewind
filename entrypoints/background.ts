@@ -27,9 +27,11 @@
 import { createIdbStore } from "@/lib/db";
 import { asRevisionId } from "@/lib/domain/ids";
 import type { DocId, RawPayload, RevisionId } from "@/lib/domain/model";
+import { mergeIdentities, parseTilesParams, parseUserMap } from "@/lib/identity/resolve";
 import { onMessage } from "@/lib/messaging";
 import type { RevisionRangeDiscovery } from "@/lib/protocol/discovery";
-import { buildRevisionsLoadUrl } from "@/lib/protocol/endpoints";
+import { buildRevisionsLoadUrl, buildRevisionsTilesUrl } from "@/lib/protocol/endpoints";
+import { parseFramed } from "@/lib/protocol/framing";
 import { fail, ok, type Result, type RetrievalError, retrievalError } from "@/lib/retrieval/errors";
 import { type CancellationToken, runRetrieval } from "@/lib/retrieval/orchestrator";
 import type { ChunkFetcher, ChunkRequest } from "@/lib/retrieval/transport";
@@ -39,10 +41,12 @@ import {
   getPendingDestructiveStorageClears,
   getPendingStorageMaintenance,
   hasActiveStorageLease,
+  realIdentities,
   refreshStorageLease,
   removePendingDestructiveStorageClear,
   removePendingStorageMaintenance,
   removePendingStorageMaintenanceForScope,
+  resolvedIdentities,
   runIfCurrentPendingDestructiveStorageClear,
   runIfCurrentPendingStorageMaintenance,
   STORAGE_LEASE_REFRESH_MS,
@@ -59,8 +63,28 @@ export default defineBackground(() => {
     canRunScope: async (docId) => !(await hasActiveStorageLease(docId)),
   });
 
+  // The identity cache lives in `storage.session` (in-memory, never on disk). By
+  // default session storage is readable only by trusted contexts; raise the access
+  // level so the Docs CONTENT SCRIPT can contribute the viewer's own name. This is
+  // strictly an enrichment path — if the API is unavailable the content-script write
+  // simply no-ops and the background tiles harvest (a trusted context) still fills
+  // the cache, so the call is best-effort and never gates anything.
+  void (
+    browser.storage.session as unknown as {
+      setAccessLevel?: (opts: { accessLevel: string }) => Promise<void>;
+    }
+  )
+    .setAccessLevel?.({ accessLevel: "TRUSTED_AND_UNTRUSTED_CONTEXTS" })
+    .catch(() => {});
+
   // Per-document cancellation flags for in-flight retrievals.
   const cancelledDocs = new Set<string>();
+  // Docs whose identity userMap has already been harvested in THIS service-worker
+  // lifetime. Resolution is one same-origin GET per doc per session — re-opening a
+  // replay for the same doc must not refetch (rate-limit + efficiency). The session
+  // cache persists names across replays anyway; an MV3 restart resets this set and
+  // costs at most one extra harvest, which is acceptable.
+  const identitiesHarvested = new Set<string>();
   // Per-document run epoch. A fresh `startRetrieval` bumps the epoch, so any
   // still-pending earlier run for the same docId sees `isCancelled() === true`
   // and stops — preventing two concurrent runs from racing the IDB store when
@@ -221,6 +245,54 @@ export default defineBackground(() => {
       params.set("u", String(userIndex));
     }
     return `?${params.toString()}`;
+  };
+
+  // Collaborator identity harvest (PRD §9.7). Runs by default; skipped only when the
+  // user opted OUT via `realIdentities`. The self-path (content script) resolves just
+  // the viewer; other collaborators' Gaia ids never appear in the page bootstrap, so
+  // their names come from the `revisions/tiles` `userMap` — the same feed Docs' native
+  // version history uses. We read the short-lived `token`+`ouid` from the edit-page
+  // bootstrap, fetch tiles same-origin (existing `docs.google.com` host permission — no
+  // new endpoint host, no new scope), and merge the names into the SESSION cache.
+  // Entirely best-effort: any miss leaves the opaque "Author N" labels untouched, and
+  // nothing is fetched or stored when the toggle is off.
+  const harvestCollaboratorIdentities = async (
+    docId: DocId,
+    userIndex: number | null,
+  ): Promise<void> => {
+    if (identitiesHarvested.has(docId) || !(await realIdentities.getValue())) {
+      return;
+    }
+    try {
+      const editResponse = await fetch(buildEditUrl(docId, userIndex), {
+        credentials: "include",
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      });
+      if (!editResponse.ok) {
+        return;
+      }
+      const params = parseTilesParams(await editResponse.text());
+      if (params === null) {
+        return;
+      }
+      const tilesResponse = await fetch(
+        buildRevisionsTilesUrl({ docId, userIndex, token: params.token, ouid: params.ouid }),
+        { credentials: "include", signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) },
+      );
+      if (!tilesResponse.ok) {
+        return;
+      }
+      const incoming = parseUserMap(parseFramed(await tilesResponse.text()));
+      if (Object.keys(incoming).length === 0) {
+        return;
+      }
+      const current = await resolvedIdentities.getValue();
+      await resolvedIdentities.setValue(mergeIdentities(current, incoming));
+      // Mark resolved only on success, so a transient failure can retry next replay.
+      identitiesHarvested.add(docId);
+    } catch {
+      // Best-effort cosmetic enrichment — never surface or retry; opaque labels remain.
+    }
   };
 
   // Map an HTTP status to the typed error taxonomy. Recoverable categories let
@@ -444,6 +516,11 @@ export default defineBackground(() => {
       void refreshStorageLease(data.docId).catch(() => {});
     }, STORAGE_LEASE_REFRESH_MS);
     cancelledDocs.delete(data.docId);
+    // Identity enrichment (default-on; opt-out via `realIdentities`), decoupled from
+    // the retrieval critical path: it gates internally and never throws, so a
+    // fire-and-forget launch can't delay or fail the changelog fetch. Names land
+    // asynchronously in `resolvedIdentities`, which the replay surface watches.
+    void harvestCollaboratorIdentities(data.docId, data.userIndex);
     // Claim a fresh epoch; any earlier run for this docId is now stale and will
     // self-cancel on its next `isCancelled()` check.
     const epoch = (runEpochByDoc.get(data.docId) ?? 0) + 1;
