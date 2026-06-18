@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { describe, expect, test } from "bun:test";
 import {
+  attachCollaboratorEmails,
   mergeIdentities,
   parseAccountLabel,
+  parseDriveShareAcl,
   parseOwnGaia,
+  parseTilesHovercardIds,
   parseTilesParams,
   parseUserMap,
   resolveSelfIdentity,
@@ -242,5 +245,110 @@ describe("withSelfIdentity", () => {
   test("is a no-op (null) when the self identity carries no email to add", () => {
     const current = { "0728": { userId: "0728", name: "Mofo Ker", email: null } };
     expect(withSelfIdentity(current, { userId: "0728", name: "Mofo Ker", email: null })).toBeNull();
+  });
+});
+
+describe("parseTilesHovercardIds", () => {
+  test("maps each token to its peopleHovercardId, skipping entries without one", () => {
+    expect(
+      parseTilesHovercardIds({
+        userMap: {
+          "03089517982426497767": { name: "RB Boot", peopleHovercardId: "104941268820871967559" },
+          "12090495620932845773": {
+            name: "Mr Torrint",
+            peopleHovercardId: "  109650672404104410772  ",
+          },
+          noHover: { name: "Nameless" },
+          blank: { name: "Blank", peopleHovercardId: "   " },
+          notRecord: "nope",
+        },
+      }),
+    ).toEqual({
+      "03089517982426497767": "104941268820871967559",
+      "12090495620932845773": "109650672404104410772",
+    });
+  });
+
+  test("tolerates a malformed or absent payload without throwing", () => {
+    expect(parseTilesHovercardIds(null)).toEqual({});
+    expect(parseTilesHovercardIds({})).toEqual({});
+    expect(parseTilesHovercardIds({ userMap: [] })).toEqual({});
+    expect(parseTilesHovercardIds("nope")).toEqual({});
+  });
+});
+
+describe("parseDriveShareAcl", () => {
+  // The live `drivesharing/driveshare` blob is deeply escaped JSON (`\"`), fields
+  // alphabetical. `esc` reproduces that escaping over readable JSON. Captured shape
+  // 2026-06-18: two active user perms, one group (skipped), one deleted user (skipped).
+  const esc = (json: string) => json.replace(/"/g, '\\"');
+  const acl = esc(
+    '{"permissions":[' +
+      '{"capabilities":{"canShare":true},"deleted":false,"domain":"gmail.com",' +
+      '"emailAddress":"cautiosreboot0402@gmail.com","id":"06332265589177339962",' +
+      '"isCollaboratorAccount":false,"role":"writer","type":"user",' +
+      '"userId":"104941268820871967559"},' +
+      '{"capabilities":{"canShare":false},"deleted":false,"domain":"gmail.com",' +
+      '"emailAddress":"s14s14s14mail@gmail.com","id":"06332265589177339963",' +
+      '"isCollaboratorAccount":false,"role":"writer","type":"user",' +
+      '"userId":"109650672404104410772"},' +
+      '{"capabilities":{},"deleted":false,"emailAddress":"team@example.com",' +
+      '"id":"77","role":"reader","type":"group","userId":"222"},' +
+      '{"capabilities":{},"deleted":true,"domain":"gmail.com",' +
+      '"emailAddress":"left@gmail.com","id":"88","type":"user","userId":"333"}' +
+      "]}",
+  );
+
+  test("returns {gaia→email} for active user perms only (skips groups + deleted)", () => {
+    expect(parseDriveShareAcl(acl)).toEqual({
+      "104941268820871967559": "cautiosreboot0402@gmail.com",
+      "109650672404104410772": "s14s14s14mail@gmail.com",
+    });
+  });
+
+  test("tolerates malformed/empty input without throwing", () => {
+    expect(parseDriveShareAcl("")).toEqual({});
+    expect(parseDriveShareAcl("no acl here")).toEqual({});
+    // @ts-expect-error — exercises the runtime non-string guard
+    expect(parseDriveShareAcl(null)).toEqual({});
+  });
+});
+
+describe("attachCollaboratorEmails", () => {
+  const identities = {
+    tokA: { userId: "tokA", name: "RB Boot", email: null, color: "#673AB7" },
+    tokB: { userId: "tokB", name: "Mr Torrint", email: null },
+    self: { userId: "self", name: "Mofo Ker", email: "flylocious@gmail.com" },
+  };
+  const hovercardByToken = { tokA: "gaiaA", tokB: "gaiaB", self: "gaiaSelf" };
+
+  test("fills the email when the join resolves, preserving name + colour", () => {
+    expect(
+      attachCollaboratorEmails(identities, hovercardByToken, {
+        gaiaA: "cautiosreboot0402@gmail.com",
+        gaiaSelf: "someoneelse@gmail.com",
+      }),
+    ).toEqual({
+      tokA: {
+        userId: "tokA",
+        name: "RB Boot",
+        email: "cautiosreboot0402@gmail.com",
+        color: "#673AB7",
+      },
+      // No ACL entry for gaiaB → stays null.
+      tokB: { userId: "tokB", name: "Mr Torrint", email: null },
+      // A pre-existing (self) email is preserved, never overwritten by the ACL.
+      self: { userId: "self", name: "Mofo Ker", email: "flylocious@gmail.com" },
+    });
+  });
+
+  test("leaves email null when the token has no hovercard id to join on", () => {
+    expect(
+      attachCollaboratorEmails(
+        { x: { userId: "x", name: "X", email: null } },
+        {},
+        { g: "e@x.com" },
+      ),
+    ).toEqual({ x: { userId: "x", name: "X", email: null } });
   });
 });

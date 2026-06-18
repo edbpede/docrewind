@@ -175,6 +175,113 @@ export function parseUserMap(tilesPayload: unknown): IdentityMap {
   return out;
 }
 
+/**
+ * From a deframed `revisions/tiles` payload, return `{ authorToken → peopleHovercardId }`.
+ * The `peopleHovercardId` is the collaborator's real Gaia id — the join key to the sharing
+ * ACL (the changelog token at tuple `[2]` is a *different* obfuscated id, so this bridge is
+ * what lets an ACL email be attached to a changelog author). Tolerant by construction
+ * (open-world, R-series): a non-record payload, a missing/!record `userMap`, and entries
+ * lacking a string `peopleHovercardId` are all skipped — never a throw.
+ */
+export function parseTilesHovercardIds(tilesPayload: unknown): Readonly<Record<string, string>> {
+  const userMap = isRecord(tilesPayload) ? tilesPayload.userMap : undefined;
+  if (!isRecord(userMap)) {
+    return {};
+  }
+  const out: Record<string, string> = {};
+  for (const [token, entry] of Object.entries(userMap)) {
+    if (token.length === 0 || !isRecord(entry)) {
+      continue;
+    }
+    const hovercardId =
+      typeof entry.peopleHovercardId === "string" ? entry.peopleHovercardId.trim() : "";
+    if (hovercardId.length === 0) {
+      continue;
+    }
+    out[token] = hovercardId;
+  }
+  return out;
+}
+
+// ── Collaborator EMAIL resolution via the `drivesharing/driveshare` ACL ───────
+//
+// Reverse-engineered live 2026-06-18: the same-origin, credentialed GET
+// `docs.google.com/drivesharing/driveshare?…&command=init_share` returns ~78 KB of
+// HTML with deeply-escaped embedded JSON carrying the full sharing ACL — but ONLY
+// when the viewer can manage sharing (owner / editor-with-share); a reader gets a
+// reduced/empty ACL. Each permission object (fields alphabetical) carries
+// `emailAddress`, `type:"user"`, `deleted`, and `userId` (the real Gaia id). That
+// `userId` === the tiles `peopleHovercardId`, so joining ACL→tiles→changelog token
+// surfaces a collaborator's email on the same data Google already shows this viewer
+// in its own Share dialog (no People/Drive API, no new scope). Tolerant + best-effort
+// like the tiles path: a miss only costs the (optional) email row.
+
+// One `type:"user"` permission object: capture its `emailAddress` then, without
+// crossing into the NEXT permission's `emailAddress`, its adjacent `"type":"user","userId"`
+// pair (alphabetical field order makes type+userId adjacent — see the live capture). The
+// no-cross-emailAddress guard confines a match to a single object, so a group/domain entry
+// (type !== "user") can never be mis-paired with a following user's id.
+const ACL_USER_PERMISSION_RE =
+  /"emailAddress":"([^"]+)"(?:(?!"emailAddress")[\s\S]){0,2000}?"type":"user","userId":"(\d+)"/g;
+
+/**
+ * Parse `drivesharing/driveshare` HTML into `{ gaiaUserId → email }` for active user
+ * permissions. The blob is deeply escaped, so we first un-escape `\"`→`"`. Entries that
+ * are not `type:"user"` (groups/domains) never match the pair regex; entries flagged
+ * `"deleted":true` are skipped via a short look-back (the field sits just before
+ * `emailAddress` in the alphabetical object). Non-string / no-match input → `{}`; never
+ * throws.
+ */
+export function parseDriveShareAcl(html: string): Readonly<Record<string, string>> {
+  if (typeof html !== "string" || html.length === 0) {
+    return {};
+  }
+  const unescaped = html.replace(/\\"/g, '"');
+  const out: Record<string, string> = {};
+  ACL_USER_PERMISSION_RE.lastIndex = 0;
+  for (
+    let match = ACL_USER_PERMISSION_RE.exec(unescaped);
+    match !== null;
+    match = ACL_USER_PERMISSION_RE.exec(unescaped)
+  ) {
+    const email = match[1];
+    const userId = match[2];
+    if (email === undefined || userId === undefined) {
+      continue;
+    }
+    // `"deleted":true` precedes `emailAddress` (deleted < domain < emailAddress); a
+    // bounded look-back stays inside this object (the large `capabilities` block sits
+    // before `deleted`, so it can't reach a previous permission's flag).
+    const preceding = unescaped.slice(Math.max(0, match.index - 400), match.index);
+    if (/"deleted":true/.test(preceding)) {
+      continue;
+    }
+    out[userId] = email;
+  }
+  return out;
+}
+
+/**
+ * Attach collaborator emails to an {@link IdentityMap} by joining through the tiles
+ * hovercard ids: for each token, look up its `peopleHovercardId`, then the ACL email for
+ * that Gaia id. The email is filled ONLY when both lookups succeed AND the entry's email
+ * is currently `null` — so the self-path email (resolved from the account label) is never
+ * overwritten. Returns a new map; pure join, no I/O.
+ */
+export function attachCollaboratorEmails(
+  identities: IdentityMap,
+  hovercardByToken: Readonly<Record<string, string>>,
+  emailByGaia: Readonly<Record<string, string>>,
+): IdentityMap {
+  const out: Record<string, ResolvedIdentity> = {};
+  for (const [token, identity] of Object.entries(identities)) {
+    const gaiaId = hovercardByToken[token];
+    const email = gaiaId !== undefined ? emailByGaia[gaiaId] : undefined;
+    out[token] = identity.email === null && email !== undefined ? { ...identity, email } : identity;
+  }
+  return out;
+}
+
 // The editor bootstrap publishes the per-session revisions/tiles credentials inside
 // an `"info_params":{ "token":"…:<ms>", "ouid":"<digits>" }` block. The token is
 // short-lived (it embeds a millisecond timestamp) so it must be read fresh per
