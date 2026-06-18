@@ -3,8 +3,9 @@
 // DocumentViewport (plan Phase 5 Step 5d / PRD §9.6). Renders the reconstructed
 // document as a sequence of `Segment`s — never raw response bodies. Each state
 // pairs color with a non-color affordance: suggestions get a dotted underline,
-// deletions a strike, opaque structures a labeled chip (§9.11). A visually-hidden
-// label names each non-accepted run for screen readers. The reading column uses
+// deletions a strike, opaque structures a labeled chip (§9.11). Non-accepted runs
+// carry a `title` so the descriptive label surfaces on hover (and as an accessible-
+// name fallback) without cluttering the rendered text. The reading column uses
 // `dir="auto"` for RTL scripts (§9.12). NON-VIRTUALIZED in Phase 5; segments are
 // length-changing across frames, so `<For>` (reference-keyed) is correct.
 
@@ -40,16 +41,14 @@ const DocumentViewport: Component<DocumentViewportProps> = (props) => {
                 </Match>
                 <Match when={segment.kind === "suggested-insert" && segment}>
                   {(seg) => (
-                    <span class="doc-suggest">
-                      <span class="sr-only">{strings.viewport.suggestedInsert}: </span>
+                    <span class="doc-suggest" title={strings.viewport.suggestedInsert}>
                       {seg().text}
                     </span>
                   )}
                 </Match>
                 <Match when={segment.kind === "marked-for-deletion" && segment}>
                   {(seg) => (
-                    <span class="doc-strike">
-                      <span class="sr-only">{strings.viewport.markedForDeletion}: </span>
+                    <span class="doc-strike" title={strings.viewport.markedForDeletion}>
                       {seg().text}
                     </span>
                   )}
