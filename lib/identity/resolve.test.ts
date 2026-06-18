@@ -425,9 +425,9 @@ describe("parseDriveShareAcl", () => {
 
   test("ignores an unrelated earlier `permissions` array that shadows the real ACL", () => {
     // The ~78 KB blob can carry an unrelated `"permissions":[…]` (app config / capability list)
-    // BEFORE the real sharing ACL. First-match-wins would slice that decoy, find no user perms,
-    // and drop every email. Scanning all matches and validating each (≥1 type-keyed entry) skips
-    // the decoy and resolves the real ACL.
+    // BEFORE the real sharing ACL. First-match-wins would slice that decoy and drop every email.
+    // Merging every array's extraction skips the numeric decoy (it yields nothing) and resolves
+    // the real ACL regardless of order.
     const shadowed = esc(
       '{"config":{"permissions":[1,2,3]}}' +
         '{"permissions":[' +
@@ -440,9 +440,31 @@ describe("parseDriveShareAcl", () => {
     });
   });
 
-  test("returns {} when the only `permissions` array is unrelated (no type-keyed entries)", () => {
+  test("extracts the real ACL when a type-keyed decoy array precedes it (no short-circuit)", () => {
+    // Regression for reviewer 3438249973: a decoy `"permissions"` array that DOES contain a
+    // `type`-keyed object (so an `isAclCandidate`-style predicate would accept it) but is NOT a
+    // real user ACL — e.g. a feature-flag list — placed BEFORE the real ACL. First-match-wins
+    // would slice the decoy, find no user perms, return {}, and never reach the real ACL.
+    // Merging every array's extraction means the decoy contributes nothing and the real email
+    // still surfaces.
+    const decoyWithType = esc(
+      '{"config":{"permissions":[{"type":"feature","name":"beta"}]}}' +
+        '{"permissions":[' +
+        '{"deleted":false,"emailAddress":"cautiosreboot0402@gmail.com",' +
+        '"type":"user","userId":"104941268820871967559"}' +
+        "]}",
+    );
+    expect(parseDriveShareAcl(decoyWithType)).toEqual({
+      "104941268820871967559": "cautiosreboot0402@gmail.com",
+    });
+  });
+
+  test("returns {} when the only `permissions` array is unrelated (yields no user emails)", () => {
     const onlyDecoy = esc('{"config":{"permissions":[{"foo":true},{"bar":1}]}}');
     expect(parseDriveShareAcl(onlyDecoy)).toEqual({});
+    // A type-keyed-but-non-user decoy alone also yields nothing.
+    const onlyTypedDecoy = esc('{"config":{"permissions":[{"type":"feature","name":"beta"}]}}');
+    expect(parseDriveShareAcl(onlyTypedDecoy)).toEqual({});
   });
 
   test("tolerates malformed/empty input without throwing", () => {

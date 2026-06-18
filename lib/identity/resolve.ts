@@ -227,23 +227,22 @@ export function parseTilesHovercardIds(tilesPayload: unknown): Readonly<Record<s
 // serialization: a leading `{"kind":…,"permissions":[` or pretty-printed `{ "permissions" : [`
 // both resolve, where the old literal `{"permissions":[` marker silently missed them.
 //
-// We scan ALL `"permissions":[` matches in document order (not just the first) and use the
-// first that parses to a valid ACL array, because an unrelated earlier `"permissions"` array
-// (app config / capability list) in the same blob would otherwise shadow the real ACL and drop
-// every email. Narrowing the anchor to the wrapper instead (e.g. `{"permissions":[`) was
-// rejected: it reintroduces a first-key + compact-serialization dependency. The `g` flag is
-// kept on a local clone of the regex per call so its `lastIndex` state is never shared.
+// We scan ALL `"permissions":[` matches in document order (not just the first) and MERGE every
+// array's extraction, because an unrelated `"permissions"` array (app config / capability list)
+// may appear in the same blob. We do not select one array via a shape predicate: any such
+// predicate is either too broad (a decoy carrying a `type`-keyed object short-circuits onto an
+// empty extraction and the real ACL is never reached) or too tight (it skips a real ACL holding
+// only group/domain entries). Merging sidesteps the choice — a decoy contributes nothing (it has
+// no active `type:"user"` + digit-`userId` + email entries that survive extraction) while the real
+// ACL contributes its emails, so array order and decoys no longer matter and no validity predicate
+// is needed. Narrowing the anchor to the wrapper instead (e.g. `{"permissions":[`) was rejected
+// for a separate reason: it reintroduces a first-key + compact-serialization dependency. The `g`
+// flag is kept on a local clone of the regex per call so its `lastIndex` state is never shared.
+//
+// Residual accepted limitation: a decoy array whose entries are themselves active `type:"user"` +
+// digit `userId` + `emailAddress` would be merged in — but such an entry is indistinguishable from
+// a real ACL entry by any heuristic and is not a realistic shape for non-ACL config data.
 const ACL_ARRAY_ANCHOR_RE = /"permissions"\s*:\s*\[/g;
-
-/**
- * Does a parsed array look like a sharing ACL? Real ACL entries (user/group/domain/anyone) each
- * carry a string `type`; unrelated config/numeric arrays do not. We require ≥1 such entry — loose
- * enough to accept an ACL that legitimately holds only group/domain/deleted entries (it then
- * yields no emails), tight enough to skip a shadowing array of numbers or plain objects.
- */
-function isAclCandidate(arr: readonly unknown[]): boolean {
-  return arr.some((el) => isRecord(el) && typeof el.type === "string");
-}
 
 /**
  * Return the substring of `text` spanning the balanced `open`/`close` pair that begins at
@@ -315,11 +314,13 @@ function extractAclEmails(permissions: readonly unknown[]): Record<string, strin
  * slice exactly that `[…]` array via a string-literal-aware balanced-bracket walk and
  * `JSON.parse` it directly — reading each permission's fields structurally rather than with
  * field-order-dependent regex windows, and depending on neither the array being the enclosing
- * object's first key nor compact serialization. The first array that parses to a valid ACL
- * (see {@link isAclCandidate}) wins, so an unrelated earlier `"permissions"` array can't shadow
- * the real one. We keep an entry only when it is `type:"user"`, not `deleted`, and carries both
- * an `emailAddress` and a digit-only `userId`. Non-string / no-match / malformed input → `{}`;
- * never throws (every parse is wrapped).
+ * object's first key nor compact serialization. We MERGE every array's extraction rather than
+ * selecting one: an unrelated `"permissions"` array contributes nothing (its entries don't
+ * survive the user/email/digit-userId filters), so it can neither shadow the real ACL nor depend
+ * on array order — see the anchor note for why a single-array shape predicate was rejected. We
+ * keep an entry only when it is `type:"user"`, not `deleted`, and carries both an `emailAddress`
+ * and a digit-only `userId`. Non-string / no-match / malformed input → `{}`; never throws (every
+ * parse is wrapped).
  */
 export function parseDriveShareAcl(html: string): Readonly<Record<string, string>> {
   if (typeof html !== "string" || html.length === 0) {
@@ -328,6 +329,7 @@ export function parseDriveShareAcl(html: string): Readonly<Record<string, string
   const unescaped = html.replace(/\\"/g, '"');
   // Local global regex so its `lastIndex` state is per-call, never shared across invocations.
   const anchor = new RegExp(ACL_ARRAY_ANCHOR_RE.source, "g");
+  const out: Record<string, string> = {};
   let match: RegExpExecArray | null = anchor.exec(unescaped);
   while (match !== null) {
     // The match ends on the opening `[`; slice the balanced array from there.
@@ -342,13 +344,13 @@ export function parseDriveShareAcl(html: string): Readonly<Record<string, string
         // costs the optional email row, see module header).
         permissions = undefined;
       }
-      if (Array.isArray(permissions) && isAclCandidate(permissions)) {
-        return extractAclEmails(permissions);
+      if (Array.isArray(permissions)) {
+        Object.assign(out, extractAclEmails(permissions));
       }
     }
     match = anchor.exec(unescaped);
   }
-  return {};
+  return out;
 }
 
 /**
