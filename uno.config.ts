@@ -274,6 +274,14 @@ const shortcuts = {
     "mx-0.5 inline-flex items-center gap-1 rounded border border-stone-300 bg-stone-100 " +
     "px-1.5 py-0.5 align-baseline font-sans text-xs text-stone-600 " +
     "dark:border-stone-600 dark:bg-stone-700 dark:text-stone-300",
+  // The writing caret (nib): a thin rounded inline mark trailing the run the current
+  // revision wrote, tinted to that author's hue (set inline). Same nib vocabulary as the
+  // timeline playhead (`tl-thumb`) — a standing stroke, not a block cursor — so the page
+  // and its transport share one "now-writing" gesture. The soft-blink + reduced-motion
+  // freeze live in the preflight (a layout-only utility can't carry keyframes).
+  "doc-caret":
+    "inline-block h-[1.15em] w-[2px] -mb-[0.18em] mx-[0.5px] rounded-full align-baseline " +
+    "shadow-[0_1px_2px_oklch(0%_0_0/0.28)]",
 
   // ── Data / chrome typography helpers ──────────────────────────────────────
   "dr-counter": "font-mono text-sm tabular-nums text-stone-600 dark:text-stone-400",
@@ -405,6 +413,9 @@ export default defineConfig({
   /* The reading-column affordance tooltip below fades in; drop the fade (it still
      appears instantly on hover) so reduced-motion users get no transition at all. */
   .doc-suggest::after, .doc-strike::after { transition: none !important; }
+  /* Freeze the writing caret to a steady mark — still present and colour-coded, just
+     not blinking — so the attribution cue survives without vestibular motion. */
+  .doc-caret { animation: none !important; opacity: 1 !important; }
   /* Don't freeze the indeterminate bar (a static one-third pill reads as a
      broken/stalled load). Instead drop the travelling sweep for a vestibular-
      safe opacity pulse over the FULL track, so reduced-motion users still get a
@@ -428,6 +439,15 @@ export default defineConfig({
   50% { opacity: 1; }
 }
 .dr-indeterminate { animation: dr-indeterminate-slide 1.1s linear infinite; }
+
+/* The writing caret's soft blink — a living "now-writing" pulse rather than a hard
+   on/off, so it reads as a nib resting on the page, not a terminal cursor. Frozen
+   under reduced-motion above. */
+@keyframes dr-caret-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+.doc-caret { animation: dr-caret-blink 1.1s ease-in-out infinite; }
 
 /* Reading-column affordance tooltips (suggested insertion / marked for deletion).
    These non-accepted runs previously surfaced their label through the native

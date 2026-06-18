@@ -19,13 +19,33 @@ import { opaqueLabel } from "../i18n/strings";
 import type { DocumentModel, SuggestionState } from "./model";
 
 /**
- * One rendered run. `fromRevision` is the run's first element's `insertRevision`
- * — provenance only, NEVER a render-time time-cut.
+ * One rendered run. `fromRevision` / `toRevision` are the run's first / last
+ * element's `insertRevision` — provenance only, NEVER a render-time time-cut.
+ * Because a run coalesces contiguous same-kind chars regardless of which revision
+ * wrote each, a run can straddle several revisions: `fromRevision` is the revision
+ * that opened it, `toRevision` the revision that most recently extended its tail.
+ * The replay caret uses the pair to find the run the current revision touched (it
+ * either opened a fresh run or appended onto an existing one).
  */
 export type Segment =
-  | { readonly kind: "accepted-text"; readonly text: string; readonly fromRevision: number }
-  | { readonly kind: "suggested-insert"; readonly text: string; readonly fromRevision: number }
-  | { readonly kind: "marked-for-deletion"; readonly text: string; readonly fromRevision: number }
+  | {
+      readonly kind: "accepted-text";
+      readonly text: string;
+      readonly fromRevision: number;
+      readonly toRevision: number;
+    }
+  | {
+      readonly kind: "suggested-insert";
+      readonly text: string;
+      readonly fromRevision: number;
+      readonly toRevision: number;
+    }
+  | {
+      readonly kind: "marked-for-deletion";
+      readonly text: string;
+      readonly fromRevision: number;
+      readonly toRevision: number;
+    }
   | {
       readonly kind: "opaque-placeholder";
       readonly structure: OpaqueStructure;
@@ -55,6 +75,7 @@ interface TextRun {
   kind: TextKind;
   text: string;
   fromRevision: number;
+  toRevision: number;
 }
 
 /**
@@ -77,7 +98,12 @@ export function segmentsAt(model: DocumentModel): readonly Segment[] {
 
   function flush(): void {
     if (run !== null) {
-      segments.push({ kind: run.kind, text: run.text, fromRevision: run.fromRevision });
+      segments.push({
+        kind: run.kind,
+        text: run.text,
+        fromRevision: run.fromRevision,
+        toRevision: run.toRevision,
+      });
       run = null;
     }
   }
@@ -110,9 +136,17 @@ export function segmentsAt(model: DocumentModel): readonly Segment[] {
         const kind = textKindFor(el.suggestionState);
         if (run !== null && run.kind === kind) {
           run.text += el.char;
+          // Coalescing across revisions: the run's tail now belongs to this char's
+          // revision, so the caret can find the run a later revision extended.
+          run.toRevision = el.insertRevision;
         } else {
           flush();
-          run = { kind, text: el.char, fromRevision: el.insertRevision };
+          run = {
+            kind,
+            text: el.char,
+            fromRevision: el.insertRevision,
+            toRevision: el.insertRevision,
+          };
         }
         break;
       }

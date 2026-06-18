@@ -15,25 +15,20 @@
 // email row is shown ONLY when an address is known and is omitted entirely otherwise.
 
 import type { Component } from "solid-js";
-import { createMemo, createSignal, For, mergeProps, onCleanup, onMount, Show } from "solid-js";
+import {
+  createEffect,
+  createMemo,
+  createSignal,
+  For,
+  mergeProps,
+  onCleanup,
+  onMount,
+  Show,
+} from "solid-js";
 import type { DecodedRevision, TimelineEvent } from "@/lib/domain/model";
-import { authorActiveRange, authorLabel, formatDuration, strings } from "@/lib/i18n/strings";
+import { authorActiveRange, formatDuration, strings } from "@/lib/i18n/strings";
+import { type AuthorEntry, deriveAuthors } from "@/lib/identity/authors";
 import type { IdentityMap } from "@/lib/identity/resolve";
-
-interface AuthorEntry {
-  readonly key: string;
-  /** Resolved display name, or the opaque "Author N" fallback. Never the raw Gaia token. */
-  readonly label: string;
-  /** The viewer's own email when known; null for collaborators (the feed has none). */
-  readonly email: string | null;
-  /** Google's assigned collaborator colour (hex), when the source carried one. */
-  readonly color: string | null;
-  /** Count of revisions attributed to this author. */
-  readonly edits: number;
-  /** First / last attributed revision time (epoch ms), or null when untimed. */
-  readonly firstTime: number | null;
-  readonly lastTime: number | null;
-}
 
 export interface SummaryInsightsProps {
   readonly revisions: readonly DecodedRevision[];
@@ -47,6 +42,13 @@ export interface SummaryInsightsProps {
    * "Author N" label. Empty when resolution found nothing.
    */
   readonly identities?: IdentityMap;
+  /**
+   * Publishes the currently-foregrounded author (its opaque key, or null when none) so a
+   * sibling surface — the DocumentViewport — can highlight that author's segments. Fires
+   * whenever the hover/pin focus changes; the colophon still OWNS the interaction, this
+   * only shares its result. The key is the stable opaque token, never the raw Gaia id.
+   */
+  readonly onActiveAuthorChange?: (key: string | null) => void;
 }
 
 const SummaryInsights: Component<SummaryInsightsProps> = (rawProps) => {
@@ -97,53 +99,13 @@ const SummaryInsights: Component<SummaryInsightsProps> = (rawProps) => {
     ];
   });
 
-  // Distinct authors in first-seen order, each carrying its real-identity attributes
-  // (when resolution is on) plus content-free per-author tallies (revision count, first
-  // and last edit time) accumulated in one pass. A mutable accumulator is pushed in
-  // first-seen order so the opaque "Author N" numbering stays stable, then projected to
-  // the immutable entry list `<For>` consumes — list construction remains a pure
-  // derivation, never inline render logic. Each distinct author token yields ONE entry,
-  // so a single person is a single chip even across many editing sessions.
-  const authors = createMemo<readonly AuthorEntry[]>(() => {
-    interface Tally {
-      readonly key: string;
-      edits: number;
-      first: number | null;
-      last: number | null;
-    }
-    const order: Tally[] = [];
-    const byId = new Map<string, Tally>();
-    for (const revision of props.revisions) {
-      const id = revision.userId;
-      if (id === null) {
-        continue;
-      }
-      let tally = byId.get(id);
-      if (tally === undefined) {
-        tally = { key: id, edits: 0, first: null, last: null };
-        byId.set(id, tally);
-        order.push(tally);
-      }
-      tally.edits += 1;
-      if (revision.time !== null) {
-        const time = Number(revision.time);
-        tally.first = tally.first === null ? time : Math.min(tally.first, time);
-        tally.last = tally.last === null ? time : Math.max(tally.last, time);
-      }
-    }
-    return order.map((tally, index) => {
-      const identity = props.realIdentities ? props.identities[tally.key] : undefined;
-      return {
-        key: tally.key,
-        label: identity?.name ?? authorLabel(index),
-        email: identity?.email ?? null,
-        color: identity?.color ?? null,
-        edits: tally.edits,
-        firstTime: tally.first,
-        lastTime: tally.last,
-      } satisfies AuthorEntry;
-    });
-  });
+  // Distinct authors in first-seen order, each carrying content-free tallies plus (when
+  // resolution is on) its real-identity attributes. The derivation is the shared pure
+  // `deriveAuthors` so this colophon and the replay surface's authorship attribution read
+  // the IDENTICAL opaque keys, "Author N" numbering, and colours.
+  const authors = createMemo<readonly AuthorEntry[]>(() =>
+    deriveAuthors(props.revisions, props.realIdentities, props.identities),
+  );
 
   // Detail-card visibility: a chip reveals its card on hover/focus (`hovered`) or stays
   // open when clicked (`pinned`). A pin wins, so the card persists while the pointer
@@ -151,6 +113,13 @@ const SummaryInsights: Component<SummaryInsightsProps> = (rawProps) => {
   const [hovered, setHovered] = createSignal<string | null>(null);
   const [pinned, setPinned] = createSignal<string | null>(null);
   const openKey = (): string | null => pinned() ?? hovered();
+
+  // Share the foregrounded author with the replay surface so it can highlight that
+  // author's segments. A reactive `openKey()` read means this fires exactly when the
+  // hover/pin focus changes — and degrades to a no-op when no consumer is wired.
+  createEffect(() => {
+    props.onActiveAuthorChange?.(openKey());
+  });
 
   let listEl: HTMLUListElement | undefined;
   onMount(() => {
