@@ -7,6 +7,7 @@ import {
   parseTilesParams,
   parseUserMap,
   resolveSelfIdentity,
+  withSelfIdentity,
 } from "./resolve";
 
 describe("parseAccountLabel", () => {
@@ -83,11 +84,40 @@ describe("parseUserMap", () => {
     },
   };
 
-  test("maps every userMap entry to a name-only identity keyed by the Gaia id", () => {
+  test("maps every userMap entry to a name (+colour) identity keyed by the Gaia id", () => {
     expect(parseUserMap(tilesPayload)).toEqual({
-      "03089517982426497767": { userId: "03089517982426497767", name: "RB Boot", email: null },
-      "07280646734247216338": { userId: "07280646734247216338", name: "Mofo Ker", email: null },
-      "12090495620932845773": { userId: "12090495620932845773", name: "Mr Torrint", email: null },
+      "03089517982426497767": {
+        userId: "03089517982426497767",
+        name: "RB Boot",
+        email: null,
+        color: "#673AB7",
+      },
+      "07280646734247216338": {
+        userId: "07280646734247216338",
+        name: "Mofo Ker",
+        email: null,
+        color: "#26A69A",
+      },
+      "12090495620932845773": {
+        userId: "12090495620932845773",
+        name: "Mr Torrint",
+        email: null,
+        color: "#F57C00",
+      },
+    });
+  });
+
+  test("omits colour when the entry carries none, and trims a present colour", () => {
+    expect(
+      parseUserMap({
+        userMap: {
+          a: { name: "Ada" },
+          b: { name: "Bo", color: "  #ABCDEF  " },
+        },
+      }),
+    ).toEqual({
+      a: { userId: "a", name: "Ada", email: null },
+      b: { userId: "b", name: "Bo", email: null, color: "#ABCDEF" },
     });
   });
 
@@ -159,9 +189,58 @@ describe("mergeIdentities", () => {
     });
   });
 
+  test("incoming colour wins while a pre-existing colour is preserved when absent", () => {
+    const base = {
+      keep: { userId: "keep", name: "Keep", email: null, color: "#111111" },
+      over: { userId: "over", name: "Over", email: null, color: "#222222" },
+    };
+    const incoming = {
+      keep: { userId: "keep", name: "Keep", email: null }, // name-only refresh
+      over: { userId: "over", name: "Over", email: null, color: "#999999" },
+      fresh: { userId: "fresh", name: "Fresh", email: null, color: "#abcabc" },
+    };
+    expect(mergeIdentities(base, incoming)).toEqual({
+      keep: { userId: "keep", name: "Keep", email: null, color: "#111111" },
+      over: { userId: "over", name: "Over", email: null, color: "#999999" },
+      fresh: { userId: "fresh", name: "Fresh", email: null, color: "#abcabc" },
+    });
+  });
+
   test("does not mutate the base map", () => {
     const base = { a: { userId: "a", name: "A", email: null } };
     mergeIdentities(base, { b: { userId: "b", name: "B", email: null } });
     expect(base).toEqual({ a: { userId: "a", name: "A", email: null } });
+  });
+});
+
+describe("withSelfIdentity", () => {
+  const self = { userId: "0728", name: "Mofo Ker", email: "flylocious@gmail.com" };
+
+  test("adds the viewer in full when the token is not yet resolved", () => {
+    expect(withSelfIdentity({}, self)).toEqual({
+      "0728": { userId: "0728", name: "Mofo Ker", email: "flylocious@gmail.com" },
+    });
+  });
+
+  test("enriches a tiles-resolved entry with the email, keeping its name + colour", () => {
+    // The tiles harvest landed first: authoritative name + colour, but no email.
+    const current = {
+      "0728": { userId: "0728", name: "Mofo Ker", email: null, color: "#26A69A" },
+    };
+    expect(withSelfIdentity(current, self)).toEqual({
+      "0728": { userId: "0728", name: "Mofo Ker", email: "flylocious@gmail.com", color: "#26A69A" },
+    });
+  });
+
+  test("is a no-op (null) when the cached entry already has an email", () => {
+    const current = {
+      "0728": { userId: "0728", name: "Mofo Ker", email: "flylocious@gmail.com", color: "#26A69A" },
+    };
+    expect(withSelfIdentity(current, self)).toBeNull();
+  });
+
+  test("is a no-op (null) when the self identity carries no email to add", () => {
+    const current = { "0728": { userId: "0728", name: "Mofo Ker", email: null } };
+    expect(withSelfIdentity(current, { userId: "0728", name: "Mofo Ker", email: null })).toBeNull();
   });
 });

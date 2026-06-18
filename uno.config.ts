@@ -284,6 +284,37 @@ const shortcuts = {
     "font-mono text-base font-semibold tabular-nums text-revision dark:text-revision-ring",
   "dr-eyebrow":
     "font-mono text-[11px] uppercase tracking-[0.16em] text-stone-500 dark:text-stone-400",
+
+  // ── Insights contributor chips + hover/click detail card ───────────────────
+  // Each distinct contributor is an interactive chip; hover/focus — or a click to
+  // pin — lifts a small paper card carrying content-free details only (display name,
+  // the viewer's own email when known, a revision count, and the active window). The
+  // card reuses the timeline tip's vocabulary (paper surface, soft lift, mono detail).
+  "author-chip":
+    "inline-flex items-center gap-1.5 rounded border border-stone-300 bg-transparent px-2 py-0.5 " +
+    "text-xs text-stone-600 transition-colors cursor-pointer " +
+    "hover:bg-stone-100 hover:text-stone-800 " +
+    "outline-none focus-visible:ring-2 focus-visible:ring-revision-ring " +
+    "dark:border-stone-600 dark:text-stone-300 dark:hover:bg-stone-700/70 dark:hover:text-stone-100",
+  // The collaborator's Google-assigned colour, as a small ringed dot (colour set inline).
+  "author-dot": "size-2 shrink-0 rounded-full border border-black/10 dark:border-white/20",
+  // The lifted card: positioned ABOVE the chip (the insights panel is the page's last
+  // surface, so an upward card clears the viewport bottom instead of falling below it —
+  // mirroring the timeline tips). Accepts the pointer so the email stays selectable.
+  "author-pop":
+    "absolute left-0 bottom-[calc(100%+0.4rem)] z-20 flex w-max min-w-[12rem] max-w-[18rem] flex-col gap-1.5 " +
+    "rounded-lg border border-stone-200 bg-white px-3 py-2 text-left " +
+    "shadow-[0_10px_30px_-12px_oklch(0%_0_0/0.4)] dark:border-stone-700 dark:bg-stone-800",
+  "author-pop-name":
+    "flex items-center gap-1.5 font-sans text-[13px] font-semibold text-stone-800 dark:text-stone-100",
+  "author-pop-row": "flex items-baseline justify-between gap-3",
+  "author-pop-key":
+    "font-mono text-[10px] uppercase tracking-[0.12em] text-stone-400 dark:text-stone-500",
+  "author-pop-val":
+    "break-all text-right font-mono text-[11px] tabular-nums text-stone-700 dark:text-stone-200",
+  "author-pop-range":
+    "border-t border-stone-200/70 pt-1 font-mono text-[10px] tabular-nums text-stone-500 " +
+    "dark:border-stone-700 dark:text-stone-400",
 };
 
 export default defineConfig({

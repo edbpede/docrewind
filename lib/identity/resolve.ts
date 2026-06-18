@@ -24,6 +24,12 @@ export interface ResolvedIdentity {
   readonly name: string;
   /** Account email, or null when the page exposes only a name. */
   readonly email: string | null;
+  /**
+   * Google's assigned collaborator colour (a CSS hex string, e.g. `#673AB7`) when the
+   * source carried one. Present only on the tiles/userMap path; absent on the self path
+   * (the OneGoogle account label exposes no colour). UI accent only — never identifying.
+   */
+  readonly color?: string;
 }
 
 /** A gaia→identity cache, keyed by the opaque author token. */
@@ -131,12 +137,22 @@ function readUserMapName(entry: unknown): string | null {
   return name.length > 0 ? name : null;
 }
 
+/** Read a `userMap` entry's collaborator colour (a non-empty trimmed string), or null. */
+function readUserMapColor(entry: unknown): string | null {
+  if (!isRecord(entry)) {
+    return null;
+  }
+  const color = typeof entry.color === "string" ? entry.color.trim() : "";
+  return color.length > 0 ? color : null;
+}
+
 /**
  * Parse a deframed `revisions/tiles` payload into an {@link IdentityMap} keyed by
  * the opaque author token (Gaia id). Tolerant by construction (open-world, R-series):
  * a non-record payload, a missing/!record `userMap`, anonymous entries, and entries
  * without a usable name are all skipped — never a throw. Collaborators resolve to a
- * name only (`email` is always null; the feed exposes no address).
+ * name (and the feed's colour when present); `email` is always null — the feed exposes
+ * no address.
  */
 export function parseUserMap(tilesPayload: unknown): IdentityMap {
   const userMap = isRecord(tilesPayload) ? tilesPayload.userMap : undefined;
@@ -152,7 +168,9 @@ export function parseUserMap(tilesPayload: unknown): IdentityMap {
     if (name === null) {
       continue;
     }
-    out[userId] = { userId, name, email: null };
+    const color = readUserMapColor(entry);
+    out[userId] =
+      color !== null ? { userId, name, email: null, color } : { userId, name, email: null };
   }
   return out;
 }
@@ -192,17 +210,43 @@ export function parseTilesParams(html: string): TilesParams | null {
  * Merge harvested identities into an existing cache. `incoming` names win (the tiles
  * feed is the single consistent source across all collaborators), but an existing
  * `email` is preserved when the incoming entry has none — so a later name-only tiles
- * harvest never erases the email the self-path resolved for the viewer.
+ * harvest never erases the email the self-path resolved for the viewer. `color` is
+ * carried the same way (incoming wins, else the existing colour survives), so the
+ * self-path's later name-only refresh never drops a colour the tiles harvest found.
  */
 export function mergeIdentities(base: IdentityMap, incoming: IdentityMap): IdentityMap {
   const out: Record<string, ResolvedIdentity> = { ...base };
   for (const [userId, next] of Object.entries(incoming)) {
     const existing = out[userId];
-    out[userId] = {
-      userId,
-      name: next.name,
-      email: next.email ?? existing?.email ?? null,
-    };
+    const email = next.email ?? existing?.email ?? null;
+    const color = next.color ?? existing?.color;
+    out[userId] =
+      color !== undefined
+        ? { userId, name: next.name, email, color }
+        : { userId, name: next.name, email };
   }
   return out;
+}
+
+/**
+ * Fold the viewer's own resolved identity into the cache, returning the map to persist
+ * or `null` when nothing should change (so the caller can skip a redundant write).
+ *
+ * The version-history `userMap` is authoritative for name + colour, so an already-cached
+ * token is never renamed — but that feed carries NO email, and the viewer's own address
+ * is knowable only via the self-path. So: an unresolved token is added in full; an
+ * already-resolved token that lacks an email is ENRICHED with the viewer's email in place
+ * (its name + colour preserved); an entry that already has an email — or a self identity
+ * that carries none — is left untouched. This is what lets the viewer's own contributor
+ * card show their address even when the tiles harvest populated the entry first.
+ */
+export function withSelfIdentity(current: IdentityMap, self: ResolvedIdentity): IdentityMap | null {
+  const existing = current[self.userId];
+  if (existing === undefined) {
+    return mergeIdentities(current, { [self.userId]: self });
+  }
+  if (existing.email === null && self.email !== null) {
+    return mergeIdentities(current, { [self.userId]: { ...existing, email: self.email } });
+  }
+  return null;
 }

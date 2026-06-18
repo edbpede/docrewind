@@ -12,7 +12,7 @@ import { render } from "solid-js/web";
 import "virtual:uno.css";
 import ReplayAffordance from "@/components/ReplayAffordance";
 import { parseDocsUrl } from "@/lib/docs-url";
-import { mergeIdentities, parseOwnGaia, resolveSelfIdentity } from "@/lib/identity/resolve";
+import { parseOwnGaia, resolveSelfIdentity, withSelfIdentity } from "@/lib/identity/resolve";
 import { sendMessage } from "@/lib/messaging";
 import { realIdentities, resolvedIdentities } from "@/lib/settings";
 
@@ -59,9 +59,12 @@ function readBootstrapText(): string {
 // authoritative background tiles harvest: it reads the account label + the page's
 // own Gaia id (both already on the loaded page) so the viewer's own name can show
 // instantly — and even if the tiles fetch later fails. Skipped when `realIdentities`
-// is off, when the page exposes neither datum, or when this token is ALREADY
-// resolved (the version-history `userMap` is authoritative, so we never overwrite
-// it). Writes via `mergeIdentities` so it can't clobber other cached names.
+// is off or when the page exposes neither datum.
+//
+// The fold itself (add an unresolved token; enrich an already-resolved one with the
+// viewer's email — the one datum the tiles `userMap` can't supply — without renaming
+// it) lives in the pure `withSelfIdentity`, so this stays a thin DOM/storage adapter.
+// A null result means nothing changed, so we skip the redundant write.
 async function harvestSelfIdentity(): Promise<void> {
   if (!(await realIdentities.getValue())) {
     return;
@@ -72,10 +75,10 @@ async function harvestSelfIdentity(): Promise<void> {
     return;
   }
   const current = await resolvedIdentities.getValue();
-  if (current[identity.userId] !== undefined) {
-    return; // already resolved (e.g. by the tiles userMap) — leave it authoritative
+  const next = withSelfIdentity(current, identity);
+  if (next !== null) {
+    await resolvedIdentities.setValue(next);
   }
-  await resolvedIdentities.setValue(mergeIdentities(current, { [identity.userId]: identity }));
 }
 
 export default defineContentScript({
