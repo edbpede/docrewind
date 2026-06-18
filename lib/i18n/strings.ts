@@ -103,8 +103,8 @@ export const strings = {
     attributionCaveat: "Attribution may be incomplete.",
     // Author detail card (hover/click on a contributor chip). Content-free: a name,
     // the viewer's own email when known, and counts/timing only — never document text.
-    // The email row renders only when an address is known (the viewer themselves); for
-    // collaborators the wire format carries no email, so the row is simply omitted.
+    // The email row renders only when an address is known: the viewer themselves, or a
+    // collaborator whose email was resolved from the sharing ACL. Otherwise it's omitted.
     authorDetailsHint: "Show contributor details",
     authorEmail: "Email",
     authorEdits: "Revisions",

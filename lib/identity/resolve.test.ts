@@ -306,6 +306,24 @@ describe("parseDriveShareAcl", () => {
     });
   });
 
+  test("keeps an active perm that directly follows a deleted one", () => {
+    // The look-back must be scoped to the current object: a DELETED perm sitting just
+    // before an ACTIVE one must not leak its `"deleted":true` flag forward and suppress it.
+    const deletedThenActive = esc(
+      '{"permissions":[' +
+        '{"capabilities":{},"deleted":true,"domain":"gmail.com",' +
+        '"emailAddress":"left@gmail.com","id":"88","type":"user","userId":"333"},' +
+        '{"capabilities":{"canShare":true},"deleted":false,"domain":"gmail.com",' +
+        '"emailAddress":"cautiosreboot0402@gmail.com","id":"06332265589177339962",' +
+        '"isCollaboratorAccount":false,"role":"writer","type":"user",' +
+        '"userId":"104941268820871967559"}' +
+        "]}",
+    );
+    expect(parseDriveShareAcl(deletedThenActive)).toEqual({
+      "104941268820871967559": "cautiosreboot0402@gmail.com",
+    });
+  });
+
   test("tolerates malformed/empty input without throwing", () => {
     expect(parseDriveShareAcl("")).toEqual({});
     expect(parseDriveShareAcl("no acl here")).toEqual({});

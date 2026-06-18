@@ -249,10 +249,12 @@ export function parseDriveShareAcl(html: string): Readonly<Record<string, string
     if (email === undefined || userId === undefined) {
       continue;
     }
-    // `"deleted":true` precedes `emailAddress` (deleted < domain < emailAddress); a
-    // bounded look-back stays inside this object (the large `capabilities` block sits
-    // before `deleted`, so it can't reach a previous permission's flag).
-    const preceding = unescaped.slice(Math.max(0, match.index - 400), match.index);
+    // `"deleted":true` precedes `emailAddress` (deleted < domain < emailAddress), so it
+    // lives in the look-back. Anchor that window at the start of the CURRENT permission
+    // object — the nearest preceding `{` — so an adjacent DELETED entry that happens to sit
+    // just before this one can't bleed its flag in and suppress a valid active permission.
+    const objectStart = unescaped.lastIndexOf("{", match.index);
+    const preceding = unescaped.slice(objectStart === -1 ? 0 : objectStart, match.index);
     if (/"deleted":true/.test(preceding)) {
       continue;
     }
