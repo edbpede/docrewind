@@ -102,3 +102,107 @@ export function resolveSelfIdentity(
   }
   return { userId: ownGaia, name: parsed.name, email: parsed.email };
 }
+
+// ── Collaborator resolution via the `revisions/tiles` userMap (PRD §9.7) ──────
+//
+// Reverse-engineered live 2026-06-18 (multi-author capture): the version-history
+// feed `…/revisions/tiles` returns `)]}'`-framed JSON `{ tileInfo, userMap, firstRev }`.
+// Its `userMap` keys are EXACTLY the changelog tuple `[2]` author tokens, so
+// `userMap[userId].name` resolves a collaborator the self-path cannot (their Gaia
+// id never appears in the page bootstrap). The feed carries name + colour + photo
+// but NO email — only the viewer's own email is ever known (the self account
+// label). This map is harvested in the background, ONLY when `realIdentities` is
+// on, and merged into the same `resolvedIdentities` cache the replay surface reads.
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** A single `userMap` entry — only the fields we consume are typed; the feed carries more. */
+function readUserMapName(entry: unknown): string | null {
+  if (!isRecord(entry)) {
+    return null;
+  }
+  // Skip anonymous viewers — they carry no real identity to surface.
+  if (entry.anonymous === true) {
+    return null;
+  }
+  const name = typeof entry.name === "string" ? entry.name.trim() : "";
+  return name.length > 0 ? name : null;
+}
+
+/**
+ * Parse a deframed `revisions/tiles` payload into an {@link IdentityMap} keyed by
+ * the opaque author token (Gaia id). Tolerant by construction (open-world, R-series):
+ * a non-record payload, a missing/!record `userMap`, anonymous entries, and entries
+ * without a usable name are all skipped — never a throw. Collaborators resolve to a
+ * name only (`email` is always null; the feed exposes no address).
+ */
+export function parseUserMap(tilesPayload: unknown): IdentityMap {
+  const userMap = isRecord(tilesPayload) ? tilesPayload.userMap : undefined;
+  if (!isRecord(userMap)) {
+    return {};
+  }
+  const out: Record<string, ResolvedIdentity> = {};
+  for (const [userId, entry] of Object.entries(userMap)) {
+    if (userId.length === 0) {
+      continue;
+    }
+    const name = readUserMapName(entry);
+    if (name === null) {
+      continue;
+    }
+    out[userId] = { userId, name, email: null };
+  }
+  return out;
+}
+
+// The editor bootstrap publishes the per-session revisions/tiles credentials inside
+// an `"info_params":{ "token":"…:<ms>", "ouid":"<digits>" }` block. The token is
+// short-lived (it embeds a millisecond timestamp) so it must be read fresh per
+// request. The SERVER-rendered `/edit` HTML uses double-quoted JSON here (the live
+// post-script DOM uses a single-quoted mirror); we key off the JSON form the
+// background actually fetches.
+const TILES_TOKEN_RE = /"info_params":\{[^}]*?"token":"([^"]+:\d{6,})"/;
+const TILES_TOKEN_FALLBACK_RE = /"token":"([^"]+:\d{6,})"/;
+const TILES_OUID_RE = /"ouid":"(\d{8,})"/;
+
+/** Credentials the `revisions/tiles` request requires beyond the doc id. */
+export interface TilesParams {
+  readonly token: string;
+  readonly ouid: string;
+}
+
+/**
+ * Extract the `revisions/tiles` `token` + `ouid` from edit-page HTML, or null when
+ * either is absent. Pure so the background's network adapter stays a thin shell over
+ * a tested regex. The token shape (`<opaque>:<ms-timestamp>`) is required in the match
+ * so an unrelated `"token"` field can't be mistaken for the tiles credential.
+ */
+export function parseTilesParams(html: string): TilesParams | null {
+  if (typeof html !== "string") {
+    return null;
+  }
+  const token = (html.match(TILES_TOKEN_RE) ?? html.match(TILES_TOKEN_FALLBACK_RE))?.[1] ?? null;
+  const ouid = html.match(TILES_OUID_RE)?.[1] ?? null;
+  return token !== null && ouid !== null ? { token, ouid } : null;
+}
+
+/**
+ * Merge harvested identities into an existing cache. `incoming` names win (the tiles
+ * feed is the single consistent source across all collaborators), but an existing
+ * `email` is preserved when the incoming entry has none — so a later name-only tiles
+ * harvest never erases the email the self-path resolved for the viewer.
+ */
+export function mergeIdentities(base: IdentityMap, incoming: IdentityMap): IdentityMap {
+  const out: Record<string, ResolvedIdentity> = { ...base };
+  for (const [userId, next] of Object.entries(incoming)) {
+    const existing = out[userId];
+    out[userId] = {
+      userId,
+      name: next.name,
+      email: next.email ?? existing?.email ?? null,
+    };
+  }
+  return out;
+}

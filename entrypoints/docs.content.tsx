@@ -12,7 +12,7 @@ import { render } from "solid-js/web";
 import "virtual:uno.css";
 import ReplayAffordance from "@/components/ReplayAffordance";
 import { parseDocsUrl } from "@/lib/docs-url";
-import { parseOwnGaia, resolveSelfIdentity } from "@/lib/identity/resolve";
+import { mergeIdentities, parseOwnGaia, resolveSelfIdentity } from "@/lib/identity/resolve";
 import { sendMessage } from "@/lib/messaging";
 import { realIdentities, resolvedIdentities } from "@/lib/settings";
 
@@ -55,11 +55,13 @@ function readBootstrapText(): string {
   return text;
 }
 
-// Opt-in, zero-network identity harvest (PRD §9.7). ONLY runs when the user has
-// enabled `realIdentities`: it reads the account label + the page's own Gaia id
-// (both already present in the loaded page) and caches the resolved self identity
-// for the replay surface. No-op — and nothing stored — when the toggle is off or
-// the page exposes neither datum, so the default path stays content-free.
+// Zero-network self-identity harvest (PRD §9.7). A best-effort BONUS over the
+// authoritative background tiles harvest: it reads the account label + the page's
+// own Gaia id (both already on the loaded page) so the viewer's own name can show
+// instantly — and even if the tiles fetch later fails. Skipped when `realIdentities`
+// is off, when the page exposes neither datum, or when this token is ALREADY
+// resolved (the version-history `userMap` is authoritative, so we never overwrite
+// it). Writes via `mergeIdentities` so it can't clobber other cached names.
 async function harvestSelfIdentity(): Promise<void> {
   if (!(await realIdentities.getValue())) {
     return;
@@ -70,10 +72,10 @@ async function harvestSelfIdentity(): Promise<void> {
     return;
   }
   const current = await resolvedIdentities.getValue();
-  if (current[identity.userId]?.name === identity.name) {
-    return; // already cached — avoid a redundant write
+  if (current[identity.userId] !== undefined) {
+    return; // already resolved (e.g. by the tiles userMap) — leave it authoritative
   }
-  await resolvedIdentities.setValue({ ...current, [identity.userId]: identity });
+  await resolvedIdentities.setValue(mergeIdentities(current, { [identity.userId]: identity }));
 }
 
 export default defineContentScript({
@@ -120,10 +122,10 @@ export default defineContentScript({
                   // so it doesn't surface as an unhandled promise rejection; the
                   // user can simply re-activate.
                 });
-                // Opt-in identity resolution rides on the same explicit action:
-                // harvest the self identity off this page (only when enabled) so
-                // the replay surface can label the author by name. Best-effort and
-                // independent of the activation message above.
+                // Identity resolution rides on the same explicit action: harvest the
+                // viewer's self identity off this page (unless the user opted out) so
+                // the replay surface can label their own edits by name immediately.
+                // Best-effort and independent of the activation message above.
                 void harvestSelfIdentity().catch(() => {});
               }}
             />

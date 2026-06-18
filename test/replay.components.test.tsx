@@ -249,7 +249,8 @@ describe("replay UI components", () => {
 
     expect(screen.getByText("Replay duration")).toBeTruthy();
     expect(screen.getByText("1m")).toBeTruthy();
-    expect(screen.getByText("user-a")).toBeTruthy();
+    // Unresolved authors degrade to opaque labels, never the raw token.
+    expect(screen.getByText("Author 1")).toBeTruthy();
     expect(screen.getByText("Attribution may be incomplete.")).toBeTruthy();
   });
 
@@ -291,7 +292,7 @@ describe("replay UI components", () => {
     expect(screen.queryByText("07280646734247216338")).toBeNull();
   });
 
-  it("falls back to the raw token when realIdentities is on but unresolved", () => {
+  it("falls back to an opaque Author label (never the raw token) when unresolved", () => {
     render(() => (
       <SummaryInsights
         revisions={[revision(1, 1_000, asUserId("unmapped-token"))]}
@@ -300,7 +301,9 @@ describe("replay UI components", () => {
         identities={{}}
       />
     ));
-    expect(screen.getByText("unmapped-token")).toBeTruthy();
+    expect(screen.getByText("Author 1")).toBeTruthy();
+    // The raw Gaia token must never leak into the UI, even on a resolution miss.
+    expect(screen.queryByText("unmapped-token")).toBeNull();
   });
 
   it("keeps authors opaque by default even when identities are present", () => {

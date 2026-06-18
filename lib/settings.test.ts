@@ -48,8 +48,8 @@ describe("settings", () => {
       expect(await keepRawData.getValue()).toBe(true);
     });
 
-    it("realIdentities defaults to false (PRD §9.7)", async () => {
-      expect(await realIdentities.getValue()).toBe(false);
+    it("realIdentities defaults to true (PRD §9.7 — opt-out)", async () => {
+      expect(await realIdentities.getValue()).toBe(true);
     });
 
     it("storageBudget defaults to ~50MB / ~500MB", async () => {

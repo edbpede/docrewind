@@ -276,16 +276,15 @@ const ReplaySurface: Component<{
 
   const [prefersReducedMotion, setPrefersReducedMotion] = createSignal(false);
 
-  // Identity-display preference (default opaque). When on, an author may resolve
-  // to a real display name harvested off the open Docs page (PRD §9.7); the cache
-  // stays empty unless the user opted in, so the opaque path is content-free.
+  // Identity-display preference (default ON; opt-out). When on, an author resolves to
+  // a real display name harvested for the open document (PRD §9.7); when the user has
+  // opted out, names are never ingested into the reactive graph and authors stay opaque.
   const [showRealIdentities] = createResource(() => realIdentities.getValue());
-  // The self-identity harvest runs in the Docs content script on the same click
-  // that opens this page, so the cache may be written just after this page boots.
-  // Watch the store so a late resolution still reaches the colophon without a
-  // manual refresh. The load and watch are gated behind the opt-in: in the opaque
-  // (default) path we never ingest harvested names into the reactive graph, and a
-  // user who opted out keeps the cache out of the graph even if stale entries linger.
+  // Harvesting is asynchronous (the background tiles fetch + the content-script self
+  // path both write the SESSION cache shortly after this page boots). Watch the store
+  // so a late resolution still reaches the colophon without a manual refresh. The load
+  // and watch are gated behind the preference: a user who opted out keeps the cache out
+  // of the graph entirely.
   const [identities, { refetch: refetchIdentities }] = createResource(
     () => showRealIdentities() ?? false,
     (enabled) => (enabled ? resolvedIdentities.getValue() : {}),

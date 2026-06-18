@@ -39,6 +39,44 @@ export function buildRevisionsLoadUrl(params: RevisionsLoadParams): string {
   return `${DOCS_ORIGIN}/document${userSegment}/d/${params.docId}/revisions/load?${query.toString()}`;
 }
 
+/** Parameters for a `revisions/tiles` request (the version-history / userMap feed). */
+export interface RevisionsTilesParams {
+  readonly docId: DocId;
+  // null = single-account path; a number selects the `/document/u/{N}/d/` slot (A.5).
+  readonly userIndex: number | null;
+  // Short-lived per-session credentials read fresh from the edit-page bootstrap.
+  readonly token: string;
+  readonly ouid: string;
+  // Server caps the batch; 1500 matches the native version-history request.
+  readonly revisionBatchSize?: number;
+}
+
+/**
+ * Build the `revisions/tiles` URL whose `)]}'`-framed `{ tileInfo, userMap, firstRev }`
+ * body maps changelog author tokens to real display names (reverse-engineered live
+ * 2026-06-18). The `token` + `ouid` are mandatory — without them the endpoint returns
+ * an HTTP 400 HTML error page rather than JSON. Used on the real-identities path (default-on with opt-out).
+ */
+export function buildRevisionsTilesUrl(params: RevisionsTilesParams): string {
+  if (params.userIndex !== null && (!Number.isInteger(params.userIndex) || params.userIndex < 0)) {
+    throw new TypeError("buildRevisionsTilesUrl: userIndex must be a non-negative integer or null");
+  }
+  const userSegment = params.userIndex !== null ? `/u/${params.userIndex}` : "";
+  const query = new URLSearchParams({
+    id: params.docId,
+    start: "1",
+    revisionBatchSize: String(params.revisionBatchSize ?? 1500),
+    showDetailedRevisions: "false",
+    loadType: "0",
+    token: params.token,
+    ouid: params.ouid,
+    includes_info_params: "true",
+    cros_files: "false",
+    nded: "false",
+  });
+  return `${DOCS_ORIGIN}/document${userSegment}/d/${params.docId}/revisions/tiles?${query.toString()}`;
+}
+
 // Extracts the multi-account slot from a `/document/u/{N}/d/` path segment (A.5).
 const USER_INDEX_PATTERN = /\/document\/u\/(\d+)\/d\//;
 
