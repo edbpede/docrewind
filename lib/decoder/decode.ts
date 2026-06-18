@@ -197,19 +197,26 @@ interface EntryEnvelope {
   readonly time: unknown;
 }
 
-// Positional layout of a LIVE changelog tuple, confirmed by the §24 capture
-// (2026-06-12): `[ op, time(ms), sessionId, revisionId, userId, … ]`.
+// Positional layout of a LIVE changelog tuple. CORRECTED 2026-06-17 against a
+// multi-session live capture: the stable per-AUTHOR id sits at position [2]
+// (a constant ~20-digit obfuscated Gaia id, unchanged across every revision of a
+// single-author doc), while position [4] holds a per-editing-SESSION token (a
+// 16-hex value that rotates each session, `null` on system/setup revisions). The
+// §24 single-session capture could not distinguish them — both were one constant
+// value — so the original `[op, time, sessionId, revisionId, userId, …]` reading
+// transposed the two, making one author surface as many "users" (one per session).
+// True layout: `[ op, time(ms), userId, revisionId, sessionId, seq, … ]`.
 // See PRD Appendix A.2.
 const TUPLE_TIME = 1;
-const TUPLE_SESSION_ID = 2;
+const TUPLE_USER_ID = 2;
 const TUPLE_REVISION_ID = 3;
-const TUPLE_USER_ID = 4;
+const TUPLE_SESSION_ID = 4;
 
 /**
  * Normalize a changelog entry to its {@link EntryEnvelope}. TWO shapes are
  * accepted so the decoder is faithful to the live wire format AND to the
  * synthetic fixture corpus:
- *   • Live (2026): a positional TUPLE `[op, time, sessionId, revisionId, userId, …]`.
+ *   • Live (2026): a positional TUPLE `[op, time, userId, revisionId, sessionId, …]`.
  *   • Synthetic fixtures: a flat OBJECT carrying the op fields alongside
  *     `revision_id`/`user_id`/`session_id`/`time` siblings.
  * Any other shape yields an envelope whose `op` degrades to UnknownOp downstream

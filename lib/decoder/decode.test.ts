@@ -208,4 +208,45 @@ describe("decodeOperations — revision metadata", () => {
     expect(decodeOperations({ nope: true })).toEqual([]);
     expect(decodeOperations(null)).toEqual([]);
   });
+
+  // Regression (2026-06-17): the LIVE tuple carries the stable per-author id at
+  // position [2] and a per-session token at position [4]. A single author across
+  // several sessions must therefore decode to ONE userId, not one-per-session —
+  // the transposed layout was surfacing every session as a distinct "author".
+  test("maps the live tuple's userId from [2] and sessionId from [4]", () => {
+    const decoded = decodeOperations({
+      changelog: [
+        // [op, time, userId(2), revisionId(3), sessionId(4), seq, …]
+        [
+          { ty: "is", s: "a", ibi: 1 },
+          1718000000000,
+          "author-gaia",
+          2,
+          "session-aaa",
+          0,
+          null,
+          null,
+          false,
+        ],
+        [
+          { ty: "is", s: "b", ibi: 2 },
+          1718000300000,
+          "author-gaia",
+          3,
+          "session-bbb",
+          1,
+          null,
+          null,
+          false,
+        ],
+      ],
+    });
+    expect(decoded.map((r) => r.userId as string | null)).toEqual(["author-gaia", "author-gaia"]);
+    expect(decoded.map((r) => r.sessionId as string | null)).toEqual([
+      "session-aaa",
+      "session-bbb",
+    ]);
+    // One author across two sessions ⇒ a single distinct userId.
+    expect(new Set(decoded.map((r) => r.userId)).size).toBe(1);
+  });
 });

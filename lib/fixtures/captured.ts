@@ -6,12 +6,15 @@
 // `revisions/load` read during the §24 transport capture. This is the FIRST
 // fixture taken from the real 2026
 // wire format rather than the hand-authored A.2 grammar — it exercises the live
-// 9-element changelog TUPLE envelope `[op, time, sessionId, revisionId, userId, …]`
+// 9-element changelog TUPLE envelope `[op, time, userId, revisionId, sessionId, …]`
 // that the synthetic corpus (corpus.ts, flat-object entries) does not model.
+// (Tuple layout corrected 2026-06-17: position [2] is the stable per-author id,
+// position [4] the per-session token — see decode.ts. This fixture is a single
+// author in a single session, so both reduce to one constant value here.)
 //
 // SANITIZATION (PRD §11.5, §13.7): every identifying field is redacted to a
-// structural placeholder — `time` → a synthetic monotonic stamp, `sessionId` →
-// "sess-redacted", `userId` → "user-redacted". The operation `s` strings are the
+// structural placeholder — `time` → a synthetic monotonic stamp, `userId` (pos [2])
+// → "user-redacted", `sessionId` (pos [4]) → "sess-redacted". The operation `s` strings are the
 // throwaway filler the capturing maintainer typed themselves ("Probe one two
 // three." / " Second sentence." / " Third one."), NOT third-party content, so
 // they are committed verbatim — that is what makes the end-of-timeline
@@ -250,7 +253,7 @@ const CHANGELOG: readonly unknown[] = [
       ],
     },
     1700000000000,
-    "sess-redacted",
+    "user-redacted",
     1,
     null,
     null,
@@ -265,9 +268,9 @@ const CHANGELOG: readonly unknown[] = [
       s: "Probe one two three.",
     },
     1700000001000,
-    "sess-redacted",
-    2,
     "user-redacted",
+    2,
+    "sess-redacted",
     0,
     null,
     null,
@@ -280,9 +283,9 @@ const CHANGELOG: readonly unknown[] = [
       s: " Second sentence.",
     },
     1700000002000,
-    "sess-redacted",
-    3,
     "user-redacted",
+    3,
+    "sess-redacted",
     1,
     null,
     null,
@@ -295,9 +298,9 @@ const CHANGELOG: readonly unknown[] = [
       s: " Third one.",
     },
     1700000003000,
-    "sess-redacted",
-    4,
     "user-redacted",
+    4,
+    "sess-redacted",
     2,
     null,
     null,

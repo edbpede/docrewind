@@ -60,6 +60,7 @@ import {
   keepRawData,
   realIdentities,
   removePendingStorageMaintenance,
+  resolvedIdentities,
   STORAGE_LEASE_REFRESH_MS,
   storageBudget,
   upsertPendingStorageMaintenance,
@@ -275,9 +276,28 @@ const ReplaySurface: Component<{
 
   const [prefersReducedMotion, setPrefersReducedMotion] = createSignal(false);
 
-  // Identity-display preference (default opaque). Even when on, userId is an
-  // opaque per-document token — never a real-world identity (PRD §9.7).
+  // Identity-display preference (default opaque). When on, an author may resolve
+  // to a real display name harvested off the open Docs page (PRD §9.7); the cache
+  // stays empty unless the user opted in, so the opaque path is content-free.
   const [showRealIdentities] = createResource(() => realIdentities.getValue());
+  // The self-identity harvest runs in the Docs content script on the same click
+  // that opens this page, so the cache may be written just after this page boots.
+  // Watch the store so a late resolution still reaches the colophon without a
+  // manual refresh. The load and watch are gated behind the opt-in: in the opaque
+  // (default) path we never ingest harvested names into the reactive graph, and a
+  // user who opted out keeps the cache out of the graph even if stale entries linger.
+  const [identities, { refetch: refetchIdentities }] = createResource(
+    () => showRealIdentities() ?? false,
+    (enabled) => (enabled ? resolvedIdentities.getValue() : {}),
+  );
+  onMount(() => {
+    const unwatch = resolvedIdentities.watch(() => {
+      if (showRealIdentities()) {
+        void refetchIdentities();
+      }
+    });
+    onCleanup(unwatch);
+  });
 
   // Decode runs only AFTER retrieval completes (the worker reads raw chunks).
   // Either path writes one replay publication; replay reads resolve through the
@@ -828,6 +848,7 @@ const ReplaySurface: Component<{
                       revisions={data().revisions}
                       timeline={data().timeline}
                       realIdentities={showRealIdentities() ?? false}
+                      identities={identities() ?? {}}
                     />
                     <footer class="pt-2 text-sm">
                       <a

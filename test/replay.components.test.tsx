@@ -252,4 +252,72 @@ describe("replay UI components", () => {
     expect(screen.getByText("user-a")).toBeTruthy();
     expect(screen.getByText("Attribution may be incomplete.")).toBeTruthy();
   });
+
+  it("collapses one author across many sessions into a single chip", () => {
+    // Regression for the transposed-tuple bug: a single author token repeated
+    // across revisions must yield exactly one author chip, never one per row.
+    render(() => (
+      <SummaryInsights
+        revisions={[
+          revision(1, 1_000, asUserId("author-1")),
+          revision(2, 61_000, asUserId("author-1")),
+          revision(3, 200_000, asUserId("author-1")),
+        ]}
+        timeline={[]}
+      />
+    ));
+    const chips = screen.getAllByRole("listitem");
+    expect(chips).toHaveLength(1);
+    expect(chips[0]?.textContent).toBe("Author 1");
+  });
+
+  it("renders a resolved real name when realIdentities is on", () => {
+    render(() => (
+      <SummaryInsights
+        revisions={[revision(1, 1_000, asUserId("07280646734247216338"))]}
+        timeline={[]}
+        realIdentities={true}
+        identities={{
+          "07280646734247216338": {
+            userId: "07280646734247216338",
+            name: "Ada Lovelace",
+            email: "ada@example.com",
+          },
+        }}
+      />
+    ));
+    expect(screen.getByText("Ada Lovelace")).toBeTruthy();
+    // The raw opaque token must NOT leak when a name resolved.
+    expect(screen.queryByText("07280646734247216338")).toBeNull();
+  });
+
+  it("falls back to the raw token when realIdentities is on but unresolved", () => {
+    render(() => (
+      <SummaryInsights
+        revisions={[revision(1, 1_000, asUserId("unmapped-token"))]}
+        timeline={[]}
+        realIdentities={true}
+        identities={{}}
+      />
+    ));
+    expect(screen.getByText("unmapped-token")).toBeTruthy();
+  });
+
+  it("keeps authors opaque by default even when identities are present", () => {
+    render(() => (
+      <SummaryInsights
+        revisions={[revision(1, 1_000, asUserId("07280646734247216338"))]}
+        timeline={[]}
+        identities={{
+          "07280646734247216338": {
+            userId: "07280646734247216338",
+            name: "Ada Lovelace",
+            email: "ada@example.com",
+          },
+        }}
+      />
+    ));
+    expect(screen.getByText("Author 1")).toBeTruthy();
+    expect(screen.queryByText("Ada Lovelace")).toBeNull();
+  });
 });
