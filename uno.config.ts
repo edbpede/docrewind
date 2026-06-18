@@ -364,7 +364,16 @@ export default defineConfig({
   // banner) were silently dropped from the shipped chunk and rendered UNSTYLED.
   // Safelisting every shortcut forces all of them into the shared chunk no matter
   // the entry order; insertion order is stable, so the determinism contract holds.
-  safelist: Object.keys(shortcuts),
+  //
+  // `relative` is the one BARE utility (not a shortcut) that does load-bearing work
+  // in a replay-only component: it is the chip wrapper's class in SummaryInsights —
+  // the positioning context the hover/click detail card (`author-pop`, `absolute`)
+  // anchors to. It hits the SAME shared-chunk hazard: when the first-scanned entry
+  // never emits a standalone `relative`, the utility is dropped from the shipped
+  // chunk, the `<li>` falls back to `position: static`, and the card resolves its
+  // containing block to <body> — painting itself off-screen so it never appears.
+  // Safelist it explicitly so the card always anchors to its chip.
+  safelist: [...Object.keys(shortcuts), "relative"],
 
   preflights: [
     {
