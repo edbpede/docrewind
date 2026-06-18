@@ -267,6 +267,11 @@ function formatStamp(ms: number): string {
  * within the content-free insights model.
  */
 export function authorActiveRange(firstMs: number, lastMs: number): string {
+  // The decoder admits any finite number, but values beyond the Date epoch bound
+  // (±8.64e15 ms) render as "Invalid Date". Out-of-range stamps degrade to blank.
+  if (Math.abs(firstMs) > 8.64e15 || Math.abs(lastMs) > 8.64e15) {
+    return "";
+  }
   const first = formatStamp(firstMs);
   if (firstMs === lastMs) {
     return first;
