@@ -20,8 +20,10 @@ export type Unconfirmed = typeof UNCONFIRMED;
 export type SchemaVersion = {
   // The `)]}'`-guarded JSON changelog modeled in Appendix A.2. CONFIRMED 2026-06-12:
   // the top-level payload is an object `{ chunkedSnapshot, changelog }`; `changelog`
-  // is an array of 9-element revision tuples `[op, time, sessionId, revisionId,
-  // userId, …]`. detectSchema keys on the `changelog` array, so the sibling
+  // is an array of 9-element revision tuples `[op, time, userId, revisionId,
+  // sessionId, …]` (layout corrected 2026-06-17; see decode.ts — position [2] is
+  // the stable per-author id, [4] the per-session token). detectSchema keys on the
+  // `changelog` array, so the sibling
   // `chunkedSnapshot` (the base-state style scaffolding) does not affect detection.
   readonly kind: "json-changelog-v1";
 };

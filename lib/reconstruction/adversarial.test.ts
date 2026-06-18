@@ -110,9 +110,9 @@ describe("adversarial A4 — malformed changelog tuples degrade without mis-mapp
     const tuple = [
       { ty: "is", s: "hi", ibi: 1 }, // [0] op
       111, // [1] time
-      "sess", // [2] sessionId
+      "user", // [2] userId
       7, // [3] revisionId
-      "user", // [4] userId
+      "sess", // [4] sessionId
       "x",
       "y",
       "z",
