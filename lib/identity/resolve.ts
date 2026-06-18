@@ -216,23 +216,27 @@ export function parseTilesHovercardIds(tilesPayload: unknown): Readonly<Record<s
 // in its own Share dialog (no People/Drive API, no new scope). Tolerant + best-effort
 // like the tiles path: a miss only costs the (optional) email row.
 
-// The ACL object is embedded in a ~78 KB HTML document (module header) with markup and
-// other JSON before AND after it, so we cannot match it with a single greedy/lazy regex:
-// greedy `[\s\S]*` over-captures to the last `]}` in the whole document, while lazy
-// `[\s\S]*?` stops at the FIRST `]}` and truncates if any permission carries a nested
-// array. Instead we anchor on the `{"permissions":[` marker and walk forward tracking
-// brace/bracket depth — ignoring structural characters inside JSON string literals — to
-// find the matching close of that exact object.
-const ACL_MARKER = '{"permissions":[';
+// The ACL is embedded in a ~78 KB HTML document (module header) with markup and other JSON
+// before AND after it, so we cannot match it with a single greedy/lazy regex: greedy
+// `[\s\S]*` over-captures to the last `]}` in the whole document, while lazy `[\s\S]*?`
+// stops at the FIRST `]}` and truncates if any permission carries a nested array. Instead we
+// anchor on the permissions array opener with a whitespace-tolerant regex, then walk the
+// `[…]` forward tracking bracket depth — ignoring structural characters inside JSON string
+// literals — to slice exactly that array and parse it directly. Parsing the array (not its
+// enclosing object) means we depend on neither `permissions` being the first key nor compact
+// serialization: a leading `{"kind":…,"permissions":[` or pretty-printed `{ "permissions" : [`
+// both resolve, where the old literal `{"permissions":[` marker silently missed them.
+const ACL_ARRAY_ANCHOR_RE = /"permissions"\s*:\s*\[/;
 
 /**
- * Return the substring of `text` spanning the JSON object that begins at `start` (which
- * must index an opening `{`), walking forward until brace depth returns to zero. String
- * literals are skipped wholesale (including their escaped quotes), so braces/brackets that
- * appear inside an `emailAddress`, display name, URL, etc. never miscount. Returns null
- * when the object never closes (truncated input).
+ * Return the substring of `text` spanning the balanced `open`/`close` pair that begins at
+ * `start` (which must index an opening `open` char), walking forward until depth returns to
+ * zero. String literals are skipped wholesale (including their escaped quotes), so brackets/
+ * braces that appear inside an `emailAddress`, display name, URL, etc. never miscount. Returns
+ * null when the span never closes (truncated input). Used for both `{…}` objects and `[…]`
+ * arrays — pass the matching pair.
  */
-function balancedObjectSpan(text: string, start: number): string | null {
+function balancedSpan(text: string, start: number, open: string, close: string): string | null {
   let depth = 0;
   let inString = false;
   for (let i = start; i < text.length; i++) {
@@ -247,9 +251,9 @@ function balancedObjectSpan(text: string, start: number): string | null {
     }
     if (ch === '"') {
       inString = true;
-    } else if (ch === "{") {
+    } else if (ch === open) {
       depth++;
-    } else if (ch === "}") {
+    } else if (ch === close) {
       depth--;
       if (depth === 0) {
         return text.slice(start, i + 1);
@@ -270,28 +274,32 @@ interface AclPermission {
 /**
  * Parse `drivesharing/driveshare` HTML into `{ gaiaUserId → email }` for active user
  * permissions. The blob is deeply escaped, so we first un-escape `\"`→`"`, locate the
- * `{"permissions":[…]}` object via a string-literal-aware balanced-span walk, and
- * `JSON.parse` exactly that slice — reading each permission's fields structurally rather
- * than with field-order-dependent regex windows. We keep an entry only when it is
- * `type:"user"`, not `deleted`, and carries both an `emailAddress` and a digit-only
- * `userId`. Non-string / no-match / malformed input → `{}`; never throws (the parse is wrapped).
+ * `"permissions":[` array opener with a whitespace-tolerant anchor, slice exactly that
+ * `[…]` array via a string-literal-aware balanced-bracket walk, and `JSON.parse` the array
+ * directly — reading each permission's fields structurally rather than with field-order-
+ * dependent regex windows, and depending on neither the array being the enclosing object's
+ * first key nor compact serialization. We keep an entry only when it is `type:"user"`, not
+ * `deleted`, and carries both an `emailAddress` and a digit-only `userId`. Non-string /
+ * no-match / malformed input → `{}`; never throws (the parse is wrapped).
  */
 export function parseDriveShareAcl(html: string): Readonly<Record<string, string>> {
   if (typeof html !== "string" || html.length === 0) {
     return {};
   }
   const unescaped = html.replace(/\\"/g, '"');
-  const start = unescaped.indexOf(ACL_MARKER);
-  if (start === -1) {
+  const anchor = ACL_ARRAY_ANCHOR_RE.exec(unescaped);
+  if (anchor === null) {
     return {};
   }
-  const blob = balancedObjectSpan(unescaped, start);
+  // The match ends on the opening `[`; slice the balanced array from there.
+  const arrayStart = anchor.index + anchor[0].length - 1;
+  const blob = balancedSpan(unescaped, arrayStart, "[", "]");
   if (blob === null) {
     return {};
   }
   let permissions: unknown;
   try {
-    permissions = (JSON.parse(blob) as { permissions?: unknown }).permissions;
+    permissions = JSON.parse(blob);
   } catch {
     // Malformed slice — degrade to empty, never throw: a miss only costs the optional
     // email row (see module header).

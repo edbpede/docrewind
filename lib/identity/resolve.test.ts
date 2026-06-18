@@ -324,6 +324,36 @@ describe("parseDriveShareAcl", () => {
     });
   });
 
+  test("extracts emails when a key precedes `permissions` in the wrapper object", () => {
+    // Drive API v3 PermissionList emits `kind` FIRST, so the live wrapper is
+    // `{"kind":"drive#permissionList","permissions":[…]}`. Anchoring on the array opener
+    // (not the literal `{"permissions":[`) means a preceding key no longer hides the ACL.
+    const precedingKey = esc(
+      '{"kind":"drive#permissionList","permissions":[' +
+        '{"deleted":false,"emailAddress":"cautiosreboot0402@gmail.com",' +
+        '"type":"user","userId":"104941268820871967559"}' +
+        "]}",
+    );
+    expect(parseDriveShareAcl(precedingKey)).toEqual({
+      "104941268820871967559": "cautiosreboot0402@gmail.com",
+    });
+  });
+
+  test("extracts emails when the marker carries whitespace (pretty-printed JSON)", () => {
+    // A literal `{"permissions":[` marker fails the instant the serializer inserts spaces
+    // around the colon or brackets; the whitespace-tolerant `"permissions"\s*:\s*\[` anchor
+    // matches the pretty-printed form too.
+    const prettyPrinted = esc(
+      '{ "permissions" : [ ' +
+        '{ "deleted": false, "emailAddress": "s14s14s14mail@gmail.com", ' +
+        '"type": "user", "userId": "109650672404104410772" } ' +
+        "] }",
+    );
+    expect(parseDriveShareAcl(prettyPrinted)).toEqual({
+      "109650672404104410772": "s14s14s14mail@gmail.com",
+    });
+  });
+
   test("excludes a deleted perm whose field value before emailAddress contains a '{'", () => {
     // Structural defect the regex-window approach was vulnerable to: a field value carrying
     // a literal `{` (here a displayName-like field, alphabetically between deleted and
