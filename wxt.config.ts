@@ -12,6 +12,33 @@ import { defineConfig } from "wxt";
 // hashes the CSS asset, which a Vite plugin here cannot do. See uno.config.ts.
 export default defineConfig({
   modules: ["@wxt-dev/module-solid", "@wxt-dev/unocss"],
+  // Silence ONE known-benign UnoCSS build warning, nothing else.
+  //
+  // @unocss/vite global build mode resolves the `uno` layer the first time
+  // `virtual:uno.css` is imported and caches it (vfsLayers); every LATER importer
+  // hits the `vfsLayers.has(layer)` branch and emits
+  //   "[unocss] "virtual:uno.css" is being imported multiple times … using the
+  //    first occurrence"
+  // (@unocss/vite/dist/index.mjs:520-522). DocRewind has four legitimate
+  // importers — the options, popup and replay page mounts plus the docs content
+  // script — and each MUST import the stylesheet so the shared CSS chunk is linked
+  // into its own output. The dedup-to-one-chunk this warns about is exactly the
+  // behaviour we rely on (see the `safelist` note in uno.config.ts), so the warning
+  // is pure noise. Drop precisely this message via Rollup's onwarn and forward
+  // everything else untouched; this only affects production builds.
+  vite: () => ({
+    build: {
+      rollupOptions: {
+        onwarn(warning, defaultHandler) {
+          const msg = typeof warning === "string" ? warning : warning.message;
+          if (msg?.includes("virtual:uno.css") && msg.includes("imported multiple times")) {
+            return;
+          }
+          defaultHandler(warning);
+        },
+      },
+    },
+  }),
   // Build BOTH browsers as MV3 (Firefox would otherwise default to MV2).
   manifestVersion: 3,
   manifest: ({ browser }) => ({
