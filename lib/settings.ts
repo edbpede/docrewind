@@ -8,6 +8,7 @@
 
 import { storage } from "#imports";
 import type { CacheRecord, DocId } from "./domain/model";
+import type { IdentityMap } from "./identity/resolve";
 
 /** Visual theme preference. `system` follows the OS setting. */
 export type Theme = "light" | "dark" | "system";
@@ -138,6 +139,17 @@ export const keepRawData = storage.defineItem<boolean>("local:keepRawData", {
 /** Whether to surface real account identities vs. opaque ids (PRD §9.7). Default off. */
 export const realIdentities = storage.defineItem<boolean>("local:realIdentities", {
   fallback: false,
+});
+
+/**
+ * Cache of resolved author identities, keyed by the opaque author token (Gaia id).
+ * Populated ONLY when `realIdentities` is on — the content script reads the
+ * signed-in account label already present on the Docs page (no network) and
+ * caches it here for the replay surface. Content-free by default: this stays an
+ * empty object unless the user has explicitly opted in.
+ */
+export const resolvedIdentities = storage.defineItem<IdentityMap>("local:resolvedIdentities", {
+  fallback: {},
 });
 
 /** Cache byte budgets, versioned so the shape can evolve without data loss. */

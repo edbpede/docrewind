@@ -3,13 +3,15 @@
 // SummaryInsights (plan Phase 5 Step 5f / PRD §9.7). Derived, content-free
 // insights over the injected revisions + timeline — all values via `createMemo`,
 // rendered with `<For>`. No identity is exposed by default: authors show as
-// opaque "Author N" labels unless `realIdentities` is on (and even then the
-// underlying `UserId` is already an opaque per-document token, never a real name).
+// opaque "Author N" labels. With `realIdentities` on, an author resolves to a
+// real display name when one was harvested off the open Docs page (see
+// lib/identity/resolve.ts), falling back to the raw opaque token otherwise.
 
 import type { Component } from "solid-js";
 import { createMemo, For, mergeProps, Show } from "solid-js";
 import type { DecodedRevision, TimelineEvent } from "@/lib/domain/model";
 import { authorLabel, formatDuration, strings } from "@/lib/i18n/strings";
+import type { IdentityMap } from "@/lib/identity/resolve";
 
 interface AuthorLabel {
   readonly key: string;
@@ -21,10 +23,16 @@ export interface SummaryInsightsProps {
   readonly timeline: readonly TimelineEvent[];
   /** When false (default), authors render as opaque labels only. */
   readonly realIdentities?: boolean;
+  /**
+   * Resolved author identities keyed by the opaque author token. Consulted only
+   * when `realIdentities` is on; absent/unresolved authors fall back to the raw
+   * token. Empty by default (content-free).
+   */
+  readonly identities?: IdentityMap;
 }
 
 const SummaryInsights: Component<SummaryInsightsProps> = (rawProps) => {
-  const props = mergeProps({ realIdentities: false }, rawProps);
+  const props = mergeProps({ realIdentities: false, identities: {} as IdentityMap }, rawProps);
 
   const stats = createMemo(() => {
     let sessions = 0;
@@ -71,16 +79,22 @@ const SummaryInsights: Component<SummaryInsightsProps> = (rawProps) => {
     ];
   });
 
-  // Distinct authors in first-seen order, projected to opaque (or raw-opaque)
-  // labels. Built with an accumulator (not `.map`) so list construction stays a
-  // pure derivation feeding `<For>`, never inline render logic.
+  // Distinct authors in first-seen order, projected to opaque (default) or
+  // real-identity labels. With identity display on, a resolved name wins; an
+  // unresolved token shows raw. Built with an accumulator (not `.map`) so list
+  // construction stays a pure derivation feeding `<For>`, never inline render
+  // logic. Each distinct author token yields ONE entry, so a single person is a
+  // single label even across many editing sessions.
   const authors = createMemo<readonly AuthorLabel[]>(() => {
     const seen: string[] = [];
     const projected: AuthorLabel[] = [];
     for (const revision of props.revisions) {
       if (revision.userId !== null && !seen.includes(revision.userId)) {
         seen.push(revision.userId);
-        const label = props.realIdentities ? revision.userId : authorLabel(seen.length - 1);
+        const resolved = props.identities[revision.userId];
+        const label = props.realIdentities
+          ? (resolved?.name ?? revision.userId)
+          : authorLabel(seen.length - 1);
         projected.push({ key: revision.userId, label });
       }
     }
