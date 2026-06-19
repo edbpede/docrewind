@@ -78,6 +78,19 @@ const shortcuts = {
   "dr-page": "dr-surface min-h-screen",
   "dr-panel": "rounded-lg border border-stone-200 bg-white dark:border-stone-700 dark:bg-stone-800",
   "dr-card": "dr-panel p-4 shadow-sm",
+  // ── Settings sheet (Options) ───────────────────────────────────────────────
+  // A section is a rule-separated band, NOT a boxed card, so the options page reads
+  // as one calm sheet instead of a stack of identical panels (§6 anti-reference:
+  // identical card grids). The page's own column gap carries the rhythm.
+  "dr-section": "flex flex-col gap-4 border-t border-stone-200/80 pt-6 dark:border-stone-700/80",
+  // A native-feeling section heading: plain semibold sans, deliberately NOT a mono
+  // uppercase eyebrow, so the sheet doesn't wear the kicker-on-every-section AI tell.
+  "dr-section-title": "font-sans text-[0.9375rem] font-semibold text-stone-900 dark:text-stone-100",
+  // One settings row: a label/description column on the left, its control on the right.
+  "dr-field": "flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5",
+  // A quiet inline status note (e.g. pending storage maintenance) — tonal, not a card.
+  "dr-note":
+    "rounded-md bg-stone-100 px-3 py-2 text-sm text-stone-600 dark:bg-stone-800/70 dark:text-stone-300",
 
   // ── Masthead: the archival record header (eyebrow + balanced title) ────────
   "dr-masthead": "flex flex-col gap-2 border-b border-stone-200/80 pb-4 dark:border-stone-700/80",
@@ -95,14 +108,27 @@ const shortcuts = {
     "ring-1 ring-stone-200 shadow-sm dark:ring-stone-700/80",
 
   // ── The manuscript leaf: an elevated sheet with a graphite binding margin ──
-  // `before:` draws the ruled binding margin — pure decoration (no meaning rides
-  // on it), graphite-neutral so it never collides with the strike/suggest hues.
+  // The hero surface. A flex COLUMN with a real page presence: a generous min-height
+  // so even a short reconstruction rests on a substantial sheet (never a card hugging
+  // one line), top-aligned text flowing from the head like a written page, and the
+  // folio pinned to the foot (`mt-auto`). The reading block starts AFTER a left
+  // binding gutter, so `before:` (the ruled spine line, graphite-neutral, pure
+  // decoration) sits between the leaf edge and the first character. The lift is the
+  // Earned-Lift exception (DESIGN.md §4): a long, soft, low-opacity drop — a sheet
+  // held just off the desk — paired with a hairline ring to seat it on the paper.
   "dr-leaf":
-    "relative rounded-xl bg-white px-6 py-9 ring-1 ring-stone-200 sm:px-12 " +
-    "shadow-[0_18px_40px_-24px_oklch(0%_0_0/0.22)] " +
-    "before:pointer-events-none before:absolute before:inset-y-6 before:left-4 before:w-px " +
-    "before:bg-stone-300/70 sm:before:left-9 dark:bg-stone-800 dark:ring-stone-700 " +
+    "relative flex min-h-[24rem] flex-col rounded-xl bg-white py-10 pl-12 pr-7 ring-1 ring-stone-200 " +
+    "sm:min-h-[28rem] sm:pl-16 sm:pr-12 " +
+    "shadow-[0_22px_50px_-28px_oklch(0%_0_0/0.26)] " +
+    "before:pointer-events-none before:absolute before:inset-y-8 before:left-7 before:w-px " +
+    "before:bg-stone-300/80 sm:before:left-11 dark:bg-stone-800 dark:ring-stone-700 " +
     "dark:before:bg-stone-600/50",
+  // The folio: the printed record at the foot of the leaf — a hairline rule with the
+  // archival label at the spine and the frame's dateline at the fore-edge, both in the
+  // mono marginalia voice. Pinned to the bottom of the flex column.
+  "dr-folio":
+    "mt-auto flex items-baseline justify-between gap-3 border-t border-stone-200/70 pt-3 " +
+    "dark:border-stone-700/70",
   // A dateline reads like the hand-noted date in a manuscript margin.
   // Same visual treatment as the masthead eyebrow — aliased to one source.
   "dr-dateline": "dr-eyebrow",
@@ -269,9 +295,12 @@ const shortcuts = {
   "banner-note-body": "flex flex-col gap-1.5 px-3 pb-3 pt-0.5 text-stone-600 dark:text-stone-400",
 
   // ── Document-rendering primitives (color ALWAYS + a non-color affordance) ──
+  // Left-anchored (not centered) so the reading block sits against the binding gutter
+  // like a real page, with the fore-edge whitespace as its right margin. Capped at 68ch
+  // for a calm, book-like measure; `[text-wrap:pretty]` trims orphans in long prose.
   "doc-column":
-    "mx-auto max-w-[68ch] whitespace-pre-wrap break-words font-serif text-[1.0625rem] leading-[1.8] " +
-    "text-stone-900 dark:text-stone-100",
+    "max-w-[68ch] whitespace-pre-wrap break-words font-serif text-[1.0625rem] leading-[1.8] " +
+    "[text-wrap:pretty] text-stone-900 dark:text-stone-100",
   "doc-accepted": "text-stone-900 dark:text-stone-100",
   // Suggested insert: color + underline + label affordance.
   "doc-suggest":
@@ -304,6 +333,17 @@ const shortcuts = {
     "font-mono text-base font-semibold tabular-nums text-revision dark:text-revision-ring",
   "dr-eyebrow":
     "font-mono text-[11px] uppercase tracking-[0.16em] text-stone-500 dark:text-stone-400",
+
+  // ── Colophon: the page's closing record (NOT a dashboard) ──────────────────
+  // A tonal block seated under the leaf by a single hairline rule — deliberately NOT
+  // another bordered card, and never a grid of big-number KPI tiles (the §6 anti-
+  // reference). The record line rides the SERIF "record" voice so it reads as the
+  // manuscript's own colophon — an editorial note on how the document was made — rather
+  // than analytics chrome. Zero-valued figures are dropped upstream in `colophonSummary`.
+  "dr-colophon": "flex flex-col gap-3 border-t border-stone-200/80 pt-5 dark:border-stone-700/80",
+  "dr-colophon-line":
+    "max-w-[64ch] font-serif text-[0.95rem] leading-relaxed text-stone-700 dark:text-stone-300",
+  "dr-colophon-contributors": "flex flex-col gap-2",
 
   // ── Insights contributor chips + hover/click detail card ───────────────────
   // Each distinct contributor is an interactive chip; hover/focus — or a click to
@@ -346,6 +386,15 @@ export default defineConfig({
   transformers: [sortUnoVarBlocks],
 
   theme: {
+    // The three bundled voices (see assets/fonts.css + DESIGN.md §3). Each leads with
+    // the self-hosted face and falls back to the system stack, so `font-serif`/
+    // `font-sans`/`font-mono` utilities (and shortcuts built on them) resolve to the
+    // bundled faces on the extension pages and degrade gracefully in the content script.
+    font: {
+      sans: "'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif",
+      serif: "Literata, ui-serif, Georgia, Cambria, 'Times New Roman', Times, serif",
+      mono: "'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+    },
     colors: {
       // Revision-indigo: the "now"/playhead accent and primary action color.
       revision: {
@@ -417,8 +466,25 @@ export default defineConfig({
    under \`.dark\`, where surfaces like \`dr-panel\` only flip the background. That
    produces dark-on-dark, near-unreadable controls on the otherwise-dark Options
    page. Setting color-scheme makes every native control follow the theme. */
-:root { color-scheme: light; }
+:root {
+  color-scheme: light;
+  /* The Wind4 reset sets html's family from var(--default-font-family); aim it at the
+     bundled UI sans so all chrome that doesn't opt into another voice rides IBM Plex
+     Sans. The document column + titles opt into the serif (font-serif); figures the
+     mono. The fallbacks keep native fonts where the bundled faces aren't loaded. */
+  --default-font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --default-mono-font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
 .dark { color-scheme: dark; }
+
+/* Crisper rendering for the bundled variable faces; optical sizing on so Literata
+   picks the right optical master at title vs. reading sizes. */
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-optical-sizing: auto;
+}
 
 @media (prefers-reduced-motion: reduce) {
   .tl-fill, .tl-thumb, .tl-track, .tl-marker, .tl-cluster, .progress-fill, .btn-base { transition: none !important; }
@@ -428,6 +494,8 @@ export default defineConfig({
   /* Freeze the writing caret to a steady mark — still present and colour-coded, just
      not blinking — so the attribution cue survives without vestibular motion. */
   .doc-caret { animation: none !important; opacity: 1 !important; }
+  /* The manuscript leaf arrives instantly (no settle) under reduced motion. */
+  .dr-leaf { animation: none !important; }
   /* Don't freeze the indeterminate bar (a static one-third pill reads as a
      broken/stalled load). Instead drop the travelling sweep for a vestibular-
      safe opacity pulse over the FULL track, so reduced-motion users still get a
@@ -460,6 +528,16 @@ export default defineConfig({
   50% { opacity: 0.25; }
 }
 .doc-caret { animation: dr-caret-blink 1.1s ease-in-out infinite; }
+
+/* The manuscript leaf settles onto the page once the reconstruction is ready — a single
+   soft fade + rise (not an orchestrated page sequence), conveying "the rebuilt page has
+   arrived". The end state IS the leaf's natural state, so headless/no-animation renders
+   show it fully visible; reduced motion drops it entirely (above). ease-out-quint curve. */
+@keyframes dr-leaf-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+.dr-leaf { animation: dr-leaf-in 360ms cubic-bezier(0.22, 1, 0.36, 1) both; }
 
 /* Reading-column affordance tooltips (suggested insertion / marked for deletion).
    These non-accepted runs previously surfaced their label through the native

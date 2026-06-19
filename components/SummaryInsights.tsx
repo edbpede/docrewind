@@ -26,7 +26,13 @@ import {
   Show,
 } from "solid-js";
 import type { DecodedRevision, TimelineEvent } from "@/lib/domain/model";
-import { authorActiveRange, formatDuration, strings } from "@/lib/i18n/strings";
+import {
+  authorActiveRange,
+  type ColophonRecord,
+  colophonSummary,
+  formatDuration,
+  strings,
+} from "@/lib/i18n/strings";
 import { type AuthorEntry, deriveAuthors } from "@/lib/identity/authors";
 import type { IdentityMap } from "@/lib/identity/resolve";
 
@@ -54,7 +60,10 @@ export interface SummaryInsightsProps {
 const SummaryInsights: Component<SummaryInsightsProps> = (rawProps) => {
   const props = mergeProps({ realIdentities: false, identities: {} as IdentityMap }, rawProps);
 
-  const stats = createMemo(() => {
+  // The colophon record: content-free tallies over the timeline + revision timestamps.
+  // `colophonSummary` turns these into one neutral sentence, dropping any zero-valued
+  // marginalia — so the record reads as an editorial note, never a KPI readout.
+  const record = createMemo<ColophonRecord>(() => {
     let sessions = 0;
     let largeEdits = 0;
     let pauses = 0;
@@ -86,17 +95,8 @@ const SummaryInsights: Component<SummaryInsightsProps> = (rawProps) => {
       firstTime = firstTime === null ? time : Math.min(firstTime, time);
       lastTime = lastTime === null ? time : Math.max(lastTime, time);
     }
-    const duration =
-      firstTime === null || lastTime === null
-        ? strings.insights.durationUnknown
-        : formatDuration(lastTime - firstTime);
-    return [
-      { key: "sessions", label: strings.insights.sessions, value: sessions },
-      { key: "largeEdits", label: strings.insights.largeEdits, value: largeEdits },
-      { key: "pauses", label: strings.insights.pauses, value: pauses },
-      { key: "span", label: strings.insights.span, value: props.revisions.length },
-      { key: "duration", label: strings.insights.duration, value: duration },
-    ];
+    const durationMs = firstTime === null || lastTime === null ? null : lastTime - firstTime;
+    return { revisions: props.revisions.length, sessions, largeEdits, pauses, durationMs };
   });
 
   // Distinct authors in first-seen order, each carrying content-free tallies plus (when
@@ -154,22 +154,12 @@ const SummaryInsights: Component<SummaryInsightsProps> = (rawProps) => {
   const clearHover = (key: string) => setHovered((current) => (current === key ? null : current));
 
   return (
-    <section class="dr-card" aria-label={strings.insights.heading}>
-      <h2 class="dr-eyebrow mb-2">{strings.insights.heading}</h2>
-      <dl class="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <For each={stats()}>
-          {(stat) => (
-            <div class="flex flex-col gap-0.5">
-              <dt class="dr-eyebrow">{stat.label}</dt>
-              <dd class="font-mono text-lg tabular-nums text-stone-800 dark:text-stone-100">
-                {stat.value}
-              </dd>
-            </div>
-          )}
-        </For>
-      </dl>
+    <section class="dr-colophon" aria-label={strings.insights.heading}>
+      <h2 class="dr-eyebrow">{strings.insights.heading}</h2>
+      <p class="dr-colophon-line">{colophonSummary(record())}</p>
       <Show when={authors().length > 0}>
-        <div class="mt-3 flex flex-col gap-2">
+        <div class="dr-colophon-contributors">
+          <p class="dr-eyebrow">{strings.insights.contributorsLabel}</p>
           <ul ref={listEl} class="flex flex-wrap gap-2">
             <For each={authors()}>
               {(author, index) => {

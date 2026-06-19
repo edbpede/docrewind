@@ -43,21 +43,19 @@ const CacheControls: Component<CacheControlsProps> = (props) => {
   }
 
   return (
-    <section class="dr-card" aria-labelledby="dr-cache-heading">
-      <h2 id="dr-cache-heading" class="mb-2 font-medium">
+    <section class="dr-section" aria-labelledby="dr-cache-heading">
+      <h2 id="dr-cache-heading" class="dr-section-title">
         {strings.options.cacheHeading}
       </h2>
 
       <Show
         when={usage()?.quota ? usage() : undefined}
         fallback={
-          <p class="mb-3 text-sm text-stone-500 dark:text-stone-400">
-            {strings.options.usageUnknown}
-          </p>
+          <p class="text-sm text-stone-500 dark:text-stone-400">{strings.options.usageUnknown}</p>
         }
       >
         {(estimate) => (
-          <p class="dr-counter mb-3">
+          <p class="dr-counter">
             {formatMib(estimate().usage)} / {formatMib(estimate().quota)}
           </p>
         )}

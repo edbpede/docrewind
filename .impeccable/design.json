@@ -1,0 +1,311 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-06-19T00:00:00Z",
+  "title": "Design System: DocRewind",
+  "extensions": {
+    "colorMeta": {
+      "revision-indigo": {
+        "role": "primary",
+        "displayName": "Revision Indigo",
+        "canonical": "oklch(54% 0.13 264)",
+        "tonalRamp": [
+          "oklch(20% 0.06 264)",
+          "oklch(30% 0.09 264)",
+          "oklch(40% 0.12 264)",
+          "oklch(48% 0.13 264)",
+          "oklch(54% 0.13 264)",
+          "oklch(62% 0.11 264)",
+          "oklch(70% 0.10 264)",
+          "oklch(82% 0.06 264)"
+        ]
+      },
+      "marginal-green": {
+        "role": "secondary",
+        "displayName": "Marginal Green",
+        "canonical": "oklch(52% 0.12 165)",
+        "tonalRamp": [
+          "oklch(22% 0.05 165)",
+          "oklch(32% 0.07 165)",
+          "oklch(42% 0.10 165)",
+          "oklch(52% 0.12 165)",
+          "oklch(63% 0.10 165)",
+          "oklch(75% 0.07 165)",
+          "oklch(86% 0.05 165)",
+          "oklch(95% 0.03 165)"
+        ]
+      },
+      "strike-vermilion": {
+        "role": "secondary",
+        "displayName": "Strike Vermilion",
+        "canonical": "oklch(55% 0.16 35)",
+        "tonalRamp": [
+          "oklch(24% 0.07 35)",
+          "oklch(34% 0.10 35)",
+          "oklch(44% 0.13 35)",
+          "oklch(55% 0.16 35)",
+          "oklch(66% 0.13 35)",
+          "oklch(78% 0.09 35)",
+          "oklch(88% 0.05 35)",
+          "oklch(95% 0.03 35)"
+        ]
+      },
+      "caution-amber": {
+        "role": "tertiary",
+        "displayName": "Caution Amber",
+        "canonical": "oklch(58% 0.12 75)",
+        "tonalRamp": [
+          "oklch(26% 0.05 75)",
+          "oklch(36% 0.07 75)",
+          "oklch(47% 0.10 75)",
+          "oklch(58% 0.12 75)",
+          "oklch(69% 0.10 78)",
+          "oklch(80% 0.07 80)",
+          "oklch(90% 0.05 80)",
+          "oklch(96% 0.04 80)"
+        ]
+      },
+      "cool-paper": {
+        "role": "neutral",
+        "displayName": "Cool Paper",
+        "canonical": "oklch(98.5% 0.001 106)",
+        "tonalRamp": [
+          "oklch(14.7% 0.004 49)",
+          "oklch(21.6% 0.006 56)",
+          "oklch(26.8% 0.007 34)",
+          "oklch(37.4% 0.01 67)",
+          "oklch(55.3% 0.013 58)",
+          "oklch(86.9% 0.005 56)",
+          "oklch(97% 0.001 106)",
+          "oklch(98.5% 0.001 106)"
+        ]
+      },
+      "graphite-ink": {
+        "role": "neutral",
+        "displayName": "Graphite Ink",
+        "canonical": "oklch(21.6% 0.006 56)",
+        "tonalRamp": [
+          "oklch(14.7% 0.004 49)",
+          "oklch(21.6% 0.006 56)",
+          "oklch(26.8% 0.007 34)",
+          "oklch(37.4% 0.01 67)",
+          "oklch(44.4% 0.011 73)",
+          "oklch(55.3% 0.013 58)",
+          "oklch(70.9% 0.01 56)",
+          "oklch(86.9% 0.005 56)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "title": {
+        "displayName": "Title",
+        "purpose": "Masthead / archival-record header. Serif, balanced wrap."
+      },
+      "reading": {
+        "displayName": "Reading",
+        "purpose": "The document column itself — serif, 1.8 line-height, capped at 68ch."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "UI copy, descriptions, control labels. System sans."
+      },
+      "eyebrow": {
+        "displayName": "Eyebrow / Label",
+        "purpose": "Masthead eyebrow, dateline, detail keys. Mono, uppercase, 0.16em tracking."
+      },
+      "data": {
+        "displayName": "Data",
+        "purpose": "Percentages, counts, revision ids. Mono + tabular-nums so figures never reflow."
+      }
+    },
+    "shadows": [
+      {
+        "name": "resting-card",
+        "value": "0 1px 2px oklch(0% 0 0 / 0.05)",
+        "purpose": "Panels and cards — barely-there separation of leaf-white from the paper."
+      },
+      {
+        "name": "lifted-leaf",
+        "value": "0 18px 40px -24px oklch(0% 0 0 / 0.22)",
+        "purpose": "The manuscript leaf: a long, soft, low-opacity drop — a sheet held off the desk."
+      },
+      {
+        "name": "floating-tip",
+        "value": "0 10px 30px -12px oklch(0% 0 0 / 0.4)",
+        "purpose": "Hover/focus tooltips and the contributor popover."
+      },
+      {
+        "name": "pinned-panel",
+        "value": "0 18px 48px -16px oklch(0% 0 0 / 0.5)",
+        "purpose": "The clicked seal-detail panel — the most-lifted surface in the system."
+      },
+      {
+        "name": "carved-channel",
+        "value": "inset 0 1px 2px oklch(0% 0 0 / 0.07)",
+        "purpose": "The timeline track, recessed so accumulating ink reads as filling a groove."
+      },
+      {
+        "name": "pressed-seal",
+        "value": "0 1px 2px oklch(0% 0 0 / 0.18)",
+        "purpose": "Timeline markers and legend seals — a small stamp proud of the track."
+      }
+    ],
+    "motion": [
+      {
+        "name": "state-transition",
+        "value": "150ms ease",
+        "purpose": "Default for color/background state changes on buttons and controls."
+      },
+      {
+        "name": "transport-transition",
+        "value": "transition on width/left",
+        "purpose": "The timeline fill width and playhead position as the frame advances."
+      },
+      {
+        "name": "tooltip-fade",
+        "value": "opacity 100ms ease-out",
+        "purpose": "Reading-column affordance tooltips fade in instantly on hover."
+      },
+      {
+        "name": "caret-blink",
+        "value": "dr-caret-blink 1.1s ease-in-out infinite",
+        "purpose": "The writing nib's soft blink; frozen (not removed) under reduced-motion."
+      },
+      {
+        "name": "indeterminate-slide",
+        "value": "dr-indeterminate-slide 1.1s linear infinite",
+        "purpose": "The discovering-phase sweep; degrades to a full-track opacity pulse under reduced-motion."
+      }
+    ],
+    "breakpoints": [{ "name": "sm", "value": "640px" }]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The single filled action per view — revision indigo, white text. Used for the main affordance (e.g. Replay revisions).",
+      "html": "<button class=\"ds-btn-primary\" type=\"button\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M8 5v14l11-7z\"/></svg>Replay revisions</button>",
+      "css": ".ds-btn-primary { display:inline-flex; align-items:center; justify-content:center; gap:0.375rem; border:none; border-radius:0.375rem; padding:0.375rem 0.75rem; font-family:ui-sans-serif,system-ui,sans-serif; font-size:0.875rem; font-weight:500; line-height:1.25rem; color:#fff; background:oklch(54% 0.13 264); cursor:pointer; transition:background-color 0.15s ease; } .ds-btn-primary:hover { background:oklch(62% 0.11 264); } .ds-btn-primary:focus-visible { outline:none; box-shadow:0 0 0 2px oklch(98.5% 0.001 106), 0 0 0 4px oklch(70% 0.10 264); }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "The default non-primary action — leaf-white surface, hairline graphite border, ink text.",
+      "html": "<button class=\"ds-btn-secondary\" type=\"button\">About</button>",
+      "css": ".ds-btn-secondary { display:inline-flex; align-items:center; justify-content:center; gap:0.375rem; border:1px solid oklch(86.9% 0.005 56); border-radius:0.375rem; padding:0.375rem 0.75rem; font-family:ui-sans-serif,system-ui,sans-serif; font-size:0.875rem; font-weight:500; line-height:1.25rem; color:oklch(26.8% 0.007 34); background:#fff; cursor:pointer; transition:background-color 0.15s ease; } .ds-btn-secondary:hover { background:oklch(97% 0.001 106); } .ds-btn-secondary:focus-visible { outline:none; box-shadow:0 0 0 2px oklch(98.5% 0.001 106), 0 0 0 4px oklch(70% 0.10 264); }"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Low-emphasis / icon-adjacent action (back, dismiss) — transparent, graphite-muted text, soft stone wash on hover.",
+      "html": "<button class=\"ds-btn-ghost\" type=\"button\">← Back</button>",
+      "css": ".ds-btn-ghost { display:inline-flex; align-items:center; justify-content:center; gap:0.375rem; border:none; border-radius:0.375rem; padding:0.375rem 0.75rem; font-family:ui-sans-serif,system-ui,sans-serif; font-size:0.875rem; font-weight:500; line-height:1.25rem; color:oklch(37.4% 0.01 67); background:transparent; cursor:pointer; transition:background-color 0.15s ease; } .ds-btn-ghost:hover { background:oklch(92.3% 0.003 49 / 0.7); } .ds-btn-ghost:focus-visible { outline:none; box-shadow:0 0 0 2px oklch(98.5% 0.001 106), 0 0 0 4px oklch(70% 0.10 264); }"
+    },
+    {
+      "name": "Card / Panel",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "A resting surface on the paper — leaf-white, hairline border, barely-there shadow. Eyebrow + title + body.",
+      "html": "<div class=\"ds-card\"><p class=\"ds-eyebrow\">Revision 482</p><h3 class=\"ds-card-title\">Draft converges</h3><p class=\"ds-card-body\">Three contributors, 1,204 edits across 6 sessions — reconstructed entirely on this device.</p></div>",
+      "css": ".ds-card { border-radius:0.5rem; border:1px solid oklch(92.3% 0.003 49); background:#fff; padding:1rem; box-shadow:0 1px 2px oklch(0% 0 0 / 0.05); max-width:22rem; } .ds-eyebrow { margin:0 0 0.5rem; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:0.6875rem; text-transform:uppercase; letter-spacing:0.16em; color:oklch(55.3% 0.013 58); } .ds-card-title { margin:0 0 0.375rem; font-family:ui-serif,Georgia,Cambria,serif; font-size:1.25rem; font-weight:600; letter-spacing:-0.025em; color:oklch(21.6% 0.006 56); } .ds-card-body { margin:0; font-family:ui-sans-serif,system-ui,sans-serif; font-size:0.875rem; line-height:1.5; color:oklch(44.4% 0.011 73); }"
+    },
+    {
+      "name": "Revision Timeline",
+      "kind": "custom",
+      "refersTo": "tl-track",
+      "description": "The signature writing-activity stratum: a carved channel filled with an oklch ink-ramp, a standing-nib playhead, and marginalia seals you press to jump through time.",
+      "html": "<div class=\"ds-tl\"><div class=\"ds-tl-track\"><div class=\"ds-tl-fill\"></div><span class=\"ds-tl-seal\" style=\"left:30%\">§</span><span class=\"ds-tl-seal ds-tl-seal-strike\" style=\"left:76%\">⌄</span><span class=\"ds-tl-thumb\" style=\"left:62%\"></span></div></div>",
+      "css": ".ds-tl { padding:1.25rem 0.5rem; max-width:30rem; } .ds-tl-track { position:relative; height:0.625rem; width:100%; border-radius:9999px; background:oklch(92.3% 0.003 49); box-shadow:inset 0 1px 2px oklch(0% 0 0 / 0.07); } .ds-tl-fill { position:absolute; inset:0 38% 0 0; border-radius:9999px; background:linear-gradient(to right, oklch(70% 0.10 264), oklch(62% 0.11 264), oklch(54% 0.13 264)); } .ds-tl-thumb { position:absolute; top:50%; height:1.5rem; width:3px; transform:translate(-50%,-50%); border-radius:9999px; background:oklch(54% 0.13 264); box-shadow:0 1px 3px oklch(54% 0.13 264 / 0.45); outline:2px solid #fff; } .ds-tl-seal { position:absolute; top:50%; display:grid; place-items:center; width:1rem; height:1rem; transform:translate(-50%,-50%); border-radius:9999px; border:1px solid oklch(54% 0.13 264); background:#fff; color:oklch(54% 0.13 264); font-size:12px; line-height:1; box-shadow:0 1px 2px oklch(0% 0 0 / 0.18); cursor:pointer; transition:transform 0.15s ease; } .ds-tl-seal:hover { transform:translate(-50%,-50%) scale(1.1); } .ds-tl-seal-strike { border-color:oklch(55% 0.16 35); color:oklch(55% 0.16 35); }"
+    },
+    {
+      "name": "Reconstruction Runs",
+      "kind": "custom",
+      "refersTo": "doc-column",
+      "description": "How the document column renders revision state: accepted text, suggested insert (green + dotted underline + sr-only label), marked-for-deletion (vermilion + strike), and an opaque-structure chip. Color is never the sole signal.",
+      "html": "<p class=\"ds-reading\">The committee <span class=\"ds-doc-suggest\">approved the revised</span> <span class=\"ds-doc-strike\">draft</span> proposal <span class=\"ds-doc-opaque\">▤ table</span> before recess.</p>",
+      "css": ".ds-reading { max-width:42rem; margin:0; font-family:ui-serif,Georgia,Cambria,serif; font-size:1.0625rem; line-height:1.8; color:oklch(21.6% 0.006 56); } .ds-doc-suggest { border-radius:0.125rem; background:oklch(95% 0.03 165); color:oklch(52% 0.12 165); text-decoration:underline dotted oklch(52% 0.12 165); text-underline-offset:2px; } .ds-doc-strike { border-radius:0.125rem; background:oklch(95% 0.03 35); color:oklch(55% 0.16 35); text-decoration:line-through; text-decoration-color:oklch(55% 0.16 35); } .ds-doc-opaque { display:inline-flex; align-items:center; gap:0.25rem; margin:0 0.125rem; border-radius:0.25rem; border:1px solid oklch(86.9% 0.005 56); background:oklch(97% 0.001 106); padding:0.125rem 0.375rem; font-family:ui-sans-serif,system-ui,sans-serif; font-size:0.75rem; color:oklch(44.4% 0.011 73); vertical-align:baseline; }"
+    },
+    {
+      "name": "Contributor Chip",
+      "kind": "chip",
+      "refersTo": "author-chip",
+      "description": "An interactive contributor chip with the collaborator's Google-assigned color as a small ringed dot; hover/focus reveals a content-free detail card.",
+      "html": "<button class=\"ds-author-chip\" type=\"button\"><span class=\"ds-author-dot\" style=\"background:oklch(62% 0.17 25)\"></span>A. Marquez</button>",
+      "css": ".ds-author-chip { display:inline-flex; align-items:center; gap:0.375rem; border:1px solid oklch(86.9% 0.005 56); border-radius:0.25rem; background:transparent; padding:0.125rem 0.5rem; font-family:ui-sans-serif,system-ui,sans-serif; font-size:0.75rem; color:oklch(44.4% 0.011 73); cursor:pointer; transition:background-color 0.15s ease, color 0.15s ease; } .ds-author-chip:hover { background:oklch(97% 0.001 106); color:oklch(26.8% 0.007 34); } .ds-author-chip:focus-visible { outline:none; box-shadow:0 0 0 2px oklch(70% 0.10 264); } .ds-author-dot { width:0.5rem; height:0.5rem; flex-shrink:0; border-radius:9999px; border:1px solid oklch(0% 0 0 / 0.1); }"
+    },
+    {
+      "name": "Privacy Banner",
+      "kind": "custom",
+      "refersTo": "banner-note",
+      "description": "A collapsed-by-default disclosure on a calm stone surface — orientation, not a hazard. No alarming hue or colored side-stripe; the chevron rotates on open as the non-color affordance.",
+      "html": "<details class=\"ds-banner\"><summary class=\"ds-banner-summary\"><svg class=\"ds-banner-chevron\" width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\"><path d=\"M9 18l6-6-6-6\"/></svg>What am I looking at?</summary><div class=\"ds-banner-body\">DocRewind reconstructed this history on your machine. Nothing was uploaded, and no account was used.</div></details>",
+      "css": ".ds-banner { overflow:hidden; border-radius:0.375rem; border:1px solid oklch(92.3% 0.003 49); background:oklch(98.5% 0.001 106); font-family:ui-sans-serif,system-ui,sans-serif; font-size:0.875rem; max-width:26rem; } .ds-banner-summary { display:flex; align-items:center; gap:0.5rem; list-style:none; cursor:pointer; padding:0.5rem 0.75rem; font-weight:500; color:oklch(44.4% 0.011 73); transition:color 0.15s ease; } .ds-banner-summary::-webkit-details-marker { display:none; } .ds-banner-summary:hover { color:oklch(21.6% 0.006 56); } .ds-banner-chevron { flex-shrink:0; color:oklch(70.9% 0.01 56); transition:transform 0.2s ease; } .ds-banner[open] .ds-banner-chevron { transform:rotate(90deg); } .ds-banner-body { padding:0.125rem 0.75rem 0.75rem; line-height:1.5; color:oklch(44.4% 0.011 73); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Manuscript and Its Margin",
+    "overview": "DocRewind looks like an archival sheet under raking light, with a working margin running down its spine. The page is cool, near-neutral paper; the document sits on an elevated leaf with a ruled binding margin; and the revision timeline reads as marginalia — small paper seals pressed into the margin of the record, each a mark you can press to jump through time. The personality is approachable, calm, and trustworthy: an everyday utility, not a specialist instrument. The archival calm is in service of approachability — it keeps the chrome quiet so the document and its evolution stay center stage. The tool is meant to disappear into the reading.",
+    "keyCharacteristics": [
+      "Cool archival paper (near-neutral stone), not warm cream — and a full first-class dark theme.",
+      "Serif for the document and titles; system sans for UI; mono for data, eyebrows, and revision ids.",
+      "One accent — revision indigo — for 'now,' primary actions, and focus, never decoration.",
+      "Meaning is never carried by color alone; every state pairs a hue with a glyph, underline, strike, or label.",
+      "The manuscript leaf and floating cards lift; everything else stays tonal and flat.",
+      "Motion conveys state only and fully degrades under reduced-motion."
+    ],
+    "rules": [
+      {
+        "name": "The One-Indigo Rule",
+        "body": "Revision indigo means 'now' and 'primary action' — nothing else. It is never used to decorate, fill a background, or color a heading. Its scarcity is what makes the playhead and the active control instantly findable.",
+        "section": "colors"
+      },
+      {
+        "name": "The Cool-Paper Rule",
+        "body": "The page is cool, near-neutral stone. Warming it toward cream, sand, ivory, or beige is forbidden — that warm near-white is the generic-AI tell this system was built to avoid.",
+        "section": "colors"
+      },
+      {
+        "name": "The Never-Color-Alone Rule",
+        "body": "Every meaning-bearing hue (indigo, green, vermilion, amber) is always paired with a non-color affordance — a glyph, underline, strike, ringed seal, or sr-only label — so meaning survives grayscale and color-vision differences.",
+        "section": "colors"
+      },
+      {
+        "name": "The Three-Voice Rule",
+        "body": "Serif = the record. Sans = the controls. Mono = the figures. A label in serif, body copy in mono, or a revision id in sans is wrong. Keep each voice in its lane.",
+        "section": "typography"
+      },
+      {
+        "name": "The Honest-Figures Rule",
+        "body": "Every number that changes (percent, count, revision id, timestamp) is mono + tabular-nums, so it holds its column and never jitters as it climbs.",
+        "section": "typography"
+      },
+      {
+        "name": "The Earned-Lift Rule",
+        "body": "A drop shadow means 'this floats above the page.' Only the leaf and genuinely floating overlays (tips, popovers, pinned panels) earn one. Cards and panels stay tonal.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do keep the page cool, near-neutral paper (cool-paper oklch(98.5% 0.001 106)). Carry any warmth through accent and type, never the body background.",
+      "Do reserve revision indigo for 'now,' the single primary action, and focus rings. One filled button per view.",
+      "Do pair every meaning-bearing color with a non-color affordance — glyph, underline, strike, ringed seal, or sr-only label. Test every state in grayscale.",
+      "Do keep the three type voices in their lanes: serif for the document and titles, system sans for UI, mono + tabular-nums for every figure.",
+      "Do spend drop shadows only on the leaf and genuinely floating overlays; let tonal stone layering carry the rest.",
+      "Do ship every interactive element with default, hover, focus-visible, active, and disabled states, and a visible 2px revision-indigo-ring focus ring.",
+      "Do provide a prefers-reduced-motion alternative for every animation (freeze the caret, pulse the indeterminate bar, drop transitions).",
+      "Do prefer native form controls and standard affordances; the tool should feel familiar and recede."
+    ],
+    "donts": [
+      "Don't drift the paper toward cream, sand, ivory, or beige — that warm AI-default near-white is the exact aesthetic this system rejects.",
+      "Don't build a surveillance / analytics dashboard look: no KPI tiles, no charts-as-decoration, no telemetry sheen.",
+      "Don't import flashy consumer-SaaS patterns: no gradient hero banners, no hero-metric template, no marketing polish.",
+      "Don't let reconstruction states read as accusatory. Show process neutrally; never score, flag, or editorialize.",
+      "Don't use gradient text (background-clip: text) anywhere. The only sanctioned gradients are the timeline's oklch ink-ramp and the near-flat paper wash.",
+      "Don't use a colored side-stripe (border-left/right > 1px) on cards, banners, or alerts. Full hairline borders or tonal tints only.",
+      "Don't use glassmorphism / decorative blur, or reach for a heavy shadow to fake hierarchy that tonal layering should carry.",
+      "Don't let a second accent compete with revision indigo, or use any meaning-bearing hue as decoration."
+    ]
+  }
+}

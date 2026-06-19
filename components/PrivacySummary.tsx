@@ -8,11 +8,13 @@ import { strings } from "@/lib/i18n/strings";
 
 const PrivacySummary: Component = () => {
   return (
-    <section class="dr-card" aria-labelledby="dr-privacy-heading">
-      <h2 id="dr-privacy-heading" class="mb-1 font-medium">
+    <section class="dr-section" aria-labelledby="dr-privacy-heading">
+      <h2 id="dr-privacy-heading" class="dr-section-title">
         {strings.options.privacyHeading}
       </h2>
-      <p class="text-sm text-stone-700 dark:text-stone-300">{strings.options.privacyBody}</p>
+      <p class="max-w-[68ch] text-sm leading-relaxed text-stone-700 dark:text-stone-300">
+        {strings.options.privacyBody}
+      </p>
     </section>
   );
 };

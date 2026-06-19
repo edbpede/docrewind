@@ -86,6 +86,9 @@ export const strings = {
     suggestedInsert: "Suggested insertion",
     markedForDeletion: "Marked for deletion",
     empty: "Nothing has been written yet at this point.",
+    // The folio at the foot of the manuscript leaf names what the page is — a
+    // reconstruction, never the live document — reinforcing the honesty principle.
+    folioLabel: "Reconstruction",
     // Authorship attribution: the off-screen description linked (via aria-describedby)
     // to every segment highlighted while a contributor is foregrounded. Combined with
     // the author's display name by `contributedBy` so assistive tech announces who
@@ -99,7 +102,14 @@ export const strings = {
     cancel: "Cancel",
   },
   insights: {
-    heading: "Insights",
+    // The closing record of the page. Named "Colophon" — a manuscript's printed note
+    // on how it was made — not "Insights"/"Analytics": this is an editorial record, never
+    // a dashboard (DESIGN.md anti-reference: no KPI tiles, no telemetry sheen).
+    heading: "Colophon",
+    contributorsLabel: "Contributors",
+    // Legacy stat-tile labels — retained as part of the catalog (and pinned by the i18n
+    // shape test) though the colophon now weaves these figures into prose via
+    // `colophonSummary`, suppressing any zero-valued count rather than tiling it.
     sessions: "Editing sessions",
     largeEdits: "Large edits",
     pauses: "Pauses",
@@ -118,6 +128,7 @@ export const strings = {
   },
   options: {
     title: "DocRewind settings",
+    eyebrow: "Settings & privacy",
     privacyHeading: "Privacy",
     privacyBody:
       "DocRewind is local-first. It reads a document's revision history only when you " +
@@ -243,6 +254,50 @@ export function formatDuration(ms: number): string {
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
   return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}m`;
+}
+
+/** Content-free tallies the colophon line is assembled from (metadata only). */
+export interface ColophonRecord {
+  readonly revisions: number;
+  readonly sessions: number;
+  readonly largeEdits: number;
+  readonly pauses: number;
+  /** Total span of the revision timestamps in ms, or null when unknown. */
+  readonly durationMs: number | null;
+}
+
+/**
+ * The colophon line — a manuscript's printed "record of the making", rendered as one
+ * neutral sentence assembled from the timeline tallies. Counts and timing only, never
+ * document text, never a judgement (Design Principle 2: show the process, never judge
+ * it). Zero-valued marginalia (large edits, pauses) are OMITTED — the record never reads
+ * "0 large edits" — so it stays an editorial note, not the KPI readout the brand rejects.
+ */
+export function colophonSummary(record: ColophonRecord): string {
+  const plural = (n: number, one: string, many: string): string => (n === 1 ? one : many);
+  const rev = `${record.revisions.toLocaleString()} ${plural(record.revisions, "revision", "revisions")}`;
+
+  let lead = `Reconstructed from ${rev}`;
+  if (record.sessions === 1) {
+    lead += " in a single editing session";
+  } else if (record.sessions > 1) {
+    lead += ` across ${record.sessions.toLocaleString()} editing sessions`;
+  }
+  if (record.durationMs !== null && record.durationMs > 0) {
+    lead += `, written over ${formatDuration(record.durationMs)}`;
+  }
+  lead += ".";
+
+  const notes: string[] = [];
+  if (record.largeEdits > 0) {
+    notes.push(
+      `${record.largeEdits.toLocaleString()} large ${plural(record.largeEdits, "edit", "edits")}`,
+    );
+  }
+  if (record.pauses > 0) {
+    notes.push(`${record.pauses.toLocaleString()} ${plural(record.pauses, "pause", "pauses")}`);
+  }
+  return notes.length === 0 ? lead : `${lead} The margin notes ${notes.join(" and ")}.`;
 }
 
 // ── Timeline-marker detail lines (content-free hover/focus data) ──────────────

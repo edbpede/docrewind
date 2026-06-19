@@ -188,16 +188,19 @@ const OptionsApp: Component = () => {
 
   return (
     <div class="dr-page">
-      <main class="mx-auto flex max-w-2xl flex-col gap-4 p-6">
-        <div class="flex items-center gap-3">
-          <BrandMark size={36} />
-          <h1 class="text-xl font-semibold">{strings.options.title}</h1>
-        </div>
+      <main class="mx-auto flex max-w-2xl flex-col p-6 sm:p-8">
+        <header class="flex items-center gap-3 pb-6">
+          <BrandMark size={40} />
+          <div class="flex flex-col gap-1">
+            <p class="dr-eyebrow">{strings.options.eyebrow}</p>
+            <h1 class="dr-title">{strings.options.title}</h1>
+          </div>
+        </header>
 
         <PrivacySummary />
 
-        <section class="dr-card flex flex-col gap-3" aria-labelledby="dr-prefs-heading">
-          <h2 id="dr-prefs-heading" class="font-medium">
+        <section class="dr-section" aria-labelledby="dr-prefs-heading">
+          <h2 id="dr-prefs-heading" class="dr-section-title">
             {strings.options.settingsHeading}
           </h2>
 
@@ -261,7 +264,7 @@ const OptionsApp: Component = () => {
 
         <Show when={maintenanceStatus()}>
           {(status) => (
-            <p class="dr-card text-sm text-stone-700 dark:text-stone-300" role="status">
+            <p class="dr-note mt-4" role="status">
               {status() === "failed"
                 ? strings.options.maintenanceFailed
                 : strings.options.maintenancePending}

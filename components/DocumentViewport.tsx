@@ -63,6 +63,11 @@ export interface DocumentViewportProps {
   readonly highlight?: DocumentHighlight | null;
   /** Map from a revision id to its author's opaque key. Joins segments to authors. */
   readonly authorKeyByRevision?: ReadonlyMap<number, string>;
+  /**
+   * The frame's archival dateline, rendered in the leaf folio. Omit/empty to hide the
+   * folio (e.g. the blank page at index 0, which carries no date). Metadata only.
+   */
+  readonly folio?: string;
 }
 
 // The author hue when a contributor carried no assigned colour (the self-resolution
@@ -154,7 +159,9 @@ const DocumentViewport: Component<DocumentViewportProps> = (props) => {
       <Show
         when={props.segments.length > 0}
         fallback={
-          <p class="doc-column italic text-stone-500 dark:text-stone-400">
+          // The blank page: a quiet note resting in the centre of the sheet, so
+          // scrubbing back to the start reads as an empty manuscript, not a void.
+          <p class="m-auto max-w-[44ch] text-center font-serif text-[1.0625rem] italic leading-[1.8] text-stone-500 dark:text-stone-400">
             {strings.viewport.empty}
           </p>
         }
@@ -257,6 +264,17 @@ const DocumentViewport: Component<DocumentViewportProps> = (props) => {
             }}
           </Index>
         </article>
+      </Show>
+      {/* The folio: the frame's archival dateline at the foot of the leaf, with the
+          honesty-principle label at the spine. Shown only when the frame carries a
+          resolvable date — the blank page at index 0 has none, so the folio is hidden. */}
+      <Show when={props.folio}>
+        {(folio) => (
+          <footer class="dr-folio">
+            <span class="dr-eyebrow">{strings.viewport.folioLabel}</span>
+            <span class="dr-dateline">{folio()}</span>
+          </footer>
+        )}
       </Show>
     </section>
   );

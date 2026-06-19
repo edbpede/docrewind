@@ -72,8 +72,8 @@ const PopupApp: Component = () => {
             <>
               <header class="flex items-center gap-3">
                 <BrandMark size={36} />
-                <div class="flex min-w-0 flex-col">
-                  <span class="truncate text-base font-semibold leading-tight">
+                <div class="flex min-w-0 flex-col gap-0.5">
+                  <span class="truncate font-serif text-lg font-semibold leading-tight">
                     {strings.app.brandName}
                   </span>
                   <span class="dr-eyebrow">{strings.app.mastheadEyebrow}</span>
@@ -119,7 +119,7 @@ const PopupApp: Component = () => {
 
           <div class="flex flex-col items-center gap-1.5 py-1 text-center">
             <BrandMark size={44} label={strings.app.brandName} />
-            <span class="text-base font-semibold">{strings.app.brandName}</span>
+            <span class="font-serif text-lg font-semibold">{strings.app.brandName}</span>
             <span class="text-xs text-stone-500 dark:text-stone-400">{popup.tagline}</span>
           </div>
 

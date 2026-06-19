@@ -26,11 +26,11 @@ const DiagnosticsPreferences: Component = () => {
   }
 
   return (
-    <section class="dr-card" aria-labelledby="dr-diagnostics-heading">
-      <h2 id="dr-diagnostics-heading" class="mb-1 font-medium">
+    <section class="dr-section" aria-labelledby="dr-diagnostics-heading">
+      <h2 id="dr-diagnostics-heading" class="dr-section-title">
         {strings.options.diagnosticsHeading}
       </h2>
-      <p class="mb-2 text-sm text-stone-700 dark:text-stone-300">
+      <p class="max-w-[68ch] text-sm leading-relaxed text-stone-700 dark:text-stone-300">
         {strings.options.diagnosticsBody}
       </p>
       <fieldset class="m-0 inline-flex gap-1 border-0 p-0">

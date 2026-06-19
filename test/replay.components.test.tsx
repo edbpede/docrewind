@@ -238,7 +238,7 @@ describe("replay UI components", () => {
     expect(container.querySelector("ul")).toBeNull();
   });
 
-  it("shows replay duration and attribution caveat", () => {
+  it("renders the colophon record and attribution caveat", () => {
     render(() => (
       <SummaryInsights
         revisions={[
@@ -250,8 +250,11 @@ describe("replay UI components", () => {
       />
     ));
 
-    expect(screen.getByText("Replay duration")).toBeTruthy();
-    expect(screen.getByText("1m")).toBeTruthy();
+    // The colophon weaves the figures into one neutral sentence (no KPI tiles); the
+    // duration rides inside the prose and zero-valued marginalia (large edits, pauses)
+    // are omitted rather than tiled as "0".
+    expect(screen.getByText("Reconstructed from 2 revisions, written over 1m.")).toBeTruthy();
+    expect(screen.getByText("Contributors")).toBeTruthy();
     // Unresolved authors degrade to opaque labels, never the raw token.
     expect(screen.getByText("Author 1")).toBeTruthy();
     expect(screen.getByText("Attribution may be incomplete.")).toBeTruthy();

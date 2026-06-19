@@ -859,7 +859,7 @@ const ReplaySurface: Component<{
             <Suspense fallback={renderProgress()}>
               <Show when={loaded()} fallback={renderProgress()}>
                 {(data) => (
-                  <main class="mx-auto flex max-w-3xl flex-col gap-5 p-6 sm:p-8">
+                  <main class="mx-auto flex max-w-3xl flex-col gap-6 p-6 sm:gap-7 sm:p-8">
                     <header class="dr-masthead">
                       <div class="flex items-center gap-3">
                         <BrandMark size={40} />
@@ -885,12 +885,10 @@ const ReplaySurface: Component<{
                         onSpeed={(value) => setSpeed(value)}
                       />
                       <div class="flex flex-col gap-1.5">
-                        <div class="flex items-baseline justify-between gap-3">
-                          <span class="dr-counter">{revisionOf(currentIndex(), maxIndex())}</span>
-                          <Show when={dateline()}>
-                            {(when) => <span class="dr-dateline">{when()}</span>}
-                          </Show>
-                        </div>
+                        {/* The frame's revision counter rides above the scrubber; the
+                            archival dateline now lives in the leaf folio below, so this
+                            row stays a single quiet ledger figure. */}
+                        <span class="dr-counter">{revisionOf(currentIndex(), maxIndex())}</span>
                         <Timeline
                           currentIndex={currentIndex()}
                           max={maxIndex()}
@@ -910,6 +908,7 @@ const ReplaySurface: Component<{
                       caret={caret()}
                       highlight={highlight()}
                       authorKeyByRevision={authorKeyByRevision()}
+                      folio={dateline()}
                     />
 
                     {/* The colophon: content-free insights close the record. Foregrounding

@@ -1,0 +1,69 @@
+/* SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Self-hosted typefaces — the manuscript's three voices, bundled as local woff2.
+ *
+ * PRIVACY: these files ship inside the extension (public/fonts/ → /fonts/) and are
+ * fetched from the extension origin only. This stylesheet is imported ONLY by the
+ * three extension PAGE entries (replay/popup/options main.tsx) — never by the
+ * docs.google.com content script — so no @font-face request can ever resolve
+ * against, or leak to, the document origin. Every uno `theme.font` stack keeps its
+ * system fallback, so the (font-face-less) content-script affordance degrades to
+ * native fonts with zero extra requests.
+ *
+ * Voices (see DESIGN.md §3, "The Three-Voice Rule"):
+ *   • Literata     — serif: the record (document column + titles). Variable 200–900,
+ *                    upright + italic. A literary reading face: calm, archival, warm.
+ *   • IBM Plex Sans — sans: the controls. Variable; recedes, native-feeling, consistent
+ *                    across OSes (the reason to bundle rather than ride system-ui), and
+ *                    shares the Plex superfamily's engineered tone with the mono below.
+ *   • IBM Plex Mono — mono: the figures. 400/500/600; tabular, typewriter-archival —
+ *                    suits revision ids, datelines, and the marginalia eyebrows.
+ *
+ * `font-display: swap` paints the fallback immediately and swaps when the (local,
+ * instant) face is ready — no invisible-text flash.
+ */
+
+@font-face {
+  font-family: "Literata";
+  font-style: normal;
+  font-weight: 200 900;
+  font-display: swap;
+  src: url("/fonts/literata-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Literata";
+  font-style: italic;
+  font-weight: 200 900;
+  font-display: swap;
+  src: url("/fonts/literata-italic.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 100 700;
+  font-display: swap;
+  src: url("/fonts/plexsans-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/plexmono-400.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/fonts/plexmono-500.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/plexmono-600.woff2") format("woff2");
+}
