@@ -34,10 +34,16 @@ import {
   parseTilesHovercardIds,
   parseTilesParams,
   parseUserMap,
+  type TilesParams,
 } from "@/lib/identity/resolve";
 import { onMessage } from "@/lib/messaging";
 import type { RevisionRangeDiscovery } from "@/lib/protocol/discovery";
-import { buildRevisionsLoadUrl, buildRevisionsTilesUrl } from "@/lib/protocol/endpoints";
+import {
+  buildDocBootstrapUrl,
+  buildRevisionsLoadUrl,
+  buildRevisionsTilesUrl,
+  IDENTITY_BOOTSTRAP_SURFACES,
+} from "@/lib/protocol/endpoints";
 import { parseFramed } from "@/lib/protocol/framing";
 import { fail, ok, type Result, type RetrievalError, retrievalError } from "@/lib/retrieval/errors";
 import { type CancellationToken, runRetrieval } from "@/lib/retrieval/orchestrator";
@@ -243,13 +249,6 @@ export default defineBackground(() => {
   const FETCH_TIMEOUT_MS = 30_000;
   const pause = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-  // The editor bootstrap URL, multi-account `/document/u/{N}/d/`-aware (A.5). Discovery
-  // reads the published `"revision":N` count from this page.
-  const buildEditUrl = (docId: DocId, userIndex: number | null): string => {
-    const userSegment = userIndex !== null ? `/u/${userIndex}` : "";
-    return `${DOCS_ORIGIN}/document${userSegment}/d/${docId}/edit`;
-  };
-
   // The sharing-ACL document URL (A.5 multi-account aware). A same-origin, credentialed
   // GET that returns the full ACL — including collaborator `emailAddress` — but ONLY when
   // the viewer can manage sharing; readers get a reduced/empty ACL, so the email join
@@ -301,14 +300,30 @@ export default defineBackground(() => {
       return;
     }
     try {
-      const editResponse = await fetch(buildEditUrl(docId, userIndex), {
-        credentials: "include",
-        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-      });
-      if (!editResponse.ok) {
-        return;
+      // The tiles credentials (`token`+`ouid`) ride in the `info_params` bootstrap of any doc
+      // page surface. `/edit` is the common case (one fetch, unchanged), but it can be access-
+      // blocked for a turned-in Classroom submission the educator was granted only via the
+      // grading context — so fall back to `/grading`, then `/view`, until one resolves. A surface
+      // that 4xx's or carries no token is skipped; only a normal doc's first `/edit` is fetched.
+      let params: TilesParams | null = null;
+      for (const surface of IDENTITY_BOOTSTRAP_SURFACES) {
+        let response: Response;
+        try {
+          response = await fetch(buildDocBootstrapUrl(docId, userIndex, surface), {
+            credentials: "include",
+            signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+          });
+        } catch {
+          continue; // transport error on this surface — try the next.
+        }
+        if (!response.ok) {
+          continue;
+        }
+        params = parseTilesParams(await response.text());
+        if (params !== null) {
+          break;
+        }
       }
-      const params = parseTilesParams(await editResponse.text());
       if (params === null) {
         return;
       }
@@ -448,7 +463,7 @@ export default defineBackground(() => {
     async discoverUpperBound(docId: DocId): Promise<RevisionId> {
       // Primary: bootstrap metadata.
       try {
-        const response = await fetch(buildEditUrl(docId, userIndex), {
+        const response = await fetch(buildDocBootstrapUrl(docId, userIndex, "edit"), {
           credentials: "include",
           signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
         });

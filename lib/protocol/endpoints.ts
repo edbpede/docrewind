@@ -77,6 +77,50 @@ export function buildRevisionsTilesUrl(params: RevisionsTilesParams): string {
   return `${DOCS_ORIGIN}/document${userSegment}/d/${params.docId}/revisions/tiles?${query.toString()}`;
 }
 
+/**
+ * A Google Docs page surface that embeds the `"info_params":{token,ouid}` bootstrap the
+ * `revisions/tiles` harvest needs. The three differ ONLY in the access they require, so the
+ * harvest can fall back across them when a credentialed read of one is blocked:
+ *   • `edit`    — the editor bootstrap (the default; an author reading their own doc).
+ *   • `grading` — the surface Google Classroom authorizes an educator to read a *turned-in*
+ *                 student submission through. A direct `/edit` can be access-blocked for such a
+ *                 doc (the educator was granted access via the grading context, not as an editor),
+ *                 yet `/grading` — and `revisions/load`/`revisions/tiles` — still resolve.
+ *   • `view`    — the read-only viewer bootstrap (a commenter/viewer grant).
+ * All three were LIVE-CONFIRMED 2026-06-19 to carry both `token` and `ouid` for the same doc.
+ */
+export type DocBootstrapSurface = "edit" | "grading" | "view";
+
+/**
+ * Ordered identity-token sources for the tiles harvest: try `edit` first (the common case — one
+ * fetch, behaviour unchanged), then the access-aligned fallbacks. A surface that 4xx's or yields
+ * no token is skipped to the next; the first that yields `info_params` wins. Ordered so a normal
+ * doc never incurs a second request.
+ */
+export const IDENTITY_BOOTSTRAP_SURFACES: readonly DocBootstrapSurface[] = [
+  "edit",
+  "grading",
+  "view",
+];
+
+/**
+ * Build a Google Docs page URL for one bootstrap-bearing {@link DocBootstrapSurface}
+ * (A.5 multi-account aware — the `/document/u/{N}/d/` slot is included when `userIndex` is set).
+ * Used by discovery (reads `"revision":N` off `/edit`) and the identity harvest (reads the
+ * `info_params` token+ouid, falling back across surfaces — see {@link IDENTITY_BOOTSTRAP_SURFACES}).
+ */
+export function buildDocBootstrapUrl(
+  docId: DocId,
+  userIndex: number | null,
+  surface: DocBootstrapSurface,
+): string {
+  if (userIndex !== null && (!Number.isInteger(userIndex) || userIndex < 0)) {
+    throw new TypeError("buildDocBootstrapUrl: userIndex must be a non-negative integer or null");
+  }
+  const userSegment = userIndex !== null ? `/u/${userIndex}` : "";
+  return `${DOCS_ORIGIN}/document${userSegment}/d/${docId}/${surface}`;
+}
+
 // Extracts the multi-account slot from a `/document/u/{N}/d/` path segment (A.5).
 const USER_INDEX_PATTERN = /\/document\/u\/(\d+)\/d\//;
 

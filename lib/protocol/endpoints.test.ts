@@ -1,7 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { describe, expect, test } from "bun:test";
 import { asDocId, asRevisionId } from "../domain/ids";
-import { buildRevisionsLoadUrl, buildRevisionsTilesUrl, detectUserIndex } from "./endpoints";
+import {
+  buildDocBootstrapUrl,
+  buildRevisionsLoadUrl,
+  buildRevisionsTilesUrl,
+  detectUserIndex,
+  IDENTITY_BOOTSTRAP_SURFACES,
+} from "./endpoints";
 
 describe("buildRevisionsLoadUrl", () => {
   test("builds the single-account revisions/load URL", () => {
@@ -81,6 +87,38 @@ describe("buildRevisionsTilesUrl", () => {
         ouid: "999",
       }),
     ).toThrow(TypeError);
+  });
+});
+
+describe("buildDocBootstrapUrl", () => {
+  test("builds the single-account URL for each bootstrap surface", () => {
+    expect(buildDocBootstrapUrl(asDocId("doc_123"), null, "edit")).toBe(
+      "https://docs.google.com/document/d/doc_123/edit",
+    );
+    expect(buildDocBootstrapUrl(asDocId("doc_123"), null, "grading")).toBe(
+      "https://docs.google.com/document/d/doc_123/grading",
+    );
+    expect(buildDocBootstrapUrl(asDocId("doc_123"), null, "view")).toBe(
+      "https://docs.google.com/document/d/doc_123/view",
+    );
+  });
+
+  test("puts /u/{N} after /document for a multi-account slot", () => {
+    expect(buildDocBootstrapUrl(asDocId("doc_123"), 2, "grading")).toBe(
+      "https://docs.google.com/document/u/2/d/doc_123/grading",
+    );
+  });
+
+  test("rejects invalid userIndex values", () => {
+    expect(() => buildDocBootstrapUrl(asDocId("doc_123"), -1, "edit")).toThrow(TypeError);
+    expect(() => buildDocBootstrapUrl(asDocId("doc_123"), 1.5, "edit")).toThrow(TypeError);
+  });
+
+  test("the harvest tries /edit first so a normal doc never incurs a second fetch", () => {
+    // The identity harvest stops at the first surface that yields a token; ordering it edit-first
+    // keeps the common case to a single request, with grading/view as access-aligned fallbacks.
+    expect(IDENTITY_BOOTSTRAP_SURFACES[0]).toBe("edit");
+    expect([...IDENTITY_BOOTSTRAP_SURFACES]).toEqual(["edit", "grading", "view"]);
   });
 });
 
