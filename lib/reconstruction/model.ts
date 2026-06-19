@@ -13,7 +13,7 @@
 
 import type { OpaqueStructure } from "../decoder/types";
 import type { RevisionId } from "../domain/ids";
-import { unsafeAsRevisionId } from "../domain/ids";
+import { PRE_HISTORY_REVISION } from "../domain/ids";
 
 /** Suggestion lifecycle of an element (R6: a required field, never a boolean). */
 export type SuggestionState = "none" | "suggested-insert" | "marked-for-deletion";
@@ -49,15 +49,17 @@ export interface DocumentModel {
   chars: CharElement[];
 }
 
-// The EndOfBody sentinel pre-exists any real revision; revision 0 is a synthetic
-// pre-history id (asRevisionId would reject 0, so the blind cast is used). It is
-// never rendered as text and never tombstoned.
-const PRE_HISTORY: RevisionId = unsafeAsRevisionId(0);
+// The EndOfBody sentinel pre-exists any real revision; it carries the synthetic
+// pre-history id (0). The same id marks base/template content seeded from a
+// `chunkedSnapshot` (content that predates the fetched changelog window): it
+// renders as accepted text and is never attributed to a real author (no caret,
+// no highlight), since no fetched revision created it.
+export const BASE_REVISION: RevisionId = PRE_HISTORY_REVISION;
 
 function createBodyBoundary(): BodyBoundary {
   return {
     kind: "eob",
-    insertRevision: PRE_HISTORY,
+    insertRevision: BASE_REVISION,
     deleteRevision: null,
     suggestionState: "none",
   };

@@ -104,6 +104,45 @@ describe("apply — mlti recursion + opaque slots", () => {
   });
 });
 
+describe("apply — rplc replace-with-snapshot (pre-existing/template content)", () => {
+  test("rplc seeds the embedded content; a later insert aligns to the seeded positions", () => {
+    const model = replayAll(
+      changelog([
+        // Revision 1 loads a 4-char template ("Q1. ") via the bulk replace op.
+        { ty: "rplc", snapshot: [{ ty: "is", s: "Q1. ", ibi: 1 }], revision_id: 1 },
+        // Revision 2 types after it — ibi=5 is the live position just past "Q1. ".
+        { ty: "is", s: "answer", ibi: 5, revision_id: 2 },
+      ]),
+    );
+    // [x:hand-derived] the seeded base is present, so the rev-2 insert lands after
+    // it -> "Q1. answer". Dropping the rplc (old UnknownOp path) would seed nothing
+    // and the rev-2 ibi=5 would land in an empty doc — the reported misalignment.
+    expect(currentText(model)).toBe("Q1. answer");
+  });
+
+  test("rplc resets the document (replaces any prior content)", () => {
+    const model = replayAll(
+      changelog([
+        { ty: "is", s: "old text", ibi: 1, revision_id: 1 },
+        { ty: "rplc", snapshot: [{ ty: "is", s: "fresh", ibi: 1 }], revision_id: 2 },
+      ]),
+    );
+    // [x:hand-derived] rplc clears the body then applies its snapshot -> "fresh".
+    expect(currentText(model)).toBe("fresh");
+  });
+
+  test("rplc-seeded content time-travels under the replace revision id", () => {
+    const model = replayAll(
+      changelog([
+        { ty: "rplc", snapshot: [{ ty: "is", s: "Tpl", ibi: 1 }], revision_id: 1 },
+        { ty: "is", s: "!", ibi: 4, revision_id: 2 },
+      ]),
+    );
+    expect(stateAt(model, 1)).toBe("Tpl"); // template present at its load revision
+    expect(stateAt(model, 2)).toBe("Tpl!"); // the rev-2 edit appears after
+  });
+});
+
 describe("text — tombstone time-travel (stateAt)", () => {
   const model = replayAll(
     changelog([

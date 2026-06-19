@@ -17,7 +17,7 @@ import type { OpaqueStructure, Operation } from "../decoder/types";
 import type { RevisionId } from "../domain/ids";
 import type { DecodedRevision } from "../domain/model";
 import type { CharElement, DocumentModel, SuggestionState, TextChar } from "./model";
-import { isEndOfBody } from "./model";
+import { createModel, isEndOfBody } from "./model";
 
 /** Physical index of the `livePos`-th (1-indexed) live element, or end-of-array. */
 function physicalIndexOfLivePosition(chars: readonly CharElement[], livePos: number): number {
@@ -147,6 +147,21 @@ export function applyOperation(model: DocumentModel, op: Operation, revisionId: 
     }
     case "usfd": {
       markRange(model.chars, op.si, op.ei, "none");
+      break;
+    }
+    case "rplc": {
+      // Bulk replace: reset to a fresh body (just the EndOfBody sentinel), then
+      // re-apply the embedded snapshot ops under this revision. The wire indices
+      // of the embedded `is`/`ds`/… ops address the SAME live (deletion-collapsed)
+      // document the changelog does, so rebuilding via the normal apply path seeds
+      // the pre-existing content with the exact positions every later edit assumes
+      // — which is precisely what fixes the "garbled" misalignment. `rplc` resets
+      // the model rather than splicing, mirroring the wire op's "replace document"
+      // semantics; in practice it is the revision-1 template load.
+      model.chars = createModel().chars;
+      for (const sub of op.ops) {
+        applyOperation(model, sub, revisionId);
+      }
       break;
     }
     case "mlti": {

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { describe, expect, test } from "bun:test";
-import { decodeOperations } from "./decode";
+import { decodeOperations, decodeSnapshot } from "./decode";
 import type { Operation } from "./types";
 
 /** Decode a single-entry changelog and return its one operation (guarded). */
@@ -248,5 +248,66 @@ describe("decodeOperations — revision metadata", () => {
     ]);
     // One author across two sessions ⇒ a single distinct userId.
     expect(new Set(decoded.map((r) => r.userId)).size).toBe(1);
+  });
+});
+
+// Live-confirmed 2026-06-19 (Google Classroom assignment copy): revision 1 is a
+// `rplc` op whose embedded `snapshot` carries the pre-existing template content.
+describe("decodeOperations — rplc (replace-with-snapshot)", () => {
+  test("decodes rplc, recursing the embedded snapshot ops under the revision", () => {
+    const op = onlyOp(
+      entry({
+        ty: "rplc",
+        snapshot: [
+          { ty: "is", s: "Template ", ibi: 1 },
+          { ty: "as", st: "text" },
+        ],
+      }),
+    );
+    expect(op.ty).toBe("rplc");
+    if (op.ty !== "rplc") throw new Error("expected rplc");
+    // The text op decodes to InsertString; the style op isolates to UnknownOp —
+    // both inside the rplc, never aborting the decode.
+    expect(op.ops).toEqual([
+      { ty: "is", s: "Template ", ibi: 1 },
+      { ty: "unknown", opCode: "as", byteLength: expect.any(Number), revisionId: 1 as never },
+    ]);
+  });
+
+  test("a malformed (non-array snapshot) rplc isolates to UnknownOp", () => {
+    const op = onlyOp(entry({ ty: "rplc", snapshot: "not-an-array" }));
+    expect(op.ty).toBe("unknown");
+    if (op.ty === "unknown") expect(op.opCode).toBe("rplc");
+  });
+
+  test("decodes a nested-chunk rplc snapshot (array-of-chunks shape) too", () => {
+    const op = onlyOp(entry({ ty: "rplc", snapshot: [[{ ty: "is", s: "X", ibi: 1 }]] }));
+    expect(op.ty).toBe("rplc");
+    if (op.ty !== "rplc") throw new Error("expected rplc");
+    expect(op.ops).toEqual([{ ty: "is", s: "X", ibi: 1 }]);
+  });
+});
+
+describe("decodeSnapshot — chunkedSnapshot base-state extraction", () => {
+  test("flattens chunked snapshot ops, tagging them with the pre-history revision id", () => {
+    const ops = decodeSnapshot({
+      chunkedSnapshot: [
+        [
+          { ty: "as", st: "text" },
+          { ty: "is", s: "Base", ibi: 1 },
+        ],
+      ],
+      changelog: [],
+    });
+    expect(ops).toEqual([
+      { ty: "unknown", opCode: "as", byteLength: expect.any(Number), revisionId: 0 as never },
+      { ty: "is", s: "Base", ibi: 1 },
+    ]);
+  });
+
+  test("returns no base ops when chunkedSnapshot is absent or non-array", () => {
+    expect(decodeSnapshot({ changelog: [] })).toEqual([]);
+    expect(decodeSnapshot({ chunkedSnapshot: "nope" })).toEqual([]);
+    expect(decodeSnapshot(null)).toEqual([]);
   });
 });

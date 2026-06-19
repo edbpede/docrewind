@@ -6,11 +6,12 @@
 // decode/reconstruct/timeline logic lives HERE so the Web Worker shell stays a
 // thin transport wrapper and the logic is unit-testable under Bun.
 
-import { decodeOperations } from "../decoder/decode";
+import { decodeOperations, decodeSnapshot } from "../decoder/decode";
+import type { Operation } from "../decoder/types";
 import type { DecodedRevision, TimelineEvent } from "../domain/model";
 import { parseFramed } from "../protocol/framing";
 import { detectSchema } from "../protocol/schema-detect";
-import { buildReplayIndex, type ReplayIndex } from "../reconstruction/snapshot";
+import { buildReplayIndex, type ReplayIndex, SNAPSHOT_CADENCE } from "../reconstruction/snapshot";
 import { deriveTimeline } from "../timeline/derive";
 
 /** Why a body could not be decoded (content-free, privacy-safe). */
@@ -34,8 +35,14 @@ export interface PipelineUnsupported {
 
 export type PipelineResult = PipelineSuccess | PipelineUnsupported;
 
-/** Parse + schema-gate one raw body into revisions, or an unsupported reason. */
-function decodeBody(rawBody: unknown): readonly DecodedRevision[] | UnsupportedReason {
+/** One decodable body: its changelog revisions plus its base-state snapshot ops. */
+interface DecodedBody {
+  readonly revisions: readonly DecodedRevision[];
+  readonly snapshotOps: readonly Operation[];
+}
+
+/** Parse + schema-gate one raw body into revisions + snapshot, or a reason. */
+function decodeBody(rawBody: unknown): DecodedBody | UnsupportedReason {
   let parsed: unknown;
   try {
     // A string body is `)]}'`-framed wire text; an object body is already JSON.
@@ -46,7 +53,7 @@ function decodeBody(rawBody: unknown): readonly DecodedRevision[] | UnsupportedR
   if (detectSchema(parsed).kind === "unknown") {
     return "unknown-schema";
   }
-  return decodeOperations(parsed);
+  return { revisions: decodeOperations(parsed), snapshotOps: decodeSnapshot(parsed) };
 }
 
 /** Run the full pipeline over a single raw chunk body. Never throws. */
@@ -62,6 +69,8 @@ export function runPipeline(rawBody: unknown): PipelineResult {
  */
 export function runPipelineOverBodies(bodies: readonly unknown[]): PipelineResult {
   const revisions: DecodedRevision[] = [];
+  let baseOps: readonly Operation[] = [];
+  let baseCaptured = false;
   let skippedChunks = 0;
   let firstReason: UnsupportedReason | null = null;
 
@@ -72,7 +81,15 @@ export function runPipelineOverBodies(bodies: readonly unknown[]): PipelineResul
       firstReason ??= decoded;
       continue;
     }
-    revisions.push(...decoded);
+    // The FIRST decodable body's chunkedSnapshot is the base for the whole run:
+    // it is the state before that body's first changelog revision. Later bodies'
+    // snapshots are redundant with earlier bodies' changelogs, so seeding from
+    // every body would double-count the base — seed from the first one only.
+    if (!baseCaptured) {
+      baseOps = decoded.snapshotOps;
+      baseCaptured = true;
+    }
+    revisions.push(...decoded.revisions);
   }
 
   if (revisions.length === 0 && firstReason !== null) {
@@ -82,7 +99,7 @@ export function runPipelineOverBodies(bodies: readonly unknown[]): PipelineResul
   return {
     kind: "ok",
     revisions,
-    replayIndex: buildReplayIndex(revisions),
+    replayIndex: buildReplayIndex(revisions, SNAPSHOT_CADENCE, baseOps),
     timeline: deriveTimeline(revisions),
     skippedChunks,
   };

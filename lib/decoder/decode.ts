@@ -16,7 +16,13 @@
 // The closed-world `never` exhaustiveness gate lives in reconstruction/apply.ts.
 
 import type { RevisionId } from "../domain/ids";
-import { asRevisionId, asSessionId, asUserId, unsafeAsRevisionId } from "../domain/ids";
+import {
+  asRevisionId,
+  asSessionId,
+  asUserId,
+  PRE_HISTORY_REVISION,
+  unsafeAsRevisionId,
+} from "../domain/ids";
 import type { DecodedRevision } from "../domain/model";
 import type { OpaqueStructure, Operation, UnknownOp } from "./types";
 
@@ -137,6 +143,18 @@ function decodeOperation(raw: unknown, revisionId: RevisionId): Operation {
         return unknownOp(raw, ty, revisionId);
       }
       return { ty: "usfd", si, ei };
+    }
+    case "rplc": {
+      // Bulk replace: the embedded `snapshot` is the SAME op vocabulary as the
+      // changelog and carries pre-existing (template) content. Decode it under
+      // THIS revision so the seeded content is attributed to the replace, and
+      // apply.ts resets the doc before re-applying. A non-array snapshot is
+      // malformed → isolate as UnknownOp (open-world contract, never throws).
+      const snapshot = field(raw, "snapshot");
+      if (!Array.isArray(snapshot)) {
+        return unknownOp(raw, ty, revisionId);
+      }
+      return { ty: "rplc", ops: decodeSnapshotOps(snapshot, revisionId) };
     }
     case "opaque": {
       const structureRaw = asString(field(raw, "structure"));
@@ -261,6 +279,44 @@ function readChangelog(parsed: unknown): readonly unknown[] {
   }
   // Tolerate a bare top-level array as well; anything else yields no revisions.
   return Array.isArray(parsed) ? parsed : [];
+}
+
+/**
+ * Flatten + decode a snapshot op list under a single revision id. Tolerates BOTH
+ * observed wire shapes (live 2026-06-19): a FLAT array of op records (the shape
+ * of `rplc.snapshot`) and an array of CHUNKS, each a sub-array of op records (the
+ * shape of `chunkedSnapshot`). An element that is itself an array is treated as a
+ * chunk and unwrapped one level; an op record is decoded directly. Mutually
+ * recursive with `decodeOperation` (both are hoisted declarations).
+ */
+function decodeSnapshotOps(snapshot: readonly unknown[], revisionId: RevisionId): Operation[] {
+  const ops: Operation[] = [];
+  for (const item of snapshot) {
+    if (Array.isArray(item)) {
+      for (const rawOp of item) {
+        ops.push(decodeOperation(rawOp, revisionId));
+      }
+    } else {
+      ops.push(decodeOperation(item, revisionId));
+    }
+  }
+  return ops;
+}
+
+/**
+ * Decode the `chunkedSnapshot` sibling of a `revisions/load` payload into the
+ * base/pre-existing document content as a flat op list. The snapshot is the
+ * document state BEFORE the payload's first changelog revision; for a window that
+ * starts at revision 1 it is empty, but for a resumed/later window it carries the
+ * accumulated content (including any template). Returned ops are tagged with the
+ * pre-history revision id so the seeded content renders as accepted base text,
+ * unattributed to any fetched author. Pure: never throws, never imports protocol.
+ */
+export function decodeSnapshot(parsed: unknown): Operation[] {
+  if (!isRecord(parsed) || !Array.isArray(parsed.chunkedSnapshot)) {
+    return [];
+  }
+  return decodeSnapshotOps(parsed.chunkedSnapshot, PRE_HISTORY_REVISION);
 }
 
 /**
