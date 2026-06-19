@@ -108,7 +108,7 @@ export interface GradingTarget {
  */
 export function buildGradingPath(target: GradingTarget): string {
   const auth =
-    target.userIndex !== null && Number.isInteger(target.userIndex)
+    target.userIndex !== null && Number.isInteger(target.userIndex) && target.userIndex >= 0
       ? `?authuser=${target.userIndex}`
       : "";
   return `/g/tg/${target.classId}/${target.assignmentId}${auth}#u=${target.studentId}`;
