@@ -41,8 +41,13 @@ interface DecodedBody {
   readonly snapshotOps: readonly Operation[];
 }
 
-/** Parse + schema-gate one raw body into revisions + snapshot, or a reason. */
-function decodeBody(rawBody: unknown): DecodedBody | UnsupportedReason {
+/**
+ * Parse + schema-gate one raw body into revisions + snapshot, or a reason.
+ * The snapshot is decoded only when `withSnapshot` is set; the caller seeds the
+ * base from the first decodable body alone, so decoding later snapshots would do
+ * a full `chunkedSnapshot` traversal whose result is immediately discarded.
+ */
+function decodeBody(rawBody: unknown, withSnapshot: boolean): DecodedBody | UnsupportedReason {
   let parsed: unknown;
   try {
     // A string body is `)]}'`-framed wire text; an object body is already JSON.
@@ -53,7 +58,10 @@ function decodeBody(rawBody: unknown): DecodedBody | UnsupportedReason {
   if (detectSchema(parsed).kind === "unknown") {
     return "unknown-schema";
   }
-  return { revisions: decodeOperations(parsed), snapshotOps: decodeSnapshot(parsed) };
+  return {
+    revisions: decodeOperations(parsed),
+    snapshotOps: withSnapshot ? decodeSnapshot(parsed) : [],
+  };
 }
 
 /** Run the full pipeline over a single raw chunk body. Never throws. */
@@ -71,16 +79,20 @@ export function runPipelineOverBodies(bodies: readonly unknown[]): PipelineResul
   const revisions: DecodedRevision[] = [];
   let baseOps: readonly Operation[] = [];
   let baseCaptured = false;
+  let decodedAny = false;
   let skippedChunks = 0;
   let firstReason: UnsupportedReason | null = null;
 
   for (const body of bodies) {
-    const decoded = decodeBody(body);
+    // Only the first decodable body's snapshot is kept (see below), so skip the
+    // redundant snapshot decode for the rest.
+    const decoded = decodeBody(body, !baseCaptured);
     if (decoded === "parse-error" || decoded === "unknown-schema") {
       skippedChunks += 1;
       firstReason ??= decoded;
       continue;
     }
+    decodedAny = true;
     // The FIRST decodable body's chunkedSnapshot is the base for the whole run:
     // it is the state before that body's first changelog revision. Later bodies'
     // snapshots are redundant with earlier bodies' changelogs, so seeding from
@@ -92,7 +104,9 @@ export function runPipelineOverBodies(bodies: readonly unknown[]): PipelineResul
     revisions.push(...decoded.revisions);
   }
 
-  if (revisions.length === 0 && firstReason !== null) {
+  // Unsupported only when NOTHING decoded — a body that decodes to an empty
+  // changelog is still a success, so gate on `decodedAny`, not revision count.
+  if (!decodedAny && firstReason !== null) {
     return { kind: "unsupported", reason: firstReason };
   }
 
