@@ -102,6 +102,14 @@ interface TextRun {
  * and `suggested-insert` segments equals `currentText(model)` — `marked-for-deletion`
  * runs are rendered separately and are NOT part of the visible text, exactly as
  * `text.ts` excludes them.
+ *
+ * BASE CONTENT: pre-existing/template content seeded from a `chunkedSnapshot`
+ * carries the pre-history revision id (0) on its chars, so it groups into ordinary
+ * `accepted-text` runs and renders as the full document context — its only
+ * distinction is the revision id (`fromRevision`/`toRevision`/`revisions` of 0).
+ * The viewport joins authorship and the playback caret on REAL revision ids (≥1),
+ * so base content is naturally rendered but never attributed to a fetched author
+ * and never carries a caret — exactly right for content no captured revision wrote.
  */
 export function segmentsAt(model: DocumentModel): readonly Segment[] {
   const segments: Segment[] = [];

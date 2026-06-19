@@ -51,6 +51,18 @@ function operationDelta(op: Operation): CharDelta {
       }
       return { inserted, deleted };
     }
+    case "rplc": {
+      // A bulk replace seeds its embedded snapshot ops; counting their inserts
+      // surfaces the template/base load as a large-insertion timeline event.
+      let inserted = 0;
+      let deleted = 0;
+      for (const sub of op.ops) {
+        const delta = operationDelta(sub);
+        inserted += delta.inserted;
+        deleted += delta.deleted;
+      }
+      return { inserted, deleted };
+    }
     default:
       // Suggestion marks / opaque / unknown make no net accepted-text change.
       return { inserted: 0, deleted: 0 };

@@ -108,4 +108,14 @@ export const FIXTURES: readonly Fixture[] = [
     a2RuleNotes:
       "second insert at ibi=10 splices ' brown' before the space preceding 'fox' -> 'The quick brown fox'.",
   },
+  {
+    name: "template-base via rplc (revision-1 bulk load)",
+    changelog: [
+      { ty: "rplc", snapshot: [{ ty: "is", s: "Question: ", ibi: 1 }], revision_id: 1 },
+      { ty: "is", s: "Answer", ibi: 11, revision_id: 2 },
+    ],
+    expectedFinalText: "Question: Answer",
+    a2RuleNotes:
+      "rplc resets the body then applies its embedded snapshot ('Question: ', 10 chars); the rev-2 insert at ibi=11 (the live position past the template) appends -> 'Question: Answer'. Dropping rplc loses the base and misplaces every later edit (the 'garbled' bug).",
+  },
 ];

@@ -78,3 +78,13 @@ export function unsafeAsSessionId(value: string): SessionId {
 export function unsafeAsUserId(value: string): UserId {
   return value as UserId;
 }
+
+/**
+ * The synthetic pre-history revision id (0). It marks the EndOfBody sentinel and
+ * any base/template content that predates the fetched changelog window (seeded
+ * from a `chunkedSnapshot`). It is NEVER a real wire RevisionId — `asRevisionId`
+ * rejects 0 — so the blind cast is intentional and unique to this sentinel. Lives
+ * in the shared id layer so both the decoder and the reconstruction core can name
+ * the same "before history began" id without crossing module boundaries.
+ */
+export const PRE_HISTORY_REVISION: RevisionId = unsafeAsRevisionId(0);

@@ -74,6 +74,22 @@ export interface UnmarkStringForDeletion {
 }
 
 /**
+ * `rplc` — ReplaceWithSnapshot. A bulk "replace the whole document with this
+ * snapshot" op. LIVE-CONFIRMED 2026-06-19 as the revision-1 op of a Google
+ * Classroom assignment copy: `{ ty:"rplc", snapshot:[[ <ops> ]] }`, where the
+ * embedded snapshot is the SAME op-chunk vocabulary as the changelog (`is`/`as`/
+ * `mlti`/entity ops…) and carries the template's PRE-EXISTING content. Dropping
+ * it (the old open-world `UnknownOp` path) lost that base content, so every later
+ * edit's 1-indexed position landed in the wrong place — the reported "garbled"
+ * playback. Apply semantics: reset the document, then apply `ops` under this
+ * revision (Appendix A.2 — see reconstruction/apply.ts).
+ */
+export interface ReplaceWithSnapshot {
+  readonly ty: "rplc";
+  readonly ops: readonly Operation[];
+}
+
+/**
  * A recognized non-text structure. Preserves position + timing so replay keeps
  * a labeled slot, but carries no decoded content (A.8, §15.3) — never aborts.
  */
@@ -109,5 +125,6 @@ export type Operation =
   | DeleteStringSuggestion
   | MarkStringForDeletion
   | UnmarkStringForDeletion
+  | ReplaceWithSnapshot
   | OpaquePlaceholder
   | UnknownOp;

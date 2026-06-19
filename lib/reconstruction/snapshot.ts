@@ -6,9 +6,10 @@
 // nearest one. The cadence is a fixed, deterministic constant here; cost-aware /
 // adaptive snapshotting is deferred to a later perf pass.
 
+import type { Operation } from "../decoder/types";
 import type { DecodedRevision } from "../domain/model";
-import { applyRevision } from "./apply";
-import { cloneModel, createModel, type DocumentModel } from "./model";
+import { applyOperation, applyRevision } from "./apply";
+import { BASE_REVISION, cloneModel, createModel, type DocumentModel } from "./model";
 import { currentText } from "./text";
 
 /** Revisions between snapshots. Tunable; fixed for deterministic test cost. */
@@ -17,19 +18,36 @@ export const SNAPSHOT_CADENCE = 100;
 export interface ReplayIndex {
   readonly revisions: readonly DecodedRevision[];
   readonly cadence: number;
-  // Keyed by the number of revisions applied (0 = empty doc).
+  // Keyed by the number of revisions applied (0 = the BASE document — empty for a
+  // doc authored from scratch, or the pre-existing template/base content when the
+  // payload carried a chunkedSnapshot).
   readonly snapshots: ReadonlyMap<number, DocumentModel>;
 }
 
 /**
  * Build a replay index: apply all revisions once, caching a model snapshot every
- * `cadence` revisions plus one at the end. O(N) to build.
+ * `cadence` revisions plus one at the end. O(N) to build (the one-time base seed
+ * is O(base size), paid once).
+ *
+ * `baseOps` is the decoded `chunkedSnapshot` — pre-existing content that predates
+ * the first changelog revision (a template, a pre-filled assignment, or the
+ * accumulated state when retrieval resumed mid-document). It is applied under the
+ * pre-history revision id BEFORE the changelog, so `snapshot(0)` is the true base
+ * state and every changelog op's 1-indexed live position addresses the content it
+ * assumes is already present. Empty (the common case) reproduces the old behaviour
+ * exactly. NOTE: a revision-1 `rplc` op (the live template-load shape) carries its
+ * own base content in-band and seeds via the normal apply path, so base content
+ * arrives through whichever channel the wire used.
  */
 export function buildReplayIndex(
   revisions: readonly DecodedRevision[],
   cadence: number = SNAPSHOT_CADENCE,
+  baseOps: readonly Operation[] = [],
 ): ReplayIndex {
   const model = createModel();
+  for (const op of baseOps) {
+    applyOperation(model, op, BASE_REVISION);
+  }
   const snapshots = new Map<number, DocumentModel>();
   snapshots.set(0, cloneModel(model));
   for (let i = 0; i < revisions.length; i++) {

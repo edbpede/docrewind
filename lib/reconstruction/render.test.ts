@@ -8,10 +8,10 @@
 // applied-count (or any `t`) into it.
 
 import { describe, expect, test } from "bun:test";
-import { decodeOperations } from "../decoder/decode";
+import { decodeOperations, decodeSnapshot } from "../decoder/decode";
 import { FIXTURES } from "../fixtures/corpus";
-import { applyRevision } from "./apply";
-import { createModel, type DocumentModel } from "./model";
+import { applyOperation, applyRevision } from "./apply";
+import { BASE_REVISION, createModel, type DocumentModel } from "./model";
 import { type Segment, segmentsAt } from "./render";
 import { currentText } from "./text";
 
@@ -105,6 +105,35 @@ describe("segmentsAt segment kinds", () => {
     expect(segments[0]?.kind === "accepted-text" ? segments[0].fromRevision : -1).toBe(1);
     // A single-revision run opens and closes at the same revision.
     expect(segments[0]?.kind === "accepted-text" ? segments[0].toRevision : -1).toBe(1);
+  });
+
+  test("base/template content renders as accepted-text under the pre-history revision (0)", () => {
+    // Seed 5 chars of base content (chunkedSnapshot) under revision 0, then a real edit.
+    const model = createModel();
+    for (const op of decodeSnapshot({
+      chunkedSnapshot: [[{ ty: "is", s: "Base ", ibi: 1 }]],
+      changelog: [],
+    })) {
+      applyOperation(model, op, BASE_REVISION);
+    }
+    for (const revision of decodeOperations({
+      changelog: [{ ty: "is", s: "edit", ibi: 6, revision_id: 1 }],
+    })) {
+      applyRevision(model, revision);
+    }
+    const segments = segmentsAt(model);
+    // Base (rev 0) and the rev-1 edit are both accepted, so they coalesce into one
+    // run opened by base content (fromRevision 0) and extended by the edit (toRevision 1).
+    expect(segments).toHaveLength(1);
+    const run = segments[0];
+    expect(run?.kind).toBe("accepted-text");
+    if (run?.kind !== "accepted-text") return;
+    expect(run.text).toBe("Base edit");
+    expect(run.fromRevision).toBe(0);
+    expect(run.toRevision).toBe(1);
+    expect([...run.revisions].sort((a, b) => a - b)).toEqual([0, 1]);
+    // The visible-text invariant still holds with base content present.
+    expect(visibleText(segments)).toBe(currentText(model));
   });
 
   test("a run extended across revisions records from/to as the opening/closing revision", () => {

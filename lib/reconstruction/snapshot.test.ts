@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { describe, expect, test } from "bun:test";
-import { decodeOperations } from "../decoder/decode";
-import { applyRevision } from "./apply";
-import { createModel } from "./model";
+import { decodeOperations, decodeSnapshot } from "../decoder/decode";
+import { applyOperation, applyRevision } from "./apply";
+import { BASE_REVISION, createModel } from "./model";
 import { buildReplayIndex, textAtRevisionIndex } from "./snapshot";
 import { currentText } from "./text";
 
@@ -49,5 +49,50 @@ describe("snapshot — scrub round-trip equivalence (R3)", () => {
     expect(textAtRevisionIndex(index, 3)).toBe("world");
     expect(textAtRevisionIndex(index, 4)).toBe("world!");
     expect(textAtRevisionIndex(index, 5)).toBe("!");
+  });
+});
+
+describe("snapshot — base content seeding (chunkedSnapshot)", () => {
+  // A 9-char base ("TEMPLATE ") seeded from a chunkedSnapshot, then two edits that
+  // assume that base is present (ibi=10 is the live position just past it).
+  const BASE_OPS = decodeSnapshot({
+    chunkedSnapshot: [[{ ty: "is", s: "TEMPLATE ", ibi: 1 }]],
+    changelog: [],
+  });
+  const EDITS = decodeOperations({
+    changelog: [
+      { ty: "is", s: "edit", ibi: 10, revision_id: 1 },
+      { ty: "ds", si: 1, ei: 9, revision_id: 2 }, // delete the template prefix
+    ],
+  });
+
+  test("snapshot(0) is the seeded base document, not an empty one", () => {
+    const index = buildReplayIndex(EDITS, 2, BASE_OPS);
+    expect(textAtRevisionIndex(index, 0)).toBe("TEMPLATE ");
+  });
+
+  test("changelog edits align to the seeded base positions", () => {
+    const index = buildReplayIndex(EDITS, 2, BASE_OPS);
+    expect(textAtRevisionIndex(index, 1)).toBe("TEMPLATE edit");
+    expect(textAtRevisionIndex(index, 2)).toBe("edit"); // template deleted
+  });
+
+  test("snapshot-assisted scrub equals a fresh seeded linear replay at every index", () => {
+    const index = buildReplayIndex(EDITS, 1, BASE_OPS); // cadence=1 forces caching each step
+    for (let n = 0; n <= EDITS.length; n++) {
+      const linear = createModel();
+      for (const op of BASE_OPS) applyOperation(linear, op, BASE_REVISION);
+      for (let i = 0; i < n; i++) {
+        const revision = EDITS[i];
+        if (revision !== undefined) applyRevision(linear, revision);
+      }
+      expect(textAtRevisionIndex(index, n)).toBe(currentText(linear));
+    }
+  });
+
+  test("empty baseOps reproduces the from-empty behaviour (no regression)", () => {
+    const index = buildReplayIndex(EDITS, 2, []);
+    // With no base, the rev-1 ibi=10 clamps to the empty doc's end -> "edit".
+    expect(textAtRevisionIndex(index, 1)).toBe("edit");
   });
 });
