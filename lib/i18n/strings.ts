@@ -57,6 +57,7 @@ export const strings = {
     emptyReplayHint: "DocRewind did not find any revision chunks to reconstruct.",
   },
   privacy: {
+    bannerSummary: "What am I looking at?",
     bannerTitle: "This is a reconstruction, not the live document.",
     bannerBody:
       "DocRewind rebuilds the document from its revision history on your device. " +

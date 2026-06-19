@@ -251,10 +251,22 @@ const shortcuts = {
   // `.dr-indeterminate` rules target the element directly and animate as intended.
   "progress-indeterminate": "h-full w-1/3 rounded-full bg-revision",
 
-  // ── PrivacyBanner / reconstruction-warning surface ────────────────────────
-  "banner-warning":
-    "flex items-start gap-2 rounded-md border-l-4 border-caution bg-caution-soft " +
-    "px-3 py-2 text-sm text-stone-800 dark:bg-caution-softDark dark:text-stone-100",
+  // ── PrivacyBanner: a collapsed-by-default "what am I looking at?" disclosure.
+  // Calm/neutral by design — this is orientation, not a hazard, so it wears a
+  // soft stone surface (no alarming hue/left-border) with the indigo info mark.
+  "banner-note":
+    "overflow-hidden rounded-md border border-stone-200 bg-stone-50 text-sm " +
+    "dark:border-stone-700 dark:bg-stone-800/50",
+  "banner-note-summary":
+    "flex cursor-pointer list-none select-none items-center gap-2 px-3 py-2 font-medium " +
+    "text-stone-600 outline-none transition-colors hover:text-stone-900 " +
+    "focus-visible:ring-2 focus-visible:ring-revision-ring " +
+    "dark:text-stone-300 dark:hover:text-stone-100",
+  // Non-color affordance: the chevron rotates on open (parent carries `group`).
+  "banner-note-chevron":
+    "size-3.5 shrink-0 text-stone-400 transition-transform duration-200 " +
+    "group-open:rotate-90 dark:text-stone-500",
+  "banner-note-body": "flex flex-col gap-1.5 px-3 pb-3 pt-0.5 text-stone-600 dark:text-stone-400",
 
   // ── Document-rendering primitives (color ALWAYS + a non-color affordance) ──
   "doc-column":
@@ -353,7 +365,7 @@ export default defineConfig({
         soft: "oklch(95% 0.03 35)",
         softDark: "oklch(40% 0.08 35)",
       },
-      // Reconstruction/warning surface (the persistent PrivacyBanner).
+      // Reserved caution/warning accent (paired with an icon, never color-only).
       caution: {
         DEFAULT: "oklch(58% 0.12 75)",
         soft: "oklch(96% 0.04 80)",
