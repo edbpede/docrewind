@@ -81,27 +81,42 @@ export function buildRevisionsTilesUrl(params: RevisionsTilesParams): string {
 const USER_INDEX_PATTERN = /\/document\/u\/(\d+)\/d\//;
 
 /**
- * Detect the multi-account `/document/u/{N}/d/` index in a Docs URL, or null if the URL is
- * a single-account path. LIVE-CONFIRMED (§24 Q8, 2026-06-12): a real
- * `/document/u/1/d/` URL yields `1`, and the resulting read returns 200 JSON.
+ * Detect the multi-account account slot in a Google URL, or null when none is present.
+ *
+ * Two shapes carry the slot:
+ *   1. The Docs `/document/u/{N}/d/` PATH segment (A.5; LIVE-CONFIRMED §24 Q8,
+ *      2026-06-12 — a real `/document/u/1/d/` URL yields `1` and reads 200 JSON).
+ *   2. The `authuser={N}` QUERY param. Google Classroom embeds a student's doc as
+ *      `…/document/d/{id}/grading?authuser={N}` (LIVE-CONFIRMED 2026-06-19, educator
+ *      grading view), and some Docs deep links select the account this way too.
+ *
+ * The path form wins when both appear (it is the more specific slot). The path is
+ * matched against the pathname ONLY, so a `/document/u/{N}/d/` buried in a query or
+ * fragment can't masquerade as the slot; the query form is read via `searchParams`,
+ * which likewise can't be spoofed by path content.
  */
 export function detectUserIndex(url: string): number | null {
-  // Match against the pathname only, so a `/document/u/{N}/d/` embedded in a query or
-  // fragment can't masquerade as the multi-account slot. Path-only/relative
-  // inputs are resolved against the Docs origin to keep the pathname-only guarantee.
-  let haystack: string;
+  let parsed: URL | null;
   try {
-    haystack = new URL(url).pathname;
+    parsed = new URL(url);
   } catch {
+    // Relative/path-only inputs: resolve against the Docs origin so the WHATWG parser
+    // still isolates pathname + query (the base host is irrelevant — only the path and
+    // `authuser` are read). Truly unparseable input falls back to a raw path match.
     try {
-      haystack = new URL(url, DOCS_ORIGIN).pathname;
+      parsed = new URL(url, DOCS_ORIGIN);
     } catch {
-      haystack = url;
+      parsed = null;
     }
   }
-  const match = USER_INDEX_PATTERN.exec(haystack);
-  if (match?.[1] === undefined) {
-    return null;
+  const pathname = parsed ? parsed.pathname : url;
+  const pathMatch = USER_INDEX_PATTERN.exec(pathname);
+  if (pathMatch?.[1] !== undefined) {
+    return Number.parseInt(pathMatch[1], 10);
   }
-  return Number.parseInt(match[1], 10);
+  const authuser = parsed?.searchParams.get("authuser");
+  if (authuser !== null && authuser !== undefined && /^\d+$/.test(authuser)) {
+    return Number.parseInt(authuser, 10);
+  }
+  return null;
 }

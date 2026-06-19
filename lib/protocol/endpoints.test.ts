@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { describe, expect, test } from "bun:test";
 import { asDocId, asRevisionId } from "../domain/ids";
-import { buildRevisionsLoadUrl, buildRevisionsTilesUrl } from "./endpoints";
+import { buildRevisionsLoadUrl, buildRevisionsTilesUrl, detectUserIndex } from "./endpoints";
 
 describe("buildRevisionsLoadUrl", () => {
   test("builds the single-account revisions/load URL", () => {
@@ -81,5 +81,35 @@ describe("buildRevisionsTilesUrl", () => {
         ouid: "999",
       }),
     ).toThrow(TypeError);
+  });
+});
+
+describe("detectUserIndex", () => {
+  test("reads the /document/u/{N}/d/ path slot", () => {
+    expect(detectUserIndex("https://docs.google.com/document/u/1/d/abc/edit")).toBe(1);
+  });
+
+  test("returns null for a single-account path with no slot", () => {
+    expect(detectUserIndex("https://docs.google.com/document/d/abc/edit")).toBeNull();
+  });
+
+  test("reads the authuser query slot (Classroom grading iframe shape)", () => {
+    expect(detectUserIndex("https://docs.google.com/document/d/abc/grading?authuser=0")).toBe(0);
+  });
+
+  test("reads a non-zero authuser query slot", () => {
+    expect(detectUserIndex("https://docs.google.com/document/d/abc/edit?authuser=2")).toBe(2);
+  });
+
+  test("prefers the path slot over authuser when both are present", () => {
+    expect(detectUserIndex("https://docs.google.com/document/u/1/d/abc/edit?authuser=3")).toBe(1);
+  });
+
+  test("ignores a /document/u/{N}/d/ embedded only in the query string", () => {
+    expect(detectUserIndex("https://docs.google.com/?x=/document/u/9/d/abc")).toBeNull();
+  });
+
+  test("ignores a non-numeric authuser", () => {
+    expect(detectUserIndex("https://docs.google.com/document/d/abc/edit?authuser=foo")).toBeNull();
   });
 });

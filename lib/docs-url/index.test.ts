@@ -34,6 +34,14 @@ describe("extractDocId", () => {
   test("ignores a /document/d/ embedded only in the query string", () => {
     expect(extractDocId("https://docs.google.com/?x=/document/d/spoof/edit")).toBeNull();
   });
+
+  test("extracts the id from the Classroom grading iframe URL (/d/{id}/grading)", () => {
+    expect(
+      extractDocId(
+        `https://docs.google.com/document/d/${ID}/grading?authuser=0&enable_comments=true`,
+      ),
+    ).toBe(asDocId(ID));
+  });
 });
 
 describe("parseDocsUrl", () => {
@@ -53,5 +61,12 @@ describe("parseDocsUrl", () => {
 
   test("returns null for a malformed / non-document URL", () => {
     expect(parseDocsUrl("https://docs.google.com/document/")).toBeNull();
+  });
+
+  test("reads the authuser slot from a Classroom grading iframe URL", () => {
+    expect(parseDocsUrl(`https://docs.google.com/document/d/${ID}/grading?authuser=0`)).toEqual({
+      docId: asDocId(ID),
+      userIndex: 0,
+    });
   });
 });
