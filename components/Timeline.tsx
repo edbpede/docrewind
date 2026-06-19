@@ -17,8 +17,9 @@
 // becomes legible signal instead of a pile. Stacking is measurement-driven — with
 // no measured width (jsdom / first paint) every mark renders on its own.
 
-import type { Component } from "solid-js";
+import type { Component, JSX } from "solid-js";
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { IconClose, IconMinus, IconPauseBars, IconPencil, IconPlus } from "@/components/icons";
 import { clusterCountLabel, revisionOf, revisionRangeOf, strings } from "@/lib/i18n/strings";
 
 /** The four kinds of writing-activity mark drawn onto the timeline stratum. */
@@ -44,21 +45,22 @@ export interface TimelineProps {
   readonly onScrub: (index: number) => void;
 }
 
-// An editorial pen-mark per kind — a non-color affordance paired with the seal
-// hue (§9.11), drawn from a copy-editor's margin vocabulary: a section sign for a
-// writing sitting, a caret-up for a surge of inserted text, a caret-down for a
-// passage cut, and a caesura (the musical rest bar) for a pause between sittings.
-// Exported so the legend keys each mark to its meaning with the same glyphs.
-export function markerGlyph(kind: TimelineMarkerKind): string {
+// An intuitive icon per kind — a non-color affordance paired with the seal hue
+// (§9.11): a pencil for a writing session, a plus for a surge of inserted text, a
+// minus for a passage cut, and paused bars for a pause between sittings. (These
+// replace the old scholarly glyphs § ⌃ ⌄ ‖, which read as cryptic to non-technical
+// users.) Exported so the legend keys each mark to its meaning with the same icons.
+// A plain function (not a component) so it re-evaluates inside reactive JSX.
+export function markerIcon(kind: TimelineMarkerKind, size = 12): JSX.Element {
   switch (kind) {
     case "session":
-      return "§";
+      return <IconPencil size={size} />;
     case "large-insertion":
-      return "⌃";
+      return <IconPlus size={size} />;
     case "large-deletion":
-      return "⌄";
+      return <IconMinus size={size} />;
     case "pause":
-      return "‖";
+      return <IconPauseBars size={size} />;
     default: {
       const _exhaustive: never = kind;
       return _exhaustive;
@@ -461,7 +463,7 @@ const Timeline: Component<TimelineProps> = (props) => {
                 ? count > 99
                   ? "99+"
                   : String(count)
-                : markerGlyph(single.kind)}
+                : markerIcon(single.kind)}
             </button>
           );
         }}
@@ -494,7 +496,7 @@ const Timeline: Component<TimelineProps> = (props) => {
                     {(row) => (
                       <li class="tl-tip-row">
                         <span class={`tl-chip ${markerToneClass(row.kind)}`} aria-hidden="true">
-                          {markerGlyph(row.kind)}
+                          {markerIcon(row.kind)}
                         </span>
                         <span class="tl-tip-count">{row.count}</span>
                         <span>{row.label}</span>
@@ -535,7 +537,7 @@ const Timeline: Component<TimelineProps> = (props) => {
                   aria-label={strings.timeline.closeDetails}
                   onClick={() => closePanel(true)}
                 >
-                  ×
+                  <IconClose size={16} />
                 </button>
               </div>
               <ul class="tl-panel-list">
@@ -560,7 +562,7 @@ const Timeline: Component<TimelineProps> = (props) => {
                             class={`tl-chip ${markerToneClass(member.kind)}`}
                             aria-hidden="true"
                           >
-                            {markerGlyph(member.kind)}
+                            {markerIcon(member.kind)}
                           </span>
                           <span class="tl-panel-row-main">
                             <span class="tl-panel-row-kind">{CLUSTER_KIND_LABEL[member.kind]}</span>

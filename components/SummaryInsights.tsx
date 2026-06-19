@@ -155,21 +155,19 @@ const SummaryInsights: Component<SummaryInsightsProps> = (rawProps) => {
 
   return (
     <section class="dr-card" aria-label={strings.insights.heading}>
-      <h2 class="dr-eyebrow mb-2">{strings.insights.heading}</h2>
-      <dl class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <h2 class="dr-heading mb-4">{strings.insights.heading}</h2>
+      <dl class="grid grid-cols-2 gap-x-4 gap-y-5 sm:grid-cols-5">
         <For each={stats()}>
           {(stat) => (
-            <div class="flex flex-col gap-0.5">
-              <dt class="dr-eyebrow">{stat.label}</dt>
-              <dd class="font-mono text-lg tabular-nums text-stone-800 dark:text-stone-100">
-                {stat.value}
-              </dd>
+            <div class="dr-stat">
+              <dd class="dr-stat-value">{stat.value}</dd>
+              <dt class="dr-stat-label">{stat.label}</dt>
             </div>
           )}
         </For>
       </dl>
       <Show when={authors().length > 0}>
-        <div class="mt-3 flex flex-col gap-2">
+        <div class="mt-6 flex flex-col gap-2 border-t border-hairline pt-5">
           <ul ref={listEl} class="flex flex-wrap gap-2">
             <For each={authors()}>
               {(author, index) => {
@@ -260,9 +258,7 @@ const SummaryInsights: Component<SummaryInsightsProps> = (rawProps) => {
               }}
             </For>
           </ul>
-          <p class="text-xs text-stone-500 dark:text-stone-400">
-            {strings.insights.attributionCaveat}
-          </p>
+          <p class="text-[0.8125rem] text-ink-muted">{strings.insights.attributionCaveat}</p>
         </div>
       </Show>
     </section>

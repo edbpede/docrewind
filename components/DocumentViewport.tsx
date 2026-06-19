@@ -34,8 +34,29 @@
 
 import type { Component, JSX } from "solid-js";
 import { createMemo, Index, Match, Show, Switch } from "solid-js";
+import { IconComment, IconFile, IconImage, IconList, IconTable } from "@/components/icons";
+import type { OpaqueStructure } from "@/lib/decoder/types";
 import { contributedBy, strings } from "@/lib/i18n/strings";
 import type { Segment } from "@/lib/reconstruction/render";
+
+/** A clear per-kind icon for an embedded non-text element (image, table, …) — far
+ *  more legible than the old generic ▤ glyph. Called inside reactive JSX so it
+ *  re-evaluates if a position's structure kind ever changes. */
+function structureIcon(structure: OpaqueStructure): JSX.Element {
+  switch (structure) {
+    case "image":
+    case "drawing":
+      return <IconImage size={14} />;
+    case "table":
+      return <IconTable size={14} />;
+    case "list-format":
+      return <IconList size={14} />;
+    case "comment-ref":
+      return <IconComment size={14} />;
+    default:
+      return <IconFile size={14} />;
+  }
+}
 
 /** The active writing caret: the current revision and its author's colour. */
 export interface DocumentCaret {
@@ -66,8 +87,9 @@ export interface DocumentViewportProps {
 }
 
 // The author hue when a contributor carried no assigned colour (the self-resolution
-// path exposes none): the revision indigo, matching the playhead/caret accent.
-const ATTRIBUTION_FALLBACK = "oklch(54% 0.13 264)";
+// path exposes none): the brand indigo, matching the playhead/caret accent. Uses the
+// theme variable so the fallback follows light/dark like every other brand surface.
+const ATTRIBUTION_FALLBACK = "var(--dr-brand)";
 
 // The off-screen description id that highlighted segments point at via aria-describedby.
 const ATTR_DESC_ID = "dr-doc-attr-desc";
@@ -153,11 +175,7 @@ const DocumentViewport: Component<DocumentViewportProps> = (props) => {
     <section class="dr-leaf">
       <Show
         when={props.segments.length > 0}
-        fallback={
-          <p class="doc-column italic text-stone-500 dark:text-stone-400">
-            {strings.viewport.empty}
-          </p>
-        }
+        fallback={<p class="doc-column italic text-ink-muted">{strings.viewport.empty}</p>}
       >
         <article class="doc-column" dir="auto">
           {/* The off-screen attribution description, present only while an author is
@@ -235,8 +253,10 @@ const DocumentViewport: Component<DocumentViewportProps> = (props) => {
                     </Match>
                     <Match when={asKind(segment(), "opaque-placeholder")}>
                       {(seg) => (
-                        <span class="doc-opaque" title={seg().label}>
-                          <span aria-hidden="true">▤</span>
+                        <span class="doc-opaque">
+                          <span aria-hidden="true" class="inline-flex text-ink-muted">
+                            {structureIcon(seg().structure)}
+                          </span>
                           <span>{seg().label}</span>
                         </span>
                       )}

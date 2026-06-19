@@ -4,10 +4,13 @@
 // selector. Fully keyboard-operable: every control is a real <button> (Space/Enter
 // activate natively, so Space toggles play/pause when focused) with an accessible
 // name and a visible focus ring. Play/pause pairs an icon WITH text, never color
-// alone (§9.11). The speed set is a fixed-length value list, so it uses <Index>.
+// alone (§9.11). Speed is a friendly segmented control (the selected multiplier is
+// a raised pill — clearly "the one"). The speed set is a fixed-length value list,
+// so it uses <Index>.
 
 import type { Component } from "solid-js";
 import { Index } from "solid-js";
+import { IconPause, IconPlay, IconRestart } from "@/components/icons";
 import { speedLabel, strings } from "@/lib/i18n/strings";
 
 /** The fixed playback-speed multipliers. */
@@ -23,7 +26,7 @@ export interface PlaybackControlsProps {
 
 const PlaybackControls: Component<PlaybackControlsProps> = (props) => {
   return (
-    <div class="flex flex-wrap items-center gap-2">
+    <div class="flex flex-wrap items-center gap-3">
       <button
         type="button"
         class="btn-primary"
@@ -31,7 +34,9 @@ const PlaybackControls: Component<PlaybackControlsProps> = (props) => {
         aria-label={props.playing ? strings.controls.pause : strings.controls.play}
         onClick={() => props.onPlayPause()}
       >
-        <span aria-hidden="true">{props.playing ? "⏸" : "▶"}</span>
+        <Index each={[props.playing]}>
+          {(isPlaying) => (isPlaying() ? <IconPause size={18} /> : <IconPlay size={18} />)}
+        </Index>
         <span>{props.playing ? strings.controls.pause : strings.controls.play}</span>
       </button>
 
@@ -41,18 +46,23 @@ const PlaybackControls: Component<PlaybackControlsProps> = (props) => {
         aria-label={strings.controls.restart}
         onClick={() => props.onRestart()}
       >
-        <span aria-hidden="true">↺</span>
+        <IconRestart size={18} />
         <span>{strings.controls.restart}</span>
       </button>
 
-      <fieldset class="m-0 ml-auto inline-flex items-center gap-2 border-0 p-0">
-        <legend class="dr-eyebrow float-left mr-1">{strings.controls.speedGroup}</legend>
-        <div class="inline-flex items-center gap-0.5 rounded-lg bg-stone-100 p-0.5 dark:bg-stone-800">
+      {/* A real <fieldset>/<legend> for the speed group (native group semantics —
+          biome's useSemanticElements rejects role="group" on a div). The legend is
+          a visible, friendly label floated beside the segmented control. */}
+      <fieldset class="m-0 ml-auto inline-flex items-center gap-2.5 border-0 p-0">
+        <legend class="float-left mr-1 text-[0.8125rem] font-medium text-ink-muted">
+          {strings.controls.speedGroup}
+        </legend>
+        <div class="seg">
           <Index each={SPEEDS}>
             {(speed) => (
               <button
                 type="button"
-                class={props.speed === speed() ? "btn-ghost btn-active" : "btn-ghost"}
+                class={props.speed === speed() ? "seg-item seg-item-active" : "seg-item"}
                 aria-pressed={props.speed === speed()}
                 aria-label={speedLabel(speed())}
                 onClick={() => props.onSpeed(speed())}

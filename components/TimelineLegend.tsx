@@ -11,7 +11,7 @@
 import type { Component } from "solid-js";
 import { createMemo, For, Show } from "solid-js";
 import {
-  markerGlyph,
+  markerIcon,
   markerToneClass,
   type TimelineMarker,
   type TimelineMarkerKind,
@@ -49,14 +49,14 @@ const TimelineLegend: Component<TimelineLegendProps> = (props) => {
   return (
     <Show when={presentKinds().length > 0}>
       <ul class="tl-legend" aria-label={strings.timeline.legendLabel}>
-        <li class="dr-eyebrow" aria-hidden="true">
+        <li class="text-xs font-medium text-ink-muted" aria-hidden="true">
           {strings.timeline.legendLabel}
         </li>
         <For each={presentKinds()}>
           {(kind) => (
             <li class="tl-legend-item">
               <span class={`tl-seal ${markerToneClass(kind)}`} aria-hidden="true">
-                {markerGlyph(kind)}
+                {markerIcon(kind)}
               </span>
               <span>{KIND_LABEL[kind]}</span>
             </li>

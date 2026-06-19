@@ -80,10 +80,11 @@ describe("OptionsApp storage policy controls", () => {
 
   it("turning off raw retention requests guarded maintenance without direct raw deletion", async () => {
     render(() => <OptionsApp />);
-    const checkbox = await screen.findByLabelText("Keep raw data for re-decoding");
+    const checkbox = await screen.findByLabelText("Keep the original history on this device");
     expect(
       screen.getByText(
-        "When disabled, raw data is discarded once no replay or decode is using it.",
+        "Lets DocRewind rebuild this replay later without downloading it again. " +
+          "When off, the original history is cleared once it's no longer needed, to save space.",
       ),
     ).toBeTruthy();
 
@@ -195,7 +196,7 @@ describe("OptionsApp storage policy controls", () => {
   it("keeps a durable pending maintenance status when send fails", async () => {
     sendMessageMock.mockRejectedValueOnce(new Error("sw unavailable"));
     render(() => <OptionsApp />);
-    const checkbox = await screen.findByLabelText("Keep raw data for re-decoding");
+    const checkbox = await screen.findByLabelText("Keep the original history on this device");
 
     await fireEvent.click(checkbox);
 

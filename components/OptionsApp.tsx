@@ -5,12 +5,18 @@
 // pages live), parses an optional `?doc=` for per-document cache clearing, and
 // wires every `lib/settings.ts` item through `createResource` (read) + `setValue`
 // (write). Never displays raw document data.
+//
+// Visual register: iOS-Settings — a warm canvas, a reassuring privacy banner, then
+// quiet group labels over grouped-row cards. Boolean settings are friendly switches
+// (a native checkbox kept for a11y + tests, styled as a switch via `peer-checked:`);
+// the theme is a segmented control; storage caps are unit-suffixed number fields.
 
-import type { Component } from "solid-js";
+import type { Component, JSX } from "solid-js";
 import { createResource, createSignal, For, onMount, Show } from "solid-js";
 import BrandMark from "@/components/BrandMark";
 import CacheControls from "@/components/CacheControls";
 import DiagnosticsPreferences from "@/components/DiagnosticsPreferences";
+import { IconAlert, IconInfo } from "@/components/icons";
 import PrivacySummary from "@/components/PrivacySummary";
 import { useThemeSync } from "@/components/theme-sync";
 import { createIdbStore } from "@/lib/db";
@@ -55,6 +61,82 @@ function parseDocId(search: string): DocId | null {
     return null;
   }
 }
+
+/**
+ * A grouped settings row carrying a boolean as a friendly switch. A real
+ * `<input type="checkbox">` is kept (visually-hidden via `sr-only peer`) so the
+ * label association, `checked` state, and the existing tests/e2e selectors stay
+ * intact; the switch track + knob are painted with `peer-checked:` utilities. The
+ * one-line help sits OUTSIDE the `<label>` so the input's accessible name remains
+ * exactly the title text.
+ */
+const SwitchRow: Component<{
+  readonly label: string;
+  readonly help: string;
+  readonly checked: boolean;
+  readonly onChange: (next: boolean) => void;
+}> = (props) => {
+  return (
+    <div class="dr-row-stack">
+      <label class="flex cursor-pointer items-center justify-between gap-4">
+        <span class="dr-row-label">{props.label}</span>
+        <span class="relative inline-flex shrink-0 items-center">
+          <input
+            type="checkbox"
+            class="peer sr-only"
+            checked={props.checked}
+            onChange={(event) => props.onChange(event.currentTarget.checked)}
+          />
+          <span
+            class="block h-[1.6rem] w-[2.75rem] rounded-full bg-hairline-strong transition-colors duration-200 ease-[var(--dr-ease-out)] peer-checked:bg-brand peer-focus-visible:ring-2 peer-focus-visible:ring-brand-ring peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-surface"
+            aria-hidden="true"
+          />
+          <span
+            class="pointer-events-none absolute left-[0.2rem] size-[1.2rem] rounded-full bg-white shadow-[var(--dr-shadow-sm)] transition-transform duration-200 ease-[var(--dr-ease-out)] peer-checked:translate-x-[1.15rem]"
+            aria-hidden="true"
+          />
+        </span>
+      </label>
+      <p class="dr-row-help">{props.help}</p>
+    </div>
+  );
+};
+
+/**
+ * A grouped settings row carrying a byte budget as a unit-suffixed number field.
+ * Keeps `type="number"` + `min` and the original label association (a `<label>`
+ * wrapping the title + input) so `findByLabelText` and `.value` stay stable.
+ */
+const BudgetRow: Component<{
+  readonly id: string;
+  readonly label: string;
+  readonly value: number;
+  readonly onInput: (mib: number) => void;
+}> = (props) => {
+  // Explicit `for`/`id` association (not a wrapping label) so the input's
+  // accessible name is EXACTLY the title — the friendly "MB" suffix must not leak
+  // into it (tests query `findByLabelText("Global cap (MB)")` etc.).
+  return (
+    <div class="dr-row">
+      <label for={props.id} class="dr-row-label">
+        {props.label}
+      </label>
+      <span class="dr-field">
+        <input
+          id={props.id}
+          type="number"
+          min={1}
+          class="dr-field-input"
+          value={props.value}
+          onChange={(event) => props.onInput(Number(event.currentTarget.value))}
+        />
+        <span class="dr-field-suffix" aria-hidden="true">
+          MB
+        </span>
+      </span>
+    </div>
+  );
+};
 
 const OptionsApp: Component = () => {
   useThemeSync();
@@ -188,96 +270,111 @@ const OptionsApp: Component = () => {
 
   return (
     <div class="dr-page">
-      <main class="mx-auto flex max-w-2xl flex-col gap-4 p-6">
-        <div class="flex items-center gap-3">
+      <main class="mx-auto flex max-w-2xl flex-col gap-8 p-6 sm:p-8">
+        <header class="flex items-center gap-3">
           <BrandMark size={36} />
-          <h1 class="text-xl font-semibold">{strings.options.title}</h1>
-        </div>
+          <h1 class="dr-title">{strings.options.title}</h1>
+        </header>
 
         <PrivacySummary />
 
-        <section class="dr-card flex flex-col gap-3" aria-labelledby="dr-prefs-heading">
-          <h2 id="dr-prefs-heading" class="font-medium">
+        <section class="dr-group" aria-labelledby="dr-appearance-heading">
+          <h2 id="dr-appearance-heading" class="dr-group-label">
             {strings.options.settingsHeading}
           </h2>
-
-          <label class="flex items-center justify-between gap-3">
-            <span>{strings.options.themeLabel}</span>
-            <select
-              class="dr-panel px-2 py-1"
-              value={themeValue() ?? "system"}
-              onChange={(event) => onTheme(event.currentTarget.value as Theme)}
-            >
-              <For each={THEME_OPTIONS}>
-                {(option) => <option value={option.value}>{option.label}</option>}
-              </For>
-            </select>
-          </label>
-
-          <label class="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={keepRaw() ?? true}
-              onChange={(event) => onKeepRaw(event.currentTarget.checked)}
-            />
-            <span>{strings.options.keepRawLabel}</span>
-          </label>
-          <p class="text-xs text-stone-600 dark:text-stone-400">{strings.options.keepRawHint}</p>
-
-          <label class="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={showIdentities() ?? true}
-              onChange={(event) => onIdentities(event.currentTarget.checked)}
-            />
-            <span>{strings.options.realIdentitiesLabel}</span>
-          </label>
-          <p class="text-xs text-stone-600 dark:text-stone-400">
-            {strings.options.realIdentitiesHint}
-          </p>
-
-          <label class="flex items-center justify-between gap-3">
-            <span>{strings.options.perDocumentCapLabel}</span>
-            <input
-              type="number"
-              min={1}
-              class="dr-panel w-28 px-2 py-1 text-right tabular-nums"
-              value={Math.round((budget()?.perDocumentBytes ?? 0) / MIB)}
-              onChange={(event) => onBudget("perDocumentBytes", Number(event.currentTarget.value))}
-            />
-          </label>
-
-          <label class="flex items-center justify-between gap-3">
-            <span>{strings.options.globalCapLabel}</span>
-            <input
-              type="number"
-              min={1}
-              class="dr-panel w-28 px-2 py-1 text-right tabular-nums"
-              value={Math.round((budget()?.globalCapBytes ?? 0) / MIB)}
-              onChange={(event) => onBudget("globalCapBytes", Number(event.currentTarget.value))}
-            />
-          </label>
+          <div class="dr-rows">
+            <div class="dr-row">
+              <span class="dr-row-label">{strings.options.themeLabel}</span>
+              <fieldset class="seg m-0 border-0">
+                <legend class="sr-only">{strings.options.themeLabel}</legend>
+                <For each={THEME_OPTIONS}>
+                  {(option) => (
+                    <button
+                      type="button"
+                      class={
+                        (themeValue() ?? "system") === option.value
+                          ? "seg-item seg-item-active"
+                          : "seg-item"
+                      }
+                      aria-pressed={(themeValue() ?? "system") === option.value}
+                      onClick={() => onTheme(option.value)}
+                    >
+                      {option.label}
+                    </button>
+                  )}
+                </For>
+              </fieldset>
+            </div>
+          </div>
         </section>
 
-        <Show when={maintenanceStatus()}>
-          {(status) => (
-            <p class="dr-card text-sm text-stone-700 dark:text-stone-300" role="status">
-              {status() === "failed"
-                ? strings.options.maintenanceFailed
-                : strings.options.maintenancePending}
-            </p>
-          )}
-        </Show>
+        <section class="dr-group" aria-labelledby="dr-data-heading">
+          <h2 id="dr-data-heading" class="dr-group-label">
+            {strings.options.privacyHeading}
+          </h2>
+          <div class="dr-rows">
+            <SwitchRow
+              label={strings.options.realIdentitiesLabel}
+              help={strings.options.realIdentitiesHint}
+              checked={showIdentities() ?? true}
+              onChange={onIdentities}
+            />
+            <SwitchRow
+              label={strings.options.keepRawLabel}
+              help={strings.options.keepRawHint}
+              checked={keepRaw() ?? true}
+              onChange={onKeepRaw}
+            />
+          </div>
+        </section>
 
-        <CacheControls
-          store={store}
-          docId={docId}
-          onClearDocument={clearDocumentCache}
-          onClearAll={clearAllCaches}
-        />
+        <section class="dr-group" aria-labelledby="dr-cache-heading">
+          <h2 id="dr-cache-heading" class="dr-group-label">
+            {strings.options.cacheHeading}
+          </h2>
+          <div class="dr-rows">
+            <BudgetRow
+              id="dr-per-document-cap"
+              label={strings.options.perDocumentCapLabel}
+              value={Math.round((budget()?.perDocumentBytes ?? 0) / MIB)}
+              onInput={(mib) => onBudget("perDocumentBytes", mib)}
+            />
+            <BudgetRow
+              id="dr-global-cap"
+              label={strings.options.globalCapLabel}
+              value={Math.round((budget()?.globalCapBytes ?? 0) / MIB)}
+              onInput={(mib) => onBudget("globalCapBytes", mib)}
+            />
+          </div>
+
+          <CacheControls
+            store={store}
+            docId={docId}
+            onClearDocument={clearDocumentCache}
+            onClearAll={clearAllCaches}
+          />
+        </section>
+
         <DiagnosticsPreferences />
+
+        <Show when={maintenanceStatus()}>
+          {(status) => <MaintenanceNote failed={status() === "failed"} />}
+        </Show>
       </main>
     </div>
+  );
+};
+
+const MaintenanceNote: Component<{ readonly failed: boolean }> = (props): JSX.Element => {
+  return (
+    <p class={props.failed ? "note-warning" : "note-info"} role="status">
+      <Show when={props.failed} fallback={<IconInfo size={18} class="note-icon" />}>
+        <IconAlert size={18} class="note-icon" />
+      </Show>
+      <span>
+        {props.failed ? strings.options.maintenanceFailed : strings.options.maintenancePending}
+      </span>
+    </p>
   );
 };
 
