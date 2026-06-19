@@ -79,8 +79,8 @@ export interface GoogleFulfiller {
  * Install a reusable, SW-aware fulfiller for `https://docs.google.com/**`. The
  * route fires for service-worker-originated requests (all of the extension's
  * retrieval fetches live in the MV3 SW), branching on the request URL:
- *   • `…/d/{id}/edit`           → discovery HTML carrying `"revision":N`
- *   • `…/d/{id}/revisions/load` → the framed changelog string body
+ *   • `…/d/{id}/{edit,grading,view}` → discovery / identity-bootstrap HTML
+ *   • `…/d/{id}/revisions/load`      → the framed changelog string body
  * Any other docs.google.com sub-resource is fulfilled empty so processing runs
  * fully offline. Page-realm and SW-realm requests are fulfilled identically, so
  * the handler branches on the URL alone — no `serviceWorker()` distinction needed.
@@ -94,8 +94,19 @@ export async function installGoogleFulfiller(context: BrowserContext): Promise<G
 
   await context.route("https://docs.google.com/**", async (route: Route) => {
     const url = new URL(route.request().url());
-    if (url.pathname.endsWith("/edit")) {
-      discovery += 1;
+    // The identity harvest probes the doc bootstrap surfaces in order — `/edit`,
+    // then `/grading`, then `/view` — for the `info_params` tiles token (see
+    // IDENTITY_BOOTSTRAP_SURFACES). Discovery also reads `"revision":N` off `/edit`.
+    // Serve the same token-free bootstrap HTML for all three: discovery gets its
+    // count, and the token-less harvest exhausts every surface and gives up
+    // gracefully (authors fall back to "Author N"), leaving the replay this smoke
+    // asserts unaffected.
+    if (
+      url.pathname.endsWith("/edit") ||
+      url.pathname.endsWith("/grading") ||
+      url.pathname.endsWith("/view")
+    ) {
+      if (url.pathname.endsWith("/edit")) discovery += 1;
       await route.fulfill({
         status: 200,
         contentType: "text/html; charset=utf-8",
