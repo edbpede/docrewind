@@ -77,11 +77,33 @@ function findGradingActionGroup(): Element | null {
   return best?.parentElement ?? null;
 }
 
+// Whether an element is actually laid out (rendered), not merely present-but-hidden.
+// `getClientRects()` is empty for a node inside a `display:none` subtree (at any depth)
+// and for a zero-box node — exactly the off-screen grading links Classroom keeps in the
+// DOM. (`HTMLElement.offsetParent` would also catch `display:none` but is additionally
+// null for `position:fixed` nodes; the client-rect test is the "is it on screen" property
+// we actually want here, and it mirrors the rect guard in `findGradingActionGroup`.)
+function isRendered(el: Element): boolean {
+  return el.getClientRects().length > 0;
+}
+
 // The submission-status detail card linking to the selected student's grading view.
 // Matched by the studentId in the URL so we anchor to the right card when several
-// students are listed. Returns null until the card renders.
+// students are listed. Classroom preloads a SECOND, `display:none` copy of this grading
+// link in the grouped student list it renders during SPA navigation, and that hidden
+// copy sorts BEFORE the visible card in DOM order — so a plain `querySelector` would
+// anchor the button inside the hidden node and it would never appear (the visible card
+// only "wins" on a cold full reload, where the grouped list isn't preloaded). Return the
+// first RENDERED match so the button always mounts beside the on-screen card. A transient
+// null while it (re)renders is held by `decideReconcile`, never torn down.
 function findSubmissionCard(studentId: string): Element | null {
-  return document.querySelector<HTMLElement>(`a[href*="/g/tg/"][href*="u=${studentId}"]`);
+  const matches = document.querySelectorAll<HTMLElement>(
+    `a[href*="/g/tg/"][href*="u=${studentId}"]`,
+  );
+  for (const match of matches) {
+    if (isRendered(match)) return match;
+  }
+  return null;
 }
 
 // ── One-shot deep-link intent (submission view → grading view → replay) ─────────
