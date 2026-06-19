@@ -9,8 +9,18 @@
 // native `title`, whose built-in ~1s appearance delay (reset on every scroll) made
 // the label feel unresponsive. The inline `sr-only` span carries the same text for
 // assistive tech. The reading column uses `dir="auto"` for RTL scripts (§9.12).
-// NON-VIRTUALIZED in Phase 5; segments are length-changing across frames, so
-// `<For>` (reference-keyed) is correct.
+// NON-VIRTUALIZED in Phase 5; the runs are POSITION-keyed with `<Index>`, NOT
+// reference-keyed with `<For>`. `segmentsAt` rebuilds a fresh array of fresh
+// `Segment` objects every playback tick, and the runs never reorder — they are a
+// linear left-to-right slice of the document. Under `<For>` (reference identity)
+// that means zero overlap frame-to-frame, so EVERY span is torn down and rebuilt
+// each tick; the span under the cursor loses `:hover` (the browser doesn't re-apply
+// it to a freshly-inserted node beneath a stationary pointer) and its `::after`
+// affordance tooltip re-runs the fade from 0 — the reported flicker during playback.
+// `<Index>` keys by position: the node at row i persists across ticks and its
+// content updates reactively in place, so the hovered tooltip stays put (and the
+// per-tick teardown cost disappears). Position-keying is the natural fit here —
+// "row i" is "the i-th run", stable across frames even as the tail run grows.
 //
 // Authorship attribution (§9.7) rides on top WITHOUT a re-render of the tree:
 //  • A writing caret (nib) is painted after the run the CURRENT revision wrote,
@@ -23,7 +33,7 @@
 // opaque author key (never the raw Gaia token).
 
 import type { Component, JSX } from "solid-js";
-import { createMemo, For, Match, Show, Switch } from "solid-js";
+import { createMemo, Index, Match, Show, Switch } from "solid-js";
 import { contributedBy, strings } from "@/lib/i18n/strings";
 import type { Segment } from "@/lib/reconstruction/render";
 
@@ -77,6 +87,18 @@ function highlightStyle(color: string, kind: Segment["kind"]): JSX.CSSProperties
     style["background-color"] = `color-mix(in srgb, ${color} 13%, transparent)`;
   }
   return style;
+}
+
+// Reactive-safe discriminant narrowing for the segment union. `<Index>` hands each
+// row a `() => Segment` accessor rather than a value, so the old
+// `segment.kind === K && segment` const-narrowing no longer holds (TS can't narrow
+// a function call). This maps a value to its variant when the kind matches, else
+// `undefined`, so every `<Match>` still receives a correctly-typed narrowed accessor.
+function asKind<K extends Segment["kind"]>(
+  segment: Segment,
+  kind: K,
+): Extract<Segment, { readonly kind: K }> | undefined {
+  return segment.kind === kind ? (segment as Extract<Segment, { readonly kind: K }>) : undefined;
 }
 
 const DocumentViewport: Component<DocumentViewportProps> = (props) => {
@@ -148,30 +170,33 @@ const DocumentViewport: Component<DocumentViewportProps> = (props) => {
               </span>
             )}
           </Show>
-          <For each={props.segments}>
+          <Index each={props.segments}>
             {(segment, index) => {
               // Highlighted iff this run's author is the foregrounded one. The DOM stays
-              // put — `<For>` is reference-keyed, so no spans are recreated; only these
-              // reactive style/aria accessors re-evaluate on a focus change, and only the
-              // matching spans actually write to the DOM (the rest resolve to `undefined`).
+              // put — `<Index>` is position-keyed, so the row's spans are reused across
+              // ticks (never torn down, so a hovered tooltip keeps its `:hover`); only
+              // these reactive style/aria accessors re-evaluate on a focus change, and
+              // only the matching spans actually write to the DOM. `segment` is a `()
+              // => Segment` accessor here, so each read inside these closures tracks the
+              // per-row signal and the body restyles in place when the run updates.
               const highlighted = (): boolean => {
                 const highlight = props.highlight;
                 return (
                   highlight !== undefined &&
                   highlight !== null &&
-                  authorKeysOf(segment).has(highlight.key)
+                  authorKeysOf(segment()).has(highlight.key)
                 );
               };
               const attrStyle = (): JSX.CSSProperties | undefined =>
                 highlighted()
-                  ? highlightStyle(props.highlight?.color ?? ATTRIBUTION_FALLBACK, segment.kind)
+                  ? highlightStyle(props.highlight?.color ?? ATTRIBUTION_FALLBACK, segment().kind)
                   : undefined;
               const describedBy = (): string | undefined =>
                 highlighted() ? ATTR_DESC_ID : undefined;
               return (
                 <>
                   <Switch>
-                    <Match when={segment.kind === "accepted-text" && segment}>
+                    <Match when={asKind(segment(), "accepted-text")}>
                       {(seg) => (
                         <span
                           class="doc-accepted"
@@ -182,7 +207,7 @@ const DocumentViewport: Component<DocumentViewportProps> = (props) => {
                         </span>
                       )}
                     </Match>
-                    <Match when={segment.kind === "suggested-insert" && segment}>
+                    <Match when={asKind(segment(), "suggested-insert")}>
                       {(seg) => (
                         <span
                           class="doc-suggest"
@@ -195,7 +220,7 @@ const DocumentViewport: Component<DocumentViewportProps> = (props) => {
                         </span>
                       )}
                     </Match>
-                    <Match when={segment.kind === "marked-for-deletion" && segment}>
+                    <Match when={asKind(segment(), "marked-for-deletion")}>
                       {(seg) => (
                         <span
                           class="doc-strike"
@@ -208,7 +233,7 @@ const DocumentViewport: Component<DocumentViewportProps> = (props) => {
                         </span>
                       )}
                     </Match>
-                    <Match when={segment.kind === "opaque-placeholder" && segment}>
+                    <Match when={asKind(segment(), "opaque-placeholder")}>
                       {(seg) => (
                         <span class="doc-opaque" title={seg().label}>
                           <span aria-hidden="true">▤</span>
@@ -220,7 +245,7 @@ const DocumentViewport: Component<DocumentViewportProps> = (props) => {
                   {/* The writing caret (nib), painted after the run the current revision
                       wrote and tinted to that author's hue. Decorative — the dateline and
                       colophon carry the attribution semantics for assistive tech. */}
-                  <Show when={caretIndex() === index()}>
+                  <Show when={caretIndex() === index}>
                     <span
                       class="doc-caret"
                       aria-hidden="true"
@@ -230,7 +255,7 @@ const DocumentViewport: Component<DocumentViewportProps> = (props) => {
                 </>
               );
             }}
-          </For>
+          </Index>
         </article>
       </Show>
     </section>

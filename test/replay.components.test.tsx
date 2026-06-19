@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
+import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import DocumentViewport from "@/components/DocumentViewport";
 import SummaryInsights from "@/components/SummaryInsights";
@@ -458,6 +459,48 @@ describe("replay UI components", () => {
     expect(boot.style.boxShadow).toBe("");
     // The screen-reader-only description names the contributor (content-free).
     expect(screen.getByText("Contributed by Author 1")).toBeTruthy();
+  });
+
+  it("reuses run DOM nodes across a segments update so hover tooltips don't flicker", () => {
+    // Regression: playback rebuilds `segments` into a FRESH array of FRESH objects
+    // every tick. `<For>` (reference-keyed) found zero identity overlap and tore down
+    // every span each tick, dropping `:hover` on the affordance run under the cursor
+    // and re-running its `::after` fade from 0 — the reported tooltip flicker. `<Index>`
+    // is position-keyed, so the node at each row persists and only its content updates.
+    // We assert the exact contract: the suggest run's DOM node survives the update.
+    const [segments, setSegments] = createSignal<Segment[]>([
+      { kind: "accepted-text", text: "Hello ", fromRevision: 1, toRevision: 1, revisions: [1] },
+      {
+        kind: "suggested-insert",
+        text: "wor",
+        fromRevision: 2,
+        toRevision: 2,
+        revisions: [2],
+      },
+    ]);
+    const { container } = render(() => <DocumentViewport segments={segments()} />);
+    const before = container.querySelector(".doc-suggest");
+    expect(before).toBeTruthy();
+    expect(before?.getAttribute("data-doc-tip")).toBeTruthy();
+
+    // A subsequent playback tick: a brand-new array of brand-new objects, with the
+    // suggest run's tail grown by a char (the typical "still being typed" case).
+    setSegments([
+      { kind: "accepted-text", text: "Hello ", fromRevision: 1, toRevision: 1, revisions: [1] },
+      {
+        kind: "suggested-insert",
+        text: "world",
+        fromRevision: 2,
+        toRevision: 2,
+        revisions: [2],
+      },
+    ]);
+    const after = container.querySelector(".doc-suggest");
+    // SAME node instance (never recreated), so a live :hover and its tooltip persist...
+    expect(after).toBe(before);
+    // ...the tooltip label is unchanged, and the grown text is updated in place.
+    expect(after?.getAttribute("data-doc-tip")).toBe(before?.getAttribute("data-doc-tip"));
+    expect(after?.textContent).toContain("world");
   });
 
   it("renders no highlight or description when no author is foregrounded", () => {
