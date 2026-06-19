@@ -28,6 +28,7 @@
 import { render } from "solid-js/web";
 import "virtual:uno.css";
 import ReplayAffordance from "@/components/ReplayAffordance";
+import { decideReconcile } from "@/lib/classroom/reconcile";
 import { extractDocId } from "@/lib/docs-url";
 import { buildGradingPath, parseClassroomLocation } from "@/lib/docs-url/classroom";
 import type { DocId } from "@/lib/domain/ids";
@@ -233,25 +234,40 @@ export default defineContentScript({
       },
     });
 
+    // Whether the current location calls for the affordance at all — kept separate
+    // from whether its anchor is momentarily resolvable. Classroom re-renders the
+    // grading/submission panels in place, so the anchor can blink out for a frame
+    // without the view actually changing; we must not tear the button down for that.
+    const affordanceApplies = (): boolean => {
+      const loc = parseClassroomLocation(location.href);
+      if (loc === null) return false;
+      return loc.view === "grading" ? detectGradingDoc() !== null : loc.studentId !== null;
+    };
+
     // Classroom is a heavy SPA: toolbars mount late, the doc iframe's `src` is set
     // after insertion, and switching students re-renders in place without a reload.
-    // Reconcile (mount / move / remove + complete any pending replay) on DOM and
+    // The submission card is rendered by Classroom's Wiz engine, which prunes our
+    // injected sibling during post-load churn (the flicker) WITHOUT clearing WXT's
+    // `ui.mounted` — so a stale "mounted" is how the button vanished permanently.
+    // Reconcile keys off our own host's connectivity (`ui.shadowHost`), not just the
+    // anchor's, and only removes when the view itself stops applying. Runs on DOM and
     // navigation changes, with a slow interval as a backstop for mutations we miss.
     let mountedAnchor: Element | null = null;
     const reconcile = (): void => {
       if (!ctx.isValid) return;
       const anchor = currentAnchor();
-      if (anchor === null) {
-        if (ui.mounted) {
-          ui.remove();
-          mountedAnchor = null;
-        }
-      } else if (!ui.mounted) {
-        ui.mount();
-        mountedAnchor = anchor;
-      } else if (mountedAnchor !== anchor || !document.contains(mountedAnchor)) {
-        // Anchor was replaced under us (student switch / SPA re-render) — re-attach.
+      const action = decideReconcile({
+        applicable: affordanceApplies(),
+        mounted: ui.mounted != null,
+        hostConnected: document.contains(ui.shadowHost),
+        anchorPresent: anchor !== null,
+        anchorChanged: anchor !== null && anchor !== mountedAnchor,
+      });
+      if (action === "remove") {
         ui.remove();
+        mountedAnchor = null;
+      } else if (action === "mount") {
+        if (ui.mounted != null) ui.remove(); // dispose the old root before re-rooting
         ui.mount();
         mountedAnchor = anchor;
       }

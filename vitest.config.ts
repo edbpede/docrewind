@@ -35,6 +35,7 @@ export default defineConfig({
       "lib/replay/**",
       "lib/i18n/**",
       "lib/identity/**",
+      "lib/classroom/**",
       "lib/theme.test.ts",
       // Playwright owns assembled-extension specs under e2e/.
       "e2e/**",
