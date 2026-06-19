@@ -103,5 +103,22 @@ describe("segmentsAt segment kinds", () => {
     expect(segments).toHaveLength(1);
     expect(segments[0]?.kind).toBe("accepted-text");
     expect(segments[0]?.kind === "accepted-text" ? segments[0].fromRevision : -1).toBe(1);
+    // A single-revision run opens and closes at the same revision.
+    expect(segments[0]?.kind === "accepted-text" ? segments[0].toRevision : -1).toBe(1);
+  });
+
+  test("a run extended across revisions records from/to as the opening/closing revision", () => {
+    // Revision 2 appends onto revision 1's run — they coalesce into one accepted run
+    // whose tail belongs to revision 2 (the writing-caret's join key on sequential typing).
+    const model = reconstruct([
+      { ty: "is", s: "Hello", ibi: 1, revision_id: 1 },
+      { ty: "is", s: " world", ibi: 6, revision_id: 2 },
+    ]);
+    const segments = segmentsAt(model);
+    expect(segments).toHaveLength(1);
+    const run = segments[0];
+    expect(run?.kind === "accepted-text" ? run.text : "").toBe("Hello world");
+    expect(run?.kind === "accepted-text" ? run.fromRevision : -1).toBe(1);
+    expect(run?.kind === "accepted-text" ? run.toRevision : -1).toBe(2);
   });
 });

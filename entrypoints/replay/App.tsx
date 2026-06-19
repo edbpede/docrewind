@@ -43,6 +43,7 @@ import {
   sessionDetail,
   strings,
 } from "@/lib/i18n/strings";
+import { deriveAuthors } from "@/lib/identity/authors";
 import { sendMessage } from "@/lib/messaging";
 import { segmentsAt } from "@/lib/reconstruction/render";
 import { modelAtRevisionIndex } from "@/lib/reconstruction/snapshot";
@@ -504,6 +505,69 @@ const ReplaySurface: Component<{
     const model = currentModel();
     return model === undefined ? [] : segmentsAt(model);
   });
+
+  // ── Authorship attribution (§9.7) ───────────────────────────────────────────
+  // ONE shared author derivation feeds BOTH the colophon and the caret/highlight, so
+  // they agree on opaque keys, "Author N" numbering, and assigned colours. Built off the
+  // loaded revisions + the (opt-in) resolved identities — the same inputs the colophon uses.
+  const authors = createMemo(() =>
+    deriveAuthors(loaded()?.revisions ?? [], showRealIdentities() ?? false, identities() ?? {}),
+  );
+  // author key → assigned hue (null when the source carried none); the caret + highlight
+  // tints read it. Keyed by the stable opaque token, never the raw Gaia id.
+  const colorByAuthorKey = createMemo(() => {
+    const map = new Map<string, string | null>();
+    for (const author of authors()) {
+      map.set(author.key, author.color);
+    }
+    return map;
+  });
+  // revision id → author key: joins a rendered segment (which carries its insert
+  // revision) back to its contributor. Stable per load.
+  const authorKeyByRevision = createMemo(() => {
+    const map = new Map<number, string>();
+    for (const revision of loaded()?.revisions ?? []) {
+      if (revision.userId !== null) {
+        map.set(Number(revision.revisionId), revision.userId);
+      }
+    }
+    return map;
+  });
+
+  // The colophon publishes which contributor is foregrounded (hover/pin) and the viewport
+  // highlights that author's runs — the shared state lives HERE so the two sibling
+  // surfaces both reach it. Off when nothing is foregrounded or identities are opt-out.
+  const [activeAuthorKey, setActiveAuthorKey] = createSignal<string | null>(null);
+  const highlight = createMemo(() => {
+    const key = activeAuthorKey();
+    if (key === null) {
+      return null;
+    }
+    const author = authors().find((entry) => entry.key === key);
+    if (author === undefined) {
+      return null;
+    }
+    return { key, color: author.color, label: author.label };
+  });
+
+  // The writing caret follows the CURRENT frame's revision (`currentIndex` is an
+  // applied-count, so the frame's revision is `revisions[currentIndex - 1]`); index 0 is
+  // the blank page, before anything was written. Colour-coded to that revision's author.
+  const caret = createMemo(() => {
+    const data = loaded();
+    const index = currentIndex();
+    if (data === undefined || index <= 0) {
+      return null;
+    }
+    const revision = data.revisions[index - 1];
+    if (revision === undefined) {
+      return null;
+    }
+    const color =
+      revision.userId !== null ? (colorByAuthorKey().get(revision.userId) ?? null) : null;
+    return { revision: Number(revision.revisionId), color };
+  });
+
   const markers = createMemo(() => {
     const data = loaded();
     return data === undefined ? [] : buildMarkers(data.timeline, data.revisions);
@@ -839,15 +903,23 @@ const ReplaySurface: Component<{
 
                     {/* The leaf is the hero: the rebuilt manuscript sits directly
                         under its transport, so the controls read as the margin of
-                        the page they drive. */}
-                    <DocumentViewport segments={currentSegments()} />
+                        the page they drive. The caret + highlight surface authorship:
+                        who is writing now, and (on a colophon hover) who wrote what. */}
+                    <DocumentViewport
+                      segments={currentSegments()}
+                      caret={caret()}
+                      highlight={highlight()}
+                      authorKeyByRevision={authorKeyByRevision()}
+                    />
 
-                    {/* The colophon: content-free insights close the record. */}
+                    {/* The colophon: content-free insights close the record. Foregrounding
+                        a contributor here highlights their runs on the leaf above. */}
                     <SummaryInsights
                       revisions={data().revisions}
                       timeline={data().timeline}
                       realIdentities={showRealIdentities() ?? false}
                       identities={identities() ?? {}}
+                      onActiveAuthorChange={setActiveAuthorKey}
                     />
                     <footer class="pt-2 text-sm">
                       <a

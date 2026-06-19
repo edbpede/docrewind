@@ -85,6 +85,11 @@ export const strings = {
     suggestedInsert: "Suggested insertion",
     markedForDeletion: "Marked for deletion",
     empty: "Nothing has been written yet at this point.",
+    // Authorship attribution: the off-screen description linked (via aria-describedby)
+    // to every segment highlighted while a contributor is foregrounded. Combined with
+    // the author's display name by `contributedBy` so assistive tech announces who
+    // wrote the highlighted run. Content-free: a name only, never document text.
+    contributedBy: "Contributed by",
   },
   progress: {
     discovering: "Discovering revisions…",
@@ -214,6 +219,11 @@ export function percentLabel(pct: number): string {
  * when identity display is turned off. */
 export function authorLabel(index: number): string {
   return `Author ${index + 1}`;
+}
+
+/** Off-screen attribution label for a highlighted run, e.g. "Contributed by Author 1". */
+export function contributedBy(authorLabelText: string): string {
+  return `${strings.viewport.contributedBy} ${authorLabelText}`;
 }
 
 /**

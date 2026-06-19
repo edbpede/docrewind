@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import DocumentViewport from "@/components/DocumentViewport";
 import SummaryInsights from "@/components/SummaryInsights";
 import Timeline, { clusterMarkers, type TimelineMarker } from "@/components/Timeline";
 import TimelineLegend from "@/components/TimelineLegend";
+import type { Segment } from "@/lib/reconstruction/render";
 
 // jsdom ships no ResizeObserver, and the Timeline only stacks colliding seals
 // once it has a measured width. This mock reports a fixed 600px track and fires
@@ -369,5 +371,107 @@ describe("replay UI components", () => {
     // ...but with no address, neither the Email label nor any placeholder is rendered.
     expect(screen.queryByText("Email")).toBeNull();
     expect(screen.queryByText("Not available")).toBeNull();
+  });
+
+  it("publishes the foregrounded author key on hover and clears it on leave", () => {
+    const onActiveAuthorChange = vi.fn();
+    render(() => (
+      <SummaryInsights
+        revisions={[revision(1, 1_000, asUserId("author-x"))]}
+        timeline={[]}
+        onActiveAuthorChange={onActiveAuthorChange}
+      />
+    ));
+    // The effect publishes the initial (empty) focus once on mount.
+    expect(onActiveAuthorChange).toHaveBeenCalledWith(null);
+
+    const chip = screen.getAllByRole("listitem")[0];
+    if (chip === undefined) throw new Error("expected an author chip");
+    fireEvent.pointerEnter(chip);
+    expect(onActiveAuthorChange).toHaveBeenLastCalledWith("author-x");
+
+    fireEvent.pointerLeave(chip);
+    expect(onActiveAuthorChange).toHaveBeenLastCalledWith(null);
+  });
+
+  it("paints a colour-coded writing caret after the current revision's run", () => {
+    const segments: Segment[] = [
+      { kind: "accepted-text", text: "Hello ", fromRevision: 1, toRevision: 1, revisions: [1] },
+      { kind: "accepted-text", text: "world", fromRevision: 2, toRevision: 2, revisions: [2] },
+    ];
+    const { container } = render(() => (
+      <DocumentViewport segments={segments} caret={{ revision: 2, color: "#ff0000" }} />
+    ));
+    const caret = container.querySelector<HTMLElement>(".doc-caret");
+    expect(caret).toBeTruthy();
+    // The caret is tinted to the author's hue and hidden from assistive tech.
+    expect(caret?.style.backgroundColor).toBe("rgb(255, 0, 0)");
+    expect(caret?.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("paints the caret on a run the current revision EXTENDED (sequential typing)", () => {
+    // Revision 5 appended onto a run opened by revision 1 — the coalesced run keeps
+    // fromRevision=1 but toRevision=5, so the caret must still follow the active frame.
+    const segments: Segment[] = [
+      { kind: "accepted-text", text: "Hello", fromRevision: 1, toRevision: 5, revisions: [1, 5] },
+    ];
+    const { container } = render(() => (
+      <DocumentViewport segments={segments} caret={{ revision: 5, color: "#00ff00" }} />
+    ));
+    expect(container.querySelector(".doc-caret")).toBeTruthy();
+  });
+
+  it("paints no caret on a frame whose revision left no visible run", () => {
+    const segments: Segment[] = [
+      { kind: "accepted-text", text: "Hello", fromRevision: 1, toRevision: 1, revisions: [1] },
+    ];
+    // A pure-deletion frame: the current revision (7) has no run of its own on screen.
+    const { container } = render(() => (
+      <DocumentViewport segments={segments} caret={{ revision: 7, color: null }} />
+    ));
+    expect(container.querySelector(".doc-caret")).toBeNull();
+  });
+
+  it("highlights only the foregrounded author's runs and links them for a11y", () => {
+    const segments: Segment[] = [
+      { kind: "accepted-text", text: "by Ada", fromRevision: 1, toRevision: 1, revisions: [1] },
+      { kind: "accepted-text", text: "by Boot", fromRevision: 2, toRevision: 2, revisions: [2] },
+    ];
+    const authorKeyByRevision = new Map<number, string>([
+      [1, "ada"],
+      [2, "boot"],
+    ]);
+    render(() => (
+      <DocumentViewport
+        segments={segments}
+        authorKeyByRevision={authorKeyByRevision}
+        highlight={{ key: "ada", color: "#673AB7", label: "Author 1" }}
+      />
+    ));
+    const ada = screen.getByText("by Ada");
+    const boot = screen.getByText("by Boot");
+    // Ada's run is highlighted (linked to the off-screen attribution) and tinted...
+    expect(ada.getAttribute("aria-describedby")).toBe("dr-doc-attr-desc");
+    expect(ada.style.boxShadow).not.toBe("");
+    // ...while Boot's run is untouched.
+    expect(boot.getAttribute("aria-describedby")).toBeNull();
+    expect(boot.style.boxShadow).toBe("");
+    // The screen-reader-only description names the contributor (content-free).
+    expect(screen.getByText("Contributed by Author 1")).toBeTruthy();
+  });
+
+  it("renders no highlight or description when no author is foregrounded", () => {
+    const segments: Segment[] = [
+      { kind: "accepted-text", text: "plain", fromRevision: 1, toRevision: 1, revisions: [1] },
+    ];
+    render(() => (
+      <DocumentViewport
+        segments={segments}
+        authorKeyByRevision={new Map([[1, "ada"]])}
+        highlight={null}
+      />
+    ));
+    expect(screen.getByText("plain").getAttribute("aria-describedby")).toBeNull();
+    expect(screen.queryByText(/Contributed by/)).toBeNull();
   });
 });
