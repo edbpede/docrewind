@@ -48,7 +48,7 @@ describe("replay UI components", () => {
     vi.unstubAllGlobals();
   });
 
-  it("scrubs the timeline with pointer input", async () => {
+  it("scrubs the timeline with pointer input across the padded interior", async () => {
     const onScrub = vi.fn();
     render(() => <Timeline currentIndex={0} max={10} events={[]} onScrub={onScrub} />);
     const slider = screen.getByRole("slider");
@@ -68,11 +68,46 @@ describe("replay UI components", () => {
     slider.hasPointerCapture = vi.fn(() => true);
     slider.releasePointerCapture = vi.fn();
 
+    // The axis is inset by EDGE_INSET_PX (12px) at each end so the boundary marks
+    // own a safe-area margin, so on this 100px-wide mock the usable band is
+    // [12, 88] and a click maps through (clientX − 12) / 76.
     await fireEvent.pointerDown(slider, { pointerId: 1, clientX: 75 });
     await fireEvent.pointerMove(slider, { pointerId: 1, clientX: 25 });
     await fireEvent.pointerUp(slider, { pointerId: 1, clientX: 25 });
 
-    expect(onScrub.mock.calls.map((call) => call[0])).toEqual([8, 3]);
+    // (75 − 12) / 76 ≈ 0.83 → 8;  (25 − 12) / 76 ≈ 0.17 → 2.
+    expect(onScrub.mock.calls.map((call) => call[0])).toEqual([8, 2]);
+  });
+
+  it("clamps pointer scrubs that land in either end safe area to the bounds", async () => {
+    const onScrub = vi.fn();
+    render(() => <Timeline currentIndex={0} max={10} events={[]} onScrub={onScrub} />);
+    const slider = screen.getByRole("slider");
+    slider.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        top: 0,
+        width: 100,
+        height: 10,
+        right: 100,
+        bottom: 10,
+        x: 0,
+        y: 0,
+        toJSON: () => {},
+      }) as DOMRect;
+    slider.setPointerCapture = vi.fn();
+    slider.hasPointerCapture = vi.fn(() => true);
+    slider.releasePointerCapture = vi.fn();
+
+    // A click inside the left margin (< 12px) clamps to index 0; one inside the
+    // right margin (> 88px) clamps to max — the inset never yields fractional
+    // positions beyond the boundary marks.
+    await fireEvent.pointerDown(slider, { pointerId: 1, clientX: 4 });
+    await fireEvent.pointerUp(slider, { pointerId: 1, clientX: 4 });
+    await fireEvent.pointerDown(slider, { pointerId: 2, clientX: 97 });
+    await fireEvent.pointerUp(slider, { pointerId: 2, clientX: 97 });
+
+    expect(onScrub.mock.calls.map((call) => call[0])).toEqual([0, 10]);
   });
 
   it("scrubs the timeline with the keyboard (Arrow / Home / End)", async () => {

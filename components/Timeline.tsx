@@ -242,12 +242,35 @@ function summarizeCluster(cluster: MarkerCluster, max: number): ClusterSummary {
   };
 }
 
+// A fixed horizontal safe area reserved at EACH end of the track. The index-0 and
+// index-max marks otherwise sit flush against (and half-clipped by) the rounded
+// track ends, where they read as edge artefacts and are awkward to aim at. With
+// this inset the boundary marks stand clear in their own margin. The whole
+// applied-count axis — markers, the fill ramp, the playhead nib, and the popovers
+// — maps through `posPct`/`fillWidth` below, and `scrubFromClientX` inverts the
+// same mapping, so the padded coordinate system is the single source of truth.
+const EDGE_INSET_PX = 12;
+
 const Timeline: Component<TimelineProps> = (props) => {
   let track: HTMLDivElement | undefined;
   let activePointerId: number | null = null;
   const fraction = createMemo(() => (props.max > 0 ? props.currentIndex / props.max : 0));
-  const pct = (value: number): string =>
-    `${(props.max > 0 ? (value / props.max) * 100 : 0).toFixed(2)}%`;
+
+  // Map an applied-count `index` to its physical left offset within the track,
+  // interpolating across the inset interior: index 0 lands at `EDGE_INSET_PX`,
+  // index `max` at `100% − EDGE_INSET_PX`. Expressed as a `calc` so the safe area
+  // is a fixed pixel width at any track size (rather than a width-relative %).
+  const posPct = (index: number): string => {
+    const frac = props.max > 0 ? Math.max(0, Math.min(1, index / props.max)) : 0;
+    return `calc(${EDGE_INSET_PX}px + (100% - ${EDGE_INSET_PX * 2}px) * ${frac.toFixed(4)})`;
+  };
+
+  // The progress ramp shares the inset interior: it begins at the index-0 anchor
+  // (left = EDGE_INSET_PX) and its width spans the same usable band, so its leading
+  // edge stays glued to the playhead nib at every position.
+  const fillWidth = createMemo(
+    () => `calc((100% - ${EDGE_INSET_PX * 2}px) * ${fraction().toFixed(4)})`,
+  );
 
   // Measured track width feeds collision stacking. It stays 0 until layout is
   // observed (jsdom keeps it 0), so stacking is inert until there is a real width
@@ -271,7 +294,11 @@ const Timeline: Component<TimelineProps> = (props) => {
     }
   });
 
-  const clusters = createMemo(() => clusterMarkers(props.events, props.max, trackWidth()));
+  // Collision stacking runs in the SAME inset band the seals render into, so it
+  // measures against the usable interior width, not the raw track width.
+  const clusters = createMemo(() =>
+    clusterMarkers(props.events, props.max, Math.max(0, trackWidth() - EDGE_INSET_PX * 2)),
+  );
 
   // Hover/focus tooltip: a single popover, driven by the active cluster id, so the
   // seal itself stays a thin jump-to button. Set on enter/focus, cleared on
@@ -345,7 +372,11 @@ const Timeline: Component<TimelineProps> = (props) => {
       return;
     }
     const rect = track.getBoundingClientRect();
-    const ratio = rect.width > 0 ? (clientX - rect.left) / rect.width : 0;
+    // Invert `posPct`: the usable band runs from EDGE_INSET_PX to width −
+    // EDGE_INSET_PX, so a click anywhere in either safe-area margin clamps to the
+    // nearest bound (index 0 / max) rather than reading as a fractional position.
+    const usable = rect.width - EDGE_INSET_PX * 2;
+    const ratio = usable > 0 ? (clientX - rect.left - EDGE_INSET_PX) / usable : 0;
     const next = Math.round(Math.max(0, Math.min(1, ratio)) * props.max);
     props.onScrub(next);
   }
@@ -417,7 +448,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       onPointerUp={endPointer}
       onPointerCancel={endPointer}
     >
-      <div class="tl-fill" style={{ width: `${fraction() * 100}%` }} />
+      <div class="tl-fill" style={{ left: `${EDGE_INSET_PX}px`, width: fillWidth() }} />
       <For each={clusters()}>
         {(cluster) => {
           const single = cluster.members.length === 1 ? cluster.members[0]! : undefined;
@@ -434,7 +465,7 @@ const Timeline: Component<TimelineProps> = (props) => {
                   ? `tl-cluster ${clusterToneClass(cluster)}`
                   : `tl-marker ${markerToneClass(single.kind)} p-0`
               }
-              style={{ left: pct(cluster.index) }}
+              style={{ left: posPct(cluster.index) }}
               aria-label={ariaLabel}
               aria-describedby={activeId() === cluster.id ? "tl-tip" : undefined}
               aria-haspopup={single === undefined ? "dialog" : undefined}
@@ -480,7 +511,7 @@ const Timeline: Component<TimelineProps> = (props) => {
               id="tl-tip"
               class="tl-tip"
               role="tooltip"
-              style={{ left: pct(cluster().index), transform: tipTransform(cluster().index) }}
+              style={{ left: posPct(cluster().index), transform: tipTransform(cluster().index) }}
             >
               <span class="tl-tip-title">{summary().title}</span>
               <Show
@@ -524,7 +555,7 @@ const Timeline: Component<TimelineProps> = (props) => {
               class="tl-panel"
               role="dialog"
               aria-label={summary().title}
-              style={{ left: pct(cluster().index), transform: tipTransform(cluster().index) }}
+              style={{ left: posPct(cluster().index), transform: tipTransform(cluster().index) }}
             >
               <div class="tl-panel-head">
                 <div class="tl-panel-heading">
@@ -583,7 +614,7 @@ const Timeline: Component<TimelineProps> = (props) => {
           );
         }}
       </Show>
-      <div class="tl-thumb" style={{ left: pct(props.currentIndex) }} />
+      <div class="tl-thumb" style={{ left: posPct(props.currentIndex) }} />
     </div>
   );
 };
