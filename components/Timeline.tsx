@@ -170,8 +170,14 @@ export function clusterMarkers(
   }
 
   return groups.map((members) => {
-    const start = members[0]!.index; // sorted ascending
-    const end = members[members.length - 1]!.index;
+    const first = members[0];
+    const last = members[members.length - 1];
+    // groups only ever holds non-empty member arrays
+    if (first === undefined || last === undefined) {
+      throw new Error("clusterMarkers: unexpected empty group");
+    }
+    const start = first.index; // sorted ascending
+    const end = last.index;
     const mean = members.reduce((sum, m) => sum + m.index, 0) / members.length;
     return {
       id: members.map((m) => m.id).join("|"),
@@ -186,7 +192,8 @@ export function clusterMarkers(
 /** Graphite seal class for a mixed-kind cluster; the kind tone for a uniform one. */
 function clusterToneClass(cluster: MarkerCluster): string {
   const kinds = new Set(cluster.members.map((m) => m.kind));
-  return kinds.size === 1 ? markerToneClass(cluster.members[0]!.kind) : "tl-cluster-mixed";
+  const first = cluster.members[0];
+  return kinds.size === 1 && first ? markerToneClass(first.kind) : "tl-cluster-mixed";
 }
 
 /** One kind's tally within a cluster — the unit of both the peek ledger and aria. */
@@ -208,7 +215,7 @@ function clusterBreakdownRows(members: readonly TimelineMarker[]): ClusterBreakd
     counts.set(member.kind, (counts.get(member.kind) ?? 0) + 1);
   }
   return CLUSTER_KIND_ORDER.filter((kind) => counts.has(kind)).map((kind) => {
-    const count = counts.get(kind)!;
+    const count = counts.get(kind) ?? 0;
     const base = CLUSTER_KIND_LABEL[kind];
     return { kind, count, label: count === 1 ? base : `${base}s` };
   });
@@ -231,9 +238,9 @@ interface ClusterSummary {
 }
 
 function summarizeCluster(cluster: MarkerCluster, max: number): ClusterSummary {
-  if (cluster.members.length === 1) {
-    const marker = cluster.members[0]!;
-    return { title: marker.label, detail: marker.detail, rev: revisionOf(marker.index, max) };
+  const [first] = cluster.members;
+  if (cluster.members.length === 1 && first) {
+    return { title: first.label, detail: first.detail, rev: revisionOf(first.index, max) };
   }
   return {
     title: clusterCountLabel(cluster.members.length),
@@ -484,7 +491,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       <div class="tl-fill" style={{ left: `${EDGE_INSET_PX}px`, width: fillWidth() }} />
       <For each={clusters()}>
         {(cluster) => {
-          const single = cluster.members.length === 1 ? cluster.members[0]! : undefined;
+          const single = cluster.members.length === 1 ? cluster.members[0] : undefined;
           const summary = summarizeCluster(cluster, props.max);
           const ariaLabel = [summary.title, summary.detail, summary.rev]
             .filter((part): part is string => part !== undefined)
