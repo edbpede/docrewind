@@ -318,6 +318,23 @@ const DocumentViewport: Component<DocumentViewportProps> = (props) => {
     schedule();
   });
 
+  // Scroll anchoring vs. follow: the reconstructed document re-renders on EVERY
+  // playback tick, so runs above the caret change height and Chromium's scroll
+  // anchoring shifts `window.scrollY` to keep the prior content visually stable — a
+  // scroll the component never issued via `scrollTo`, and one that leaves total
+  // `scrollHeight` unchanged (so it is indistinguishable from a user scrollbar drag by
+  // position alone). After a follow scroll has settled (`progScrollReached`), `onScroll`
+  // reads that browser re-anchoring as "the user moved away" and disengages follow mid-
+  // playback — the large up/down-jump regression. While follow is engaged we are the
+  // sole intended scroll driver, so suppress anchoring on the viewport scroller; when
+  // the user takes over (follow off) restore the default so their reading position holds.
+  createEffect(() => {
+    if (typeof document === "undefined") {
+      return;
+    }
+    document.documentElement.style.overflowAnchor = props.follow !== false ? "none" : "";
+  });
+
   onMount(() => {
     if (typeof window === "undefined") {
       return;
@@ -422,6 +439,10 @@ const DocumentViewport: Component<DocumentViewportProps> = (props) => {
       cancelAnimationFrame(rafId);
     }
     clearTimeout(progScrollTimer);
+    // Leave the viewport scroller as we found it (drop our anchoring suppression).
+    if (typeof document !== "undefined") {
+      document.documentElement.style.overflowAnchor = "";
+    }
   });
 
   // The off-screen "Jump to edit" affordance: only while follow is OFF (when on we
