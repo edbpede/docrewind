@@ -837,6 +837,95 @@ describe("replay UI components", () => {
     expect(onFollowOff).toHaveBeenCalledTimes(1);
   });
 
+  // ── Fidelity: deferred-recompute ordering (async rAF, in-band caret after settle) ──
+  it("faithfully reproduces production deferred-recompute ordering: progScrollReached survives a recompute that sees the caret in-band after settle, then a user scroll away disengages follow", () => {
+    // Uses a manually-flushable rAF queue instead of syncRaf to exercise the true
+    // production path: each onScroll call schedules a NEW recompute frame (because
+    // recompute clears rafId on entry). The test mutates the caret rect between frames
+    // to reflect that the programmatic scroll actually landed — making recompute return
+    // decision.scroll=false so markProgrammatic is NOT called and progScrollReached
+    // survives into the user-scroll disengage check.
+    //
+    // A hypothetical bug that does NOT update the caret rect (keeps it at 900,920)
+    // would cause recompute to call markProgrammatic again, resetting progScrollReached
+    // to false, and the final onFollowOff assertion would FAIL — proving that the test
+    // genuinely distinguishes correct from buggy implementations.
+    const rafQueue: FrameRequestCallback[] = [];
+    let rafCounter = 1;
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+      rafQueue.push(cb);
+      return rafCounter++;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+
+    let capturedTarget = 0;
+    vi.stubGlobal(
+      "scrollTo",
+      vi.fn((opts: ScrollToOptions) => {
+        capturedTarget = opts.top ?? 0;
+      }),
+    );
+
+    let mockScrollY = 0;
+    vi.spyOn(window, "scrollY", "get").mockImplementation(() => mockScrollY);
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(768);
+    vi.spyOn(document.documentElement, "scrollHeight", "get").mockReturnValue(5000);
+
+    // Phase 1: caret far below the band. The variable is reassigned in phase 2 so
+    // the spy implementation closes over the binding, not the value.
+    let mockCaretRect: DOMRect = domRect(900, 920);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+      () => mockCaretRect,
+    );
+
+    const onFollowOff = vi.fn();
+    render(() => (
+      <DocumentViewport
+        segments={caretSegments}
+        caret={{ revision: 2, color: "#000000" }}
+        follow
+        onFollowOff={onFollowOff}
+      />
+    ));
+
+    // Frame 1: createEffect → schedule() → rAF queued. Flush it.
+    // recompute: caret (900,920) is below the band → decision.scroll=true →
+    //   markProgrammatic(target) → progScroll=true, progScrollReached=false.
+    // After recompute: rafId=undefined (cleared at entry).
+    expect(rafQueue.length).toBe(1);
+    rafQueue.shift()?.(0);
+    expect(capturedTarget).toBeGreaterThan(0);
+
+    // Phase 2: programmatic scroll has landed. Reflect the settled state:
+    //   • scrollY is now at the target (within PROG_SCROLL_TOLERANCE_PX=2).
+    //   • The caret rect updates to in-band because the page scrolled.
+    //     followScroll(300, 320, 768, capturedTarget): bandTopPx=153.6, bandBottomPx=598.88
+    //     → 300 ≥ 153.6 and 320 ≤ 598.88 → { scroll: false } → markProgrammatic NOT called.
+    mockScrollY = capturedTarget;
+    mockCaretRect = domRect(300, 320);
+
+    // Easing-tail scroll event at the target:
+    //   onScroll → schedule() queues frame2 (rafId was undefined after frame1)
+    //           → within-tolerance (|0| ≤ 2) → progScrollReached=true, suppressed.
+    window.dispatchEvent(new Event("scroll"));
+    expect(onFollowOff).not.toHaveBeenCalled();
+
+    // Frame 2: recompute with the now-in-band caret.
+    // decision.scroll=false → markProgrammatic NOT called → progScrollReached stays true.
+    // (If this frame ran with the OLD rect (900,920), markProgrammatic would fire,
+    // resetting progScrollReached=false, and the next assertion would fail — the test
+    // then correctly identifies the bug.)
+    expect(rafQueue.length).toBe(1);
+    rafQueue.shift()?.(0);
+    expect(onFollowOff).not.toHaveBeenCalled();
+
+    // Phase 3: user scrolls 50px past the settled target — clearly away.
+    // progScrollReached=true + |50| > PROG_SCROLL_TOLERANCE_PX → clear guard → disengage.
+    mockScrollY = capturedTarget + 50;
+    window.dispatchEvent(new Event("scroll"));
+    expect(onFollowOff).toHaveBeenCalledTimes(1);
+  });
+
   // ── Claim: clamped-maxScroll guard (progScrollTarget upper-bound fix) ─────────
   it("clamps progScrollTarget to the reachable max-scroll when the raw followScroll target exceeds the document bottom, so progScrollReached trips at the clamped landing and a user scroll away disengages", () => {
     let capturedTarget = 0;
