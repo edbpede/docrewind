@@ -64,7 +64,7 @@ describe("strings catalog", () => {
     expect(strings.insights.authorEdits.length).toBeGreaterThan(0);
     expect(strings.insights.authorActive.length).toBeGreaterThan(0);
     expect(strings.options.title.length).toBeGreaterThan(0);
-    expect(strings.options.keepRawHint).toContain("once no replay or decode is using it");
+    expect(strings.options.keepRawHint).toContain("once it's no longer needed");
     expect(strings.options.perDocumentCapLabel).toBe("Per-document cap (MB)");
     expect(strings.options.globalCapLabel).toBe("Global cap (MB)");
   });
