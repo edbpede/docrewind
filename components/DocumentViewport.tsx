@@ -218,6 +218,21 @@ const DocumentViewport: Component<DocumentViewportProps> = (props) => {
   };
 
   let rafId: number | undefined;
+  // Programmatic-scroll guard: set before every window.scrollTo call we issue so
+  // the `scroll` event listener can distinguish our own position adjustments from
+  // genuine user-initiated scrolls (keyboard nav, scrollbar drag). Smooth-scroll
+  // animations emit multiple `scroll` events over time, so the flag stays set for
+  // 1200 ms after the last scrollTo call — long enough to outlast any animation.
+  let progScroll = false;
+  let progScrollTimer: ReturnType<typeof setTimeout> | undefined;
+  const markProgrammatic = (): void => {
+    progScroll = true;
+    clearTimeout(progScrollTimer);
+    progScrollTimer = setTimeout(() => {
+      progScroll = false;
+    }, 1200);
+  };
+
   const recompute = (): void => {
     rafId = undefined;
     if (typeof window === "undefined") {
@@ -233,8 +248,10 @@ const DocumentViewport: Component<DocumentViewportProps> = (props) => {
     if (props.follow !== false) {
       const decision = followScroll(box.top, box.bottom, vh, window.scrollY);
       if (decision.scroll) {
+        markProgrammatic();
         window.scrollTo({ top: decision.top, behavior: props.scrollBehavior ?? "smooth" });
       }
+
       // Following keeps the caret in view, so the off-screen pill never shows.
       setCaretView("visible");
       return;
@@ -266,24 +283,51 @@ const DocumentViewport: Component<DocumentViewportProps> = (props) => {
     if (typeof window === "undefined") {
       return;
     }
-    // A real user gesture (wheel / touch drag) means "I'm driving now" — disengage
-    // follow so playback stops yanking the page. We listen for INPUT events, not the
-    // `scroll` event, so our own programmatic scrollTo is never mistaken for intent.
+    // A real user gesture means "I'm driving now" — disengage follow so playback
+    // stops yanking the page. We cover three gesture surfaces:
+    //   • wheel / touchmove — input events that never fire for programmatic scrollTo.
+    //   • keydown on navigation keys — fires before the resulting scroll event, giving
+    //     immediate disengage without waiting on the smooth-scroll settle timer.
+    //   • scroll (with progScroll guard) — catches scrollbar dragging and any other
+    //     scroll source not covered above; skipped while our own scrollTo is in flight.
     const onUserScroll = (): void => {
       if (props.follow !== false) {
         props.onFollowOff?.();
       }
     };
-    // Pill visibility tracks the viewport: recompute on scroll/resize (read-only).
+    // Nav keys that trigger page scrolling. We act on keydown (before the scroll
+    // fires) so keyboard users get immediate disengage.
+    const NAV_KEYS = new Set([
+      "ArrowUp",
+      "ArrowDown",
+      "ArrowLeft",
+      "ArrowRight",
+      "PageUp",
+      "PageDown",
+      "Home",
+      "End",
+    ]);
+    const onKeyNav = (e: KeyboardEvent): void => {
+      if (NAV_KEYS.has(e.key)) onUserScroll();
+    };
+    // Pill visibility + scrollbar-drag disengage: runs on every scroll event.
+    // Skipped for our own programmatic scrollTo calls (progScroll guard).
+    const onScroll = (): void => {
+      schedule();
+      if (!progScroll) onUserScroll();
+    };
+    // Pill visibility for window resize (no disengage needed).
     const onView = (): void => schedule();
     window.addEventListener("wheel", onUserScroll, { passive: true });
     window.addEventListener("touchmove", onUserScroll, { passive: true });
-    window.addEventListener("scroll", onView, { passive: true });
+    window.addEventListener("keydown", onKeyNav);
+    window.addEventListener("scroll", onScroll, { passive: true });
     window.addEventListener("resize", onView, { passive: true });
     onCleanup(() => {
       window.removeEventListener("wheel", onUserScroll);
       window.removeEventListener("touchmove", onUserScroll);
-      window.removeEventListener("scroll", onView);
+      window.removeEventListener("keydown", onKeyNav);
+      window.removeEventListener("scroll", onScroll);
       window.removeEventListener("resize", onView);
     });
   });
@@ -291,6 +335,7 @@ const DocumentViewport: Component<DocumentViewportProps> = (props) => {
     if (rafId !== undefined && typeof cancelAnimationFrame !== "undefined") {
       cancelAnimationFrame(rafId);
     }
+    clearTimeout(progScrollTimer);
   });
 
   // The off-screen "Jump to edit" affordance: only while follow is OFF (when on we
@@ -301,6 +346,7 @@ const DocumentViewport: Component<DocumentViewportProps> = (props) => {
     const box = measureCaret();
     if (box !== null && typeof window !== "undefined") {
       const decision = followScroll(box.top, box.bottom, window.innerHeight, window.scrollY);
+      markProgrammatic();
       window.scrollTo({ top: decision.top, behavior: props.scrollBehavior ?? "smooth" });
     }
     props.onFollowOn?.();

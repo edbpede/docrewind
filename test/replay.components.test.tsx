@@ -690,6 +690,61 @@ describe("replay UI components", () => {
     expect(onFollowOff).toHaveBeenCalled();
   });
 
+  it("disengages follow on keyboard navigation keys (keydown ArrowDown)", () => {
+    vi.stubGlobal("scrollTo", vi.fn());
+    syncRaf();
+    // Caret in view — no programmatic scrollTo fires, so progScroll stays false.
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(domRect(100, 120));
+    const onFollowOff = vi.fn();
+    render(() => (
+      <DocumentViewport
+        segments={caretSegments}
+        caret={{ revision: 2, color: "#000000" }}
+        follow
+        onFollowOff={onFollowOff}
+      />
+    ));
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown" }));
+    expect(onFollowOff).toHaveBeenCalled();
+  });
+
+  it("disengages follow on a non-wheel scroll event (scrollbar drag)", () => {
+    vi.stubGlobal("scrollTo", vi.fn());
+    syncRaf();
+    // Caret in view — recompute does not call scrollTo, so progScroll stays false.
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(domRect(100, 120));
+    const onFollowOff = vi.fn();
+    render(() => (
+      <DocumentViewport
+        segments={caretSegments}
+        caret={{ revision: 2, color: "#000000" }}
+        follow
+        onFollowOff={onFollowOff}
+      />
+    ));
+    window.dispatchEvent(new Event("scroll"));
+    expect(onFollowOff).toHaveBeenCalled();
+  });
+
+  it("does not disengage follow on the component's own programmatic scrollTo", () => {
+    vi.stubGlobal("scrollTo", vi.fn());
+    syncRaf();
+    // Caret far below the band → recompute calls scrollTo → sets progScroll flag.
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(domRect(900, 920));
+    const onFollowOff = vi.fn();
+    render(() => (
+      <DocumentViewport
+        segments={caretSegments}
+        caret={{ revision: 2, color: "#000000" }}
+        follow
+        onFollowOff={onFollowOff}
+      />
+    ));
+    // Simulate the scroll events that window.scrollTo would emit during its animation.
+    window.dispatchEvent(new Event("scroll"));
+    expect(onFollowOff).not.toHaveBeenCalled();
+  });
+
   it("re-engages follow and snaps to the caret when the jump pill is tapped", () => {
     const scrollTo = vi.fn();
     vi.stubGlobal("scrollTo", scrollTo);
