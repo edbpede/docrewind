@@ -159,9 +159,9 @@ const SummaryInsights: Component<SummaryInsightsProps> = (rawProps) => {
       <dl class="grid grid-cols-2 gap-x-4 gap-y-5 sm:grid-cols-5">
         <For each={stats()}>
           {(stat) => (
-            <div class="dr-stat">
-              <dd class="dr-stat-value">{stat.value}</dd>
+            <div class="flex flex-col-reverse gap-0.5">
               <dt class="dr-stat-label">{stat.label}</dt>
+              <dd class="dr-stat-value">{stat.value}</dd>
             </div>
           )}
         </For>

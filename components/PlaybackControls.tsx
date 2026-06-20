@@ -9,7 +9,7 @@
 // so it uses <Index>.
 
 import type { Component } from "solid-js";
-import { Index } from "solid-js";
+import { Index, Show } from "solid-js";
 import { IconPause, IconPlay, IconRestart } from "@/components/icons";
 import { speedLabel, strings } from "@/lib/i18n/strings";
 
@@ -34,9 +34,9 @@ const PlaybackControls: Component<PlaybackControlsProps> = (props) => {
         aria-label={props.playing ? strings.controls.pause : strings.controls.play}
         onClick={() => props.onPlayPause()}
       >
-        <Index each={[props.playing]}>
-          {(isPlaying) => (isPlaying() ? <IconPause size={18} /> : <IconPlay size={18} />)}
-        </Index>
+        <Show when={props.playing} fallback={<IconPlay size={18} />}>
+          <IconPause size={18} />
+        </Show>
         <span>{props.playing ? strings.controls.pause : strings.controls.play}</span>
       </button>
 

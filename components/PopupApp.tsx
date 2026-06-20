@@ -56,8 +56,8 @@ const ExternalLink: Component<{ href: string; children: JSX.Element }> = (props)
 /** One label/value row in the About ledger (the iOS grouped-row pattern). */
 const DetailRow: Component<{ label: string; children: JSX.Element }> = (props) => (
   <div class="dr-row">
-    <span class="dr-row-label shrink-0">{props.label}</span>
-    <span class="min-w-0 text-right text-[0.9375rem]">{props.children}</span>
+    <dt class="dr-row-label shrink-0">{props.label}</dt>
+    <dd class="m-0 min-w-0 text-right text-[0.9375rem]">{props.children}</dd>
   </div>
 );
 

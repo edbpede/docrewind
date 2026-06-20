@@ -157,6 +157,7 @@ const OptionsApp: Component = () => {
   });
 
   function onTheme(next: Theme): void {
+    if ((themeValue() ?? "system") === next) return;
     mutateTheme(next);
     void theme.setValue(next);
   }

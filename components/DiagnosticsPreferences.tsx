@@ -27,7 +27,7 @@ const DiagnosticsPreferences: Component = () => {
   }
 
   return (
-    <div class="dr-group">
+    <section class="dr-group" aria-labelledby="dr-diagnostics-heading">
       <h2 id="dr-diagnostics-heading" class="dr-group-label">
         {strings.options.diagnosticsHeading}
       </h2>
@@ -51,7 +51,7 @@ const DiagnosticsPreferences: Component = () => {
           </fieldset>
         </div>
       </div>
-    </div>
+    </section>
   );
 };
 

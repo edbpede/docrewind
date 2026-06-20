@@ -55,8 +55,8 @@ color** — never a gradient-for-decoration.
 
 | Role | Light | Dark |
 |---|---|---|
-| `brand` (primary action bg) | `oklch(0.53 0.16 264)` | `oklch(0.58 0.16 264)` |
-| `brand-hover` (press/hover) | `oklch(0.47 0.16 264)` | `oklch(0.52 0.16 264)` |
+| `brand` (primary action bg) | `oklch(0.52 0.16 264)` | `oklch(0.52 0.16 264)` |
+| `brand-hover` (press/hover) | `oklch(0.46 0.16 264)` | `oklch(0.58 0.16 264)` |
 | `brand-text` (links/accent on light) | `oklch(0.47 0.16 264)` | `oklch(0.74 0.13 264)` |
 | `brand-soft` (selected / info tint) | `oklch(0.95 0.025 264)` | `oklch(0.30 0.06 264)` |
 | `brand-ring` (focus) | `oklch(0.62 0.14 264)` | `oklch(0.70 0.12 264)` |

@@ -171,16 +171,6 @@ const shortcuts = {
     "hover:text-ink outline-none focus-visible:ring-2 focus-visible:ring-brand-ring",
   "seg-item-active": "bg-surface text-ink shadow-[var(--dr-shadow-sm)] hover:text-ink",
 
-  // ── Switch (boolean settings — friendlier & bigger than a bare checkbox) ──
-  "dr-switch":
-    "relative inline-flex h-[1.6rem] w-[2.75rem] shrink-0 cursor-pointer items-center rounded-full " +
-    "bg-hairline-strong px-[0.2rem] transition-colors duration-200 ease-[var(--dr-ease-out)] " +
-    "outline-none focus-visible:ring-2 focus-visible:ring-brand-ring focus-visible:ring-offset-2 " +
-    "focus-visible:ring-offset-surface aria-checked:bg-brand disabled:opacity-45 disabled:cursor-not-allowed",
-  "dr-switch-knob":
-    "inline-block size-[1.2rem] rounded-full bg-white shadow-[var(--dr-shadow-sm)] " +
-    "transition-transform duration-200 ease-[var(--dr-ease-out)]",
-
   // ── Inputs ────────────────────────────────────────────────────────────────
   "dr-input":
     "rounded-xl bg-surface px-3 py-2 text-[0.9375rem] text-ink ring-1 ring-hairline-strong " +
@@ -575,7 +565,7 @@ export default defineConfig({
    Every transition/animation degrades to a crossfade or instant state. */
 @media (prefers-reduced-motion: reduce) {
   .tl-fill, .tl-thumb, .tl-track, .tl-marker, .tl-cluster, .progress-fill, .btn-base,
-  .seg-item, .dr-switch, .dr-switch-knob { transition: none !important; }
+  .seg-item { transition: none !important; }
   .doc-suggest::after, .doc-strike::after { transition: none !important; }
   /* Freeze the writing caret to a steady mark — still present and colour-coded. */
   .doc-caret { animation: none !important; opacity: 1 !important; }
