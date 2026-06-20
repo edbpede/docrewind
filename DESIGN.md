@@ -199,8 +199,11 @@ it never blocks a task or gates content visibility.
   toward the playhead; the playhead is a resting nib. Markers are friendly,
   legible seals carrying a glyph **with a visible legend** (the legend is shown, not
   hidden). Tooltips/panels lift on a `lg` shadow and are keyboard-reachable.
-- **Privacy note**: calm, **open by default** (not a collapsed disclosure) on first
-  view, with a friendly info icon — reassurance, not a warning.
+- **Privacy note**: a calm, compact disclosure row. The key reassurance line ("a
+  reconstruction, not the live document") is **always visible** and doubles as the
+  trigger; the fuller explanation is **collapsed by default** and expands on
+  demand. A friendly shield mark — reassurance, not a warning. Never a banner that
+  hides its own headline.
 - **Status/empty/error states**: every async surface has a friendly, plain-language
   empty, loading, and error state with one clear recovery action and an icon —
   never a bare sentence on a card.
