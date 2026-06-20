@@ -63,7 +63,8 @@ export const strings = {
       "DocRewind rebuilds the document from its revision history on your device. " +
       "Nothing is sent anywhere, and formatting is approximate.",
     approximationNote:
-      "Insert and delete timing is exact; suggestion visibility at earlier frames is approximate.",
+      "The order and timing of edits is exact. A few details — like exactly when a " +
+      "suggestion first appeared — are approximate.",
   },
   controls: {
     play: "Play",
@@ -137,14 +138,16 @@ export const strings = {
     themeSystem: "Match system",
     themeLight: "Light",
     themeDark: "Dark",
-    keepRawLabel: "Keep raw data for re-decoding",
-    keepRawHint: "When disabled, raw data is discarded once no replay or decode is using it.",
+    keepRawLabel: "Keep the original history on this device",
+    keepRawHint:
+      "Lets DocRewind rebuild this replay later without downloading it again. " +
+      "When off, the original history is cleared once it's no longer needed, to save space.",
     realIdentitiesLabel: "Show real author names",
     realIdentitiesHint:
-      "On by default. Resolves author names from the document's version-history data " +
-      "(a same-origin request to Google) and keeps them only for this browser session — " +
-      "never written to disk; no data is sent anywhere except that same-origin Google request. " +
-      'Turn off to show opaque "Author N" labels.',
+      "On by default. Shows each contributor's real name, read from Google's version " +
+      "history for this document. Names stay only in this browser session — never saved " +
+      "to your device and never sent anywhere else. Turn this off to label contributors as " +
+      '"Author 1", "Author 2" instead.',
     perDocumentCapLabel: "Per-document cap (MB)",
     globalCapLabel: "Global cap (MB)",
     diagnosticsDefault: "Default",

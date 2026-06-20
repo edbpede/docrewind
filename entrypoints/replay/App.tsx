@@ -25,6 +25,7 @@ import {
 } from "solid-js";
 import BrandMark from "@/components/BrandMark";
 import DocumentViewport from "@/components/DocumentViewport";
+import { IconAlert, IconSettings } from "@/components/icons";
 import PlaybackControls from "@/components/PlaybackControls";
 import PrivacyBanner from "@/components/PrivacyBanner";
 import ProgressView, { type ProgressPhase } from "@/components/ProgressView";
@@ -228,28 +229,38 @@ function buildMarkers(
   return markers;
 }
 
-/** A small centered card for missing-doc / load-failure states. */
+/** A small centered card for missing-doc / load-failure states. Calm, not alarming:
+ *  a brand row for orientation, the privacy reassurance, then a plain-language error
+ *  with one clear recovery action. */
 const MessageCard: Component<{
   readonly title: string;
   readonly body: string;
   readonly actionLabel?: string;
   readonly onAction?: () => void;
 }> = (props) => (
-  <main class="mx-auto flex max-w-prose flex-col gap-3 p-8">
+  <main class="mx-auto flex max-w-prose flex-col gap-4 p-6 sm:p-8">
+    <div class="flex items-center gap-2.5">
+      <BrandMark size={30} />
+      <span class="text-base font-semibold text-ink">{strings.app.brandName}</span>
+    </div>
     <PrivacyBanner />
-    <div class="dr-card flex flex-col gap-2">
-      <div class="flex items-center gap-2.5">
-        <BrandMark size={28} />
-        <h1 class="text-balance font-serif text-lg font-semibold text-strike">{props.title}</h1>
+    <div class="dr-card flex items-start gap-3">
+      <IconAlert size={22} class="mt-0.5 shrink-0 text-danger" />
+      <div class="flex flex-col gap-1.5">
+        <h1 class="dr-subheading text-balance">{props.title}</h1>
+        <p class="dr-body text-ink-secondary text-pretty">{props.body}</p>
+        <Show when={props.actionLabel}>
+          {(label) => (
+            <button
+              type="button"
+              class="btn-primary mt-1.5 self-start"
+              onClick={() => props.onAction?.()}
+            >
+              {label()}
+            </button>
+          )}
+        </Show>
       </div>
-      <p class="text-pretty text-sm text-stone-700 dark:text-stone-300">{props.body}</p>
-      <Show when={props.actionLabel}>
-        {(label) => (
-          <button type="button" class="btn-primary self-start" onClick={() => props.onAction?.()}>
-            {label()}
-          </button>
-        )}
-      </Show>
     </div>
   </main>
 );
@@ -804,10 +815,10 @@ const ReplaySurface: Component<{
 
   function renderProgress() {
     return (
-      <main class="mx-auto flex max-w-3xl flex-col gap-4 p-6">
+      <main class="mx-auto flex max-w-3xl flex-col gap-5 p-6 sm:p-8">
         <div class="flex items-center gap-2.5">
           <BrandMark size={32} />
-          <span class="dr-eyebrow">{strings.app.brandName}</span>
+          <span class="text-base font-semibold text-ink">{strings.app.brandName}</span>
         </div>
         <PrivacyBanner />
         <ProgressView
@@ -921,11 +932,12 @@ const ReplaySurface: Component<{
                       identities={identities() ?? {}}
                       onActiveAuthorChange={setActiveAuthorKey}
                     />
-                    <footer class="pt-2 text-sm">
+                    <footer class="flex pt-1">
                       <a
-                        class="text-revision underline"
+                        class="dr-link inline-flex items-center gap-1.5"
                         href={`options.html?doc=${encodeURIComponent(props.docId)}`}
                       >
+                        <IconSettings size={16} />
                         {strings.app.optionsLink}
                       </a>
                     </footer>

@@ -17,6 +17,7 @@
 // never fire. `on:click` fires at the target, before the isolation boundary.
 
 import type { Component } from "solid-js";
+import { IconHistory } from "@/components/icons";
 
 export interface ReplayAffordanceProps {
   /** Invoked on the user's explicit click — never automatically. */
@@ -31,7 +32,10 @@ const ReplayAffordance: Component<ReplayAffordanceProps> = (props) => {
       aria-label="Replay this document's revision history"
       on:click={() => props.onActivate()}
     >
-      <span aria-hidden="true">⟲</span>
+      {/* A clock-with-rewind mark in the brand accent: enough identity to be
+          findable in the Docs toolbar, on a neutral pill that still feels native.
+          Replaces the ambiguous ⟲ glyph (often read as undo/refresh). */}
+      <IconHistory size={18} class="text-brand-text" />
       <span>Replay revisions</span>
     </button>
   );

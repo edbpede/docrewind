@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
-// PrivacyBanner (plan Phase 5 Step 5a / PRD §9.6, §13). A calm, collapsed-by-
-// default disclosure answering "what am I looking at?" — the surface is a
-// reconstruction, not the live document. This is orientation, not a hazard, so
-// it reads as information rather than a warning. No internal state: a native
-// `<details>` owns open/closed, and the body is a pure view over the i18n
-// catalog. Meaning never relies on hue alone (§9.11) — the info mark and the
-// rotating chevron are non-color affordances.
+// PrivacyBanner (PRD §9.6, §13). A calm, OPEN-by-default reassurance card
+// answering "what am I looking at?" — the surface is a reconstruction, not the
+// live document, and nothing leaves the device. Per the redesign this is shown,
+// not hidden behind a disclosure (Design Principle "show, don't make them dig"):
+// trust is a first-impression, so the key line is always visible. Orientation,
+// not a hazard — a friendly shield mark on a soft brand surface, never an alarm.
+// Meaning never relies on hue alone (§9.11): the shield icon is a non-color cue.
 
 import type { Component } from "solid-js";
 import { Show } from "solid-js";
+import { IconShield } from "@/components/icons";
 import { strings } from "@/lib/i18n/strings";
 
 export interface PrivacyBannerProps {
@@ -19,44 +20,20 @@ export interface PrivacyBannerProps {
 
 const PrivacyBanner: Component<PrivacyBannerProps> = (props) => {
   return (
-    <details class="banner-note group">
-      <summary class="banner-note-summary">
-        <svg
-          class="size-4 shrink-0 text-revision"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          aria-hidden="true"
-        >
-          <circle cx="12" cy="12" r="9" />
-          <line x1="12" y1="11" x2="12" y2="16" />
-          <line x1="12" y1="8" x2="12" y2="8" />
-        </svg>
-        <span class="flex-1">{strings.privacy.bannerSummary}</span>
-        <svg
-          class="banner-note-chevron"
-          viewBox="0 0 16 16"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.5"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          aria-hidden="true"
-        >
-          <path d="M6 4l4 4-4 4" />
-        </svg>
-      </summary>
-      <div class="banner-note-body">
-        <p class="font-medium text-stone-700 dark:text-stone-200">{strings.privacy.bannerTitle}</p>
-        <p>{strings.privacy.bannerBody}</p>
+    <section class="banner-card" aria-label={strings.privacy.bannerSummary}>
+      <IconShield class="banner-icon" />
+      <div class="flex min-w-0 flex-col gap-1">
+        <p class="banner-title">{strings.privacy.bannerTitle}</p>
+        <p class="banner-body">{strings.privacy.bannerBody}</p>
         <Show when={props.approximationNote}>
-          {(note) => <p class="text-xs text-stone-500 dark:text-stone-500">{note()}</p>}
+          {(note) => (
+            <p class="mt-0.5 text-[0.8125rem] leading-relaxed text-ink-muted text-pretty">
+              {note()}
+            </p>
+          )}
         </Show>
       </div>
-    </details>
+    </section>
   );
 };
 

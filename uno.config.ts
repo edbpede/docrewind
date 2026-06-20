@@ -1,19 +1,32 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
-// DocRewind design system (plan Phase 5 Step 1 / PRD §11.3). presetWind4 ONLY
-// (oklch, Tailwind-4 compatible) — no tailwind.config, no PostCSS, no
-// @unocss/reset. The visual identity is "the manuscript and its margin": a calm,
-// archival scrubbable-manuscript surface. Cool paper (not the warm-cream
-// default), inky blue-black text, a revision-indigo "now" accent, and three
-// reconstruction states that ALWAYS pair color with a non-color affordance
-// (suggestion = underline, deletion = strike, opaque = labeled chip) so meaning
-// is never carried by color alone (§9.11).
+// DocRewind design system. presetWind4 ONLY (oklch, Tailwind-4 compatible) — no
+// tailwind.config, no PostCSS. See PRODUCT.md (strategy) and DESIGN.md (the visual
+// system this file implements; DESIGN.md is the human-readable spec, this is the
+// machine source of truth — keep them in sync).
 //
-// Dark mode is pinned EXPLICITLY to the class strategy (`.dark` on <html>) so the
-// Seam-E applier (lib/theme.ts + the page mounts) drives every `dark:` utility.
-// Motion suppression is declarative: a `prefers-reduced-motion` preflight
-// neutralizes timeline/scrubber/progress transitions at the CSS layer, and the
-// App separately caps the JS auto-advance cadence.
+// Direction: "a warm reading room, kept by a helpful hand." A friendly, Apple-
+// Settings-calm classroom companion for educators of mixed technical ability. The
+// document still reads like a real document (serif leaf); the interface around it
+// is soft, generous and reassuring.
+//
+// Color architecture: SEMANTIC CSS VARIABLES (`--dr-*`) defined once in the
+// preflight and FLIPPED under the pinned `.dark` class. Uno theme colors map to
+// those vars (`bg-canvas`, `text-ink`, `bg-brand`, …), so components carry NO
+// `dark:` duplication for color — dark mode "just works" when the variables flip.
+// Warmth lives in a low-chroma warm-gray neutral (hue ~75, NOT cream) plus a honey
+// accent and friendly type; the ink is a cool blue-black, so warm paper + cool ink
+// gives the page its quiet, legible character. Every value below is WCAG-AA verified.
+//
+// Dark mode is pinned EXPLICITLY to the class strategy (`.dark` on <html>), driven
+// by the Seam-E applier (lib/theme.ts + the page mounts). Motion suppression is
+// declarative: a `prefers-reduced-motion` preflight neutralizes
+// timeline/scrubber/progress transitions at the CSS layer, and the App separately
+// caps the JS auto-advance cadence.
+//
+// The three reconstruction states ALWAYS pair color with a non-color affordance
+// (suggestion = dotted underline, deletion = strike, opaque = labeled chip) so
+// meaning is never carried by color alone (§9.11).
 
 import { defineConfig, presetWind4, type SourceCodeTransformer } from "unocss";
 
@@ -62,386 +75,512 @@ const sortUnoVarBlocks: SourceCodeTransformer = {
   },
 };
 
-// The design-system shortcuts, hoisted to a module const so `safelist` below can
-// be derived from the keys (see the safelist note in defineConfig).
+// ── Component vocabulary (shortcuts) ────────────────────────────────────────────
+// Hoisted to a module const so `safelist` below can be derived from the keys.
+// Heritage names (dr-card, btn-primary, tl-track, doc-suggest, doc-caret,
+// dr-brandmark, …) are PRESERVED — some are queried directly by tests — and
+// re-valued onto the new token system. Colors are semantic (`bg-canvas`,
+// `text-ink`, `bg-brand`); no `dark:` needed for color (the vars flip).
 const shortcuts = {
-  // ── Surfaces ────────────────────────────────────────────────────────────
-  // Cool archival paper. A near-flat stone wash (top a touch lighter than the
-  // foot) gives the page the depth of a sheet under raking light without ever
-  // reading as a "gradient hero". Solid `bg-stone-50` stays as the fallback.
-  // `dr-surface` is the wash+ink alone (no sizing) so non-page surfaces — e.g.
-  // the fixed-width toolbar popup — share ONE source of truth for the paper;
-  // `dr-page` composes it with `min-h-screen` for the full-height pages.
-  "dr-surface":
-    "bg-stone-50 bg-gradient-to-b from-stone-50 to-stone-100 " +
-    "text-stone-900 dark:bg-stone-900 dark:from-stone-900 dark:to-stone-950 dark:text-stone-100",
+  // ── Page & surfaces ──────────────────────────────────────────────────────
+  // The page is a calm, flat warm canvas (no hero gradient). Body type is the
+  // friendly humanist system sans; the document leaf is the only serif surface.
+  "dr-surface": "bg-canvas text-ink font-sans antialiased",
   "dr-page": "dr-surface min-h-screen",
-  "dr-panel": "rounded-lg border border-stone-200 bg-white dark:border-stone-700 dark:bg-stone-800",
-  "dr-card": "dr-panel p-4 shadow-sm",
+  // A grouped surface card (iOS-Settings register): soft elevation, no border.
+  "dr-card": "rounded-2xl bg-surface p-5 shadow-[var(--dr-shadow-md)]",
+  // The same card without padding, for grouped row lists that draw their own.
+  "dr-panel": "rounded-2xl bg-surface shadow-[var(--dr-shadow-md)]",
+  // A quiet sunken well (tracks, code, read-only readouts).
+  "dr-inset": "rounded-xl bg-sunken",
 
-  // ── Masthead: the archival record header (eyebrow + balanced title) ────────
-  "dr-masthead": "flex flex-col gap-2 border-b border-stone-200/80 pb-4 dark:border-stone-700/80",
+  // ── Grouped rows (the iOS-Settings pattern) ──────────────────────────────
+  // A `dr-panel` holds a column of `dr-row`s separated by hairlines. A quiet
+  // group label sits ABOVE the panel (not a tracked mono eyebrow).
+  "dr-group": "flex flex-col gap-2",
+  "dr-group-label": "px-1 text-[0.9375rem] font-semibold text-ink-secondary",
+  "dr-rows": "dr-panel divide-y divide-hairline overflow-hidden",
+  // A single label↔control row with a comfortable tap height.
+  "dr-row": "flex min-h-[3.25rem] items-center justify-between gap-4 px-4 py-3",
+  // A row that stacks its control/help beneath the label (long help, inputs).
+  "dr-row-stack": "flex min-h-[3.25rem] flex-col justify-center gap-2 px-4 py-3.5",
+  "dr-row-label": "text-[0.9375rem] font-medium text-ink",
+  "dr-row-help": "text-[0.8125rem] leading-relaxed text-ink-muted text-balance",
+
+  // ── Typography roles (hierarchy via size/weight/color, not eyebrows) ──────
+  "dr-display":
+    "[font-family:var(--dr-font-display)] text-[1.625rem] font-semibold leading-tight tracking-[-0.02em] text-balance text-ink",
   "dr-title":
-    "text-balance font-serif text-xl font-semibold tracking-tight text-stone-900 dark:text-stone-50",
+    "[font-family:var(--dr-font-display)] text-[1.375rem] font-semibold leading-tight tracking-[-0.015em] text-balance text-ink",
+  "dr-heading": "text-[1.125rem] font-semibold tracking-[-0.01em] text-ink",
+  "dr-subheading": "text-base font-semibold text-ink",
+  "dr-body": "text-[0.9375rem] leading-relaxed text-ink",
+  "dr-lede": "text-base leading-relaxed text-ink-secondary text-pretty",
+  "dr-muted": "text-[0.8125rem] leading-relaxed text-ink-muted",
+  // A RARE, deliberate kicker — used at most once per surface, never per section.
+  "dr-eyebrow": "text-[0.8125rem] font-semibold tracking-tight text-brand-text",
+  // Mono data readouts.
+  "dr-counter": "font-mono text-sm tabular-nums text-ink-muted",
+  "dr-percent":
+    "[font-family:var(--dr-font-display)] text-base font-semibold tabular-nums text-brand-text",
+  "dr-dateline": "font-mono text-xs tabular-nums text-ink-muted",
 
-  // ── Brand mark: the DocRewind logo seated on a fixed "app chip" ────────────
-  // The icon art carries light highlights (#fff/#ebeced) and deep navies, so it
-  // would lose contrast on BOTH the paper-light and stone-dark page. We seat it
-  // on a tile that stays light in both themes (the way an OS launcher icon does),
-  // so the mark reads identically regardless of color scheme. A hair of inset
-  // padding keeps the full-bleed art off the rounded corners.
+  // ── Masthead ──────────────────────────────────────────────────────────────
+  "dr-masthead": "flex flex-col gap-4",
+
+  // ── Brand mark: the DocRewind glyph on a soft, always-light tile ──────────
+  // The icon art carries light highlights and deep navies, so it is seated on a
+  // tile that stays light in BOTH themes (the `--dr-chip` var has no `.dark`
+  // override) — the way an OS launcher icon does — so the mark reads identically
+  // regardless of color scheme. A hair of inset padding keeps the art off the
+  // rounded corners; a hairline ring + soft shadow seats it on the page.
   "dr-brandmark":
-    "inline-grid shrink-0 place-items-center overflow-hidden rounded-lg bg-white p-1 " +
-    "ring-1 ring-stone-200 shadow-sm dark:ring-stone-700/80",
+    "inline-grid shrink-0 place-items-center overflow-hidden rounded-[11px] " +
+    "bg-[var(--dr-chip)] p-1 shadow-[var(--dr-shadow-sm)] ring-1 ring-hairline",
 
-  // ── The manuscript leaf: an elevated sheet with a graphite binding margin ──
-  // `before:` draws the ruled binding margin — pure decoration (no meaning rides
-  // on it), graphite-neutral so it never collides with the strike/suggest hues.
-  "dr-leaf":
-    "relative rounded-xl bg-white px-6 py-9 ring-1 ring-stone-200 sm:px-12 " +
-    "shadow-[0_18px_40px_-24px_oklch(0%_0_0/0.22)] " +
-    "before:pointer-events-none before:absolute before:inset-y-6 before:left-4 before:w-px " +
-    "before:bg-stone-300/70 sm:before:left-9 dark:bg-stone-800 dark:ring-stone-700 " +
-    "dark:before:bg-stone-600/50",
-  // A dateline reads like the hand-noted date in a manuscript margin.
-  // Same visual treatment as the masthead eyebrow — aliased to one source.
-  "dr-dateline": "dr-eyebrow",
-
-  // ── Buttons (focus-visible rings; never color-only — each carries a label) ─
+  // ── Buttons (generous targets; focus-visible rings; always labeled) ───────
   "btn-base":
-    "inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium " +
-    "transition-colors outline-none focus-visible:ring-2 focus-visible:ring-revision-ring " +
-    "focus-visible:ring-offset-2 focus-visible:ring-offset-stone-50 " +
-    "dark:focus-visible:ring-offset-stone-900 disabled:opacity-50 disabled:cursor-not-allowed",
-  "btn-primary": "btn-base bg-revision text-white hover:bg-revision-soft",
-  "btn-secondary":
-    "btn-base border border-stone-300 bg-white text-stone-800 hover:bg-stone-100 " +
-    "dark:border-stone-600 dark:bg-stone-800 dark:text-stone-100 dark:hover:bg-stone-700",
-  "btn-ghost":
-    "btn-base bg-transparent text-stone-700 hover:bg-stone-200/70 " +
-    "dark:text-stone-200 dark:hover:bg-stone-700/70",
-  // Pressed/active toggle state for play/pause + speed (paired with text/icon).
-  "btn-active": "bg-revision text-white hover:bg-revision-soft",
+    "inline-flex min-h-[2.5rem] cursor-pointer select-none items-center justify-center gap-2 " +
+    "rounded-xl px-4 text-[0.9375rem] font-medium leading-none " +
+    "transition-[background-color,color,box-shadow,transform] duration-150 ease-[var(--dr-ease-out)] " +
+    "outline-none focus-visible:ring-2 focus-visible:ring-brand-ring focus-visible:ring-offset-2 " +
+    "focus-visible:ring-offset-canvas active:translate-y-px " +
+    "disabled:pointer-events-none disabled:opacity-45",
+  // The primary call-to-action. One per surface.
+  "btn-primary":
+    "btn-base bg-brand text-brand-on shadow-[var(--dr-shadow-sm)] hover:bg-brand-hover",
+  // Neutral action: a surface chip with a hairline (no shadow → no ghost-card).
+  "btn-secondary": "btn-base bg-surface text-ink ring-1 ring-hairline-strong hover:bg-hover",
+  // Quiet action: tinted hover only.
+  "btn-ghost": "btn-base bg-transparent text-ink-secondary hover:bg-hover hover:text-ink",
+  // Destructive action: danger-tinted, never a loud red block (reassurance first).
+  "btn-danger":
+    "btn-base bg-surface text-danger ring-1 ring-[var(--dr-danger-line)] hover:bg-danger-soft",
+  // Taller variant for hero CTAs (≥44px touch target).
+  "btn-lg": "min-h-[2.75rem] px-5 text-base",
+  "btn-block": "w-full",
 
-  // ── Timeline: the signature "writing-activity stratum" + playhead caret ───
-  // The track is a carved channel (inset shadow); the fill is accumulating ink
-  // — an oklch ramp from faded early writing to saturated fresh indigo at the
-  // playhead, interpolated `in oklch` so the ramp stays perceptually even.
+  // ── Segmented control (theme / speed / diagnostics) ───────────────────────
+  // A pill track holding 2–4 options; the active one is a raised surface pill —
+  // unmistakably "the selected one", the iOS register.
+  seg: "inline-flex items-center gap-1 rounded-full bg-sunken p-1",
+  "seg-item":
+    "inline-flex min-h-[2rem] cursor-pointer select-none items-center justify-center gap-1.5 " +
+    "rounded-full px-3.5 text-[0.875rem] font-medium text-ink-secondary " +
+    "transition-[background-color,color,box-shadow] duration-150 ease-[var(--dr-ease-out)] " +
+    "hover:text-ink outline-none focus-visible:ring-2 focus-visible:ring-brand-ring",
+  "seg-item-active": "bg-surface text-ink shadow-[var(--dr-shadow-sm)] hover:text-ink",
+
+  // ── Inputs ────────────────────────────────────────────────────────────────
+  "dr-input":
+    "rounded-xl bg-surface px-3 py-2 text-[0.9375rem] text-ink ring-1 ring-hairline-strong " +
+    "outline-none transition-shadow placeholder:text-ink-faint " +
+    "focus-visible:ring-2 focus-visible:ring-brand-ring",
+  "dr-field": "inline-flex items-center gap-1.5 rounded-xl bg-surface ring-1 ring-hairline-strong",
+  "dr-field-input":
+    "w-16 rounded-xl bg-transparent py-2 pl-3 text-right text-[0.9375rem] tabular-nums text-ink " +
+    "outline-none focus-visible:ring-2 focus-visible:ring-brand-ring",
+  "dr-field-suffix": "select-none pr-3 text-[0.8125rem] font-medium text-ink-muted",
+
+  // ── Badges / chips ────────────────────────────────────────────────────────
+  "dr-badge":
+    "inline-flex items-center gap-1 rounded-full bg-sunken px-2.5 py-0.5 text-xs font-medium text-ink-secondary",
+  "dr-badge-brand":
+    "inline-flex items-center gap-1 rounded-full bg-brand-soft px-2.5 py-0.5 text-xs font-semibold text-brand-text",
+
+  // ── Links ─────────────────────────────────────────────────────────────────
+  "dr-link":
+    "rounded-sm font-medium text-brand-text underline decoration-1 underline-offset-2 " +
+    "transition-[text-decoration-color] hover:decoration-2 " +
+    "outline-none focus-visible:ring-2 focus-visible:ring-brand-ring",
+
+  // ── Timeline: the writing-activity stratum + playhead nib ─────────────────
+  // The track is a soft channel; the fill is a solid brand ramp that deepens to
+  // the playhead. The playhead reads as a writing nib (a standing stroke), the
+  // same gesture as the document's `doc-caret`, so page and transport rhyme.
   "tl-track":
-    "relative h-2.5 w-full rounded-full bg-stone-200 dark:bg-stone-700 " +
-    "shadow-[inset_0_1px_2px_oklch(0%_0_0/0.07)] dark:shadow-[inset_0_1px_2px_oklch(0%_0_0/0.25)] " +
-    "outline-none focus-visible:ring-2 focus-visible:ring-revision-ring " +
-    "focus-visible:ring-offset-2 focus-visible:ring-offset-stone-50 " +
-    "dark:focus-visible:ring-offset-stone-900 transition-shadow",
-  "tl-fill":
-    "absolute inset-y-0 left-0 rounded-full transition-[width] " +
-    "bg-gradient-to-r from-revision-ring via-revision-soft to-revision",
-  // The playhead reads as a writing caret (nib) standing on the track.
+    "relative h-2.5 w-full rounded-full bg-sunken shadow-[inset_0_1px_2px_var(--dr-inset-shadow)] " +
+    "outline-none focus-visible:ring-2 focus-visible:ring-brand-ring focus-visible:ring-offset-2 " +
+    "focus-visible:ring-offset-canvas transition-shadow",
+  "tl-fill": "absolute inset-y-0 left-0 rounded-full bg-brand transition-[width]",
   "tl-thumb":
-    "absolute top-1/2 h-6 w-[3px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-revision " +
-    "shadow-[0_1px_3px_oklch(54%_0.13_264/0.45)] ring-2 ring-white dark:ring-stone-900 transition-[left]",
-  // Event markers read as marginalia seals pressed onto the writing stratum: a
-  // small paper-faced stamp standing proud of the track, carrying a per-kind
-  // editorial pen-mark (§ caret-up caret-down caesura) in a per-kind ink. Color
-  // is ALWAYS paired with both the glyph and the seal ring, so the kind survives
-  // grayscale (§9.11). A keyboard focus ring makes each a jump-to-event button.
+    "absolute top-1/2 h-[1.4rem] w-[3px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-brand " +
+    "shadow-[0_1px_4px_var(--dr-brand-shadow)] ring-2 ring-surface transition-[left]",
+  // Event markers read as friendly seals standing on the stratum: a small tile
+  // carrying a per-kind glyph (non-color affordance) in a per-kind ink + ring.
   "tl-marker":
-    "absolute top-1/2 grid size-4 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full " +
-    "border bg-white text-[12px] leading-none cursor-pointer transition-transform hover:scale-110 " +
-    "shadow-[0_1px_2px_oklch(0%_0_0/0.18)] dark:bg-stone-800 " +
-    "outline-none focus-visible:ring-2 focus-visible:ring-revision-ring focus-visible:ring-offset-1 " +
-    "focus-visible:ring-offset-stone-50 dark:focus-visible:ring-offset-stone-900",
-  "tl-marker-session": "border-revision text-revision",
-  "tl-marker-large": "border-strike text-strike",
-  "tl-marker-pause": "border-stone-300 text-stone-500 dark:border-stone-600 dark:text-stone-400",
+    "absolute top-1/2 grid size-[1.1rem] -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full " +
+    "bg-surface text-[12px] leading-none ring-1 cursor-pointer transition-transform duration-150 " +
+    "ease-[var(--dr-ease-out)] hover:scale-110 shadow-[var(--dr-shadow-sm)] " +
+    "outline-none focus-visible:ring-2 focus-visible:ring-brand-ring focus-visible:ring-offset-1 " +
+    "focus-visible:ring-offset-canvas",
+  "tl-marker-session": "ring-brand text-brand-text",
+  "tl-marker-large": "ring-strike text-strike",
+  "tl-marker-pause": "ring-hairline-strong text-ink-muted",
 
-  // A stacked seal: where individual marks would collide into an unreadable pile,
-  // they fuse into one slightly-larger paper seal carrying the COUNT in tabular
-  // figures. Two faint offset paper silhouettes behind it (the layered box-shadow)
-  // read as several seals pressed together — a non-color "many" affordance that
-  // survives grayscale (§9.11) and turns a dense burst into legible signal. The
-  // count is the glyph; the kind breakdown rides the hover/focus tooltip + aria.
+  // A stacked seal: collided marks fuse into one slightly larger tile carrying the
+  // COUNT in tabular figures, with two faint paper silhouettes behind it (the
+  // layered shadow) — a non-color "many" affordance that survives grayscale.
   "tl-cluster":
-    "absolute top-1/2 grid size-[18px] -translate-x-1/2 -translate-y-1/2 place-items-center " +
-    "rounded-full border bg-white font-mono text-[10px] font-semibold leading-none tabular-nums " +
-    "cursor-pointer transition-transform hover:scale-110 dark:bg-stone-800 " +
-    "shadow-[1.5px_1.5px_0_-0.5px_oklch(89%_0_0),-1.5px_-1.5px_0_-0.5px_oklch(94%_0_0),0_1px_3px_oklch(0%_0_0/0.22)] " +
-    "dark:shadow-[1.5px_1.5px_0_-0.5px_oklch(33%_0_0),-1.5px_-1.5px_0_-0.5px_oklch(29%_0_0),0_1px_3px_oklch(0%_0_0/0.4)] " +
-    "outline-none focus-visible:ring-2 focus-visible:ring-revision-ring focus-visible:ring-offset-1 " +
-    "focus-visible:ring-offset-stone-50 dark:focus-visible:ring-offset-stone-900",
-  // Mixed-kind clusters drop to graphite ink (no single kind owns the seal); the
-  // breakdown in the tooltip carries which kinds, so color is never the sole tell.
-  "tl-cluster-mixed": "border-stone-400 text-stone-700 dark:border-stone-500 dark:text-stone-200",
+    "absolute top-1/2 grid size-[1.25rem] -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full " +
+    "bg-surface font-mono text-[10px] font-semibold leading-none tabular-nums ring-1 " +
+    "cursor-pointer transition-transform duration-150 ease-[var(--dr-ease-out)] hover:scale-110 " +
+    "shadow-[1.5px_1.5px_0_-0.5px_var(--dr-seal-1),-1.5px_-1.5px_0_-0.5px_var(--dr-seal-2),var(--dr-shadow-sm)] " +
+    "outline-none focus-visible:ring-2 focus-visible:ring-brand-ring focus-visible:ring-offset-1 " +
+    "focus-visible:ring-offset-canvas",
+  "tl-cluster-mixed": "ring-hairline-strong text-ink-secondary",
 
-  // The hover/focus tooltip: a small paper card lifted above the hovered seal,
-  // carrying the mark's name, its content-free revision data, and the frame it
-  // jumps to. `pointer-events-none` so it never intercepts a scrub; positioned by
-  // the leaf via inline `left`/`transform` (edge-clamped near the track ends). A
-  // stacked seal trades the old cramped `·`-run for a ledger: one chip-row per
-  // kind, so nothing wraps mid-phrase, plus a hint that a click opens the full list.
+  // The hover/focus tooltip: a small paper card lifted above the hovered seal.
   "tl-tip":
-    "pointer-events-none absolute bottom-[calc(100%+0.6rem)] z-20 flex w-max max-w-[17rem] flex-col gap-1.5 " +
-    "rounded-lg border border-stone-200 bg-white px-3 py-2 " +
-    "shadow-[0_10px_30px_-12px_oklch(0%_0_0/0.4)] dark:border-stone-700 dark:bg-stone-800",
-  "tl-tip-title": "font-sans text-[13px] font-semibold text-stone-800 dark:text-stone-100",
-  "tl-tip-detail": "font-mono text-[11px] tabular-nums text-stone-500 dark:text-stone-400",
-  "tl-tip-rev": "font-mono text-[11px] tabular-nums text-revision dark:text-revision-ring",
-  // The stacked-seal breakdown: a quiet ledger of kind-rows (chip · count · name).
+    "pointer-events-none absolute bottom-[calc(100%+0.6rem)] z-[60] flex w-max max-w-[17rem] flex-col gap-1.5 " +
+    "rounded-xl bg-surface px-3 py-2 ring-1 ring-hairline shadow-[var(--dr-shadow-lg)]",
+  "tl-tip-title": "text-[13px] font-semibold text-ink",
+  "tl-tip-detail": "font-mono text-[11px] tabular-nums text-ink-muted",
+  "tl-tip-rev": "font-mono text-[11px] tabular-nums text-brand-text",
   "tl-tip-breakdown": "m-0 flex list-none flex-col gap-1 p-0",
-  "tl-tip-row": "flex items-center gap-2 text-xs text-stone-600 dark:text-stone-300",
-  "tl-tip-count":
-    "font-mono text-[11px] font-semibold tabular-nums text-stone-800 dark:text-stone-100",
-  "tl-tip-hint":
-    "mt-0.5 border-t border-stone-200/70 pt-1 font-sans text-[10px] uppercase tracking-wide " +
-    "text-stone-400 dark:border-stone-700 dark:text-stone-500",
-  // A small static seal reused inside tip-rows and panel-rows (the marker stamp
-  // without the track positioning). The kind tone supplies its border + ink.
+  "tl-tip-row": "flex items-center gap-2 text-xs text-ink-secondary",
+  "tl-tip-count": "font-mono text-[11px] font-semibold tabular-nums text-ink",
+  "tl-tip-hint": "mt-0.5 border-t border-hairline pt-1 text-[10px] font-medium text-ink-muted",
+  // A small static seal reused inside tip-rows and the legend (the marker stamp
+  // without the absolute positioning). The kind tone supplies its ink + ring.
   "tl-chip":
-    "inline-grid size-[15px] shrink-0 place-items-center rounded-full border bg-white text-[11px] " +
-    "leading-none shadow-[0_1px_1px_oklch(0%_0_0/0.12)] dark:bg-stone-800",
+    "inline-grid size-[1rem] shrink-0 place-items-center rounded-full bg-surface text-[11px] " +
+    "leading-none ring-1 shadow-[var(--dr-shadow-sm)]",
 
-  // The pinned detail panel: clicking a stacked seal lifts this interactive card —
-  // a manuscript ledger of every mark in the burst, each row a jump-to-frame button.
-  // Unlike the hover peek it accepts the pointer (no `pointer-events-none`), caps its
-  // height and scrolls, and is dismissed by Escape / an outside click / its close mark.
+  // The pinned detail panel: clicking a stacked seal lifts this interactive card.
   "tl-panel":
-    "absolute bottom-[calc(100%+0.6rem)] z-30 flex max-h-[15rem] w-[17rem] flex-col overflow-hidden " +
-    "rounded-lg border border-stone-200 bg-white " +
-    "shadow-[0_18px_48px_-16px_oklch(0%_0_0/0.5)] dark:border-stone-700 dark:bg-stone-800",
-  "tl-panel-head":
-    "flex items-start justify-between gap-3 border-b border-stone-200/80 px-3 py-2 dark:border-stone-700",
+    "absolute bottom-[calc(100%+0.6rem)] z-[60] flex max-h-[15rem] w-[17rem] flex-col overflow-hidden " +
+    "rounded-2xl bg-surface ring-1 ring-hairline shadow-[var(--dr-shadow-lg)]",
+  "tl-panel-head": "flex items-start justify-between gap-3 border-b border-hairline px-3 py-2.5",
   "tl-panel-heading": "flex flex-col gap-0.5",
-  // Same treatment as the hover tip's title/rev — aliased to one source.
   "tl-panel-title": "tl-tip-title",
   "tl-panel-rev": "tl-tip-rev",
   "tl-panel-close":
-    "grid size-6 shrink-0 place-items-center rounded-md text-lg leading-none text-stone-400 " +
-    "transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-700 dark:hover:text-stone-100 " +
-    "outline-none focus-visible:ring-2 focus-visible:ring-revision-ring",
+    "grid size-7 shrink-0 place-items-center rounded-lg text-ink-muted transition-colors " +
+    "hover:bg-hover hover:text-ink outline-none focus-visible:ring-2 focus-visible:ring-brand-ring",
   "tl-panel-list": "m-0 flex list-none flex-col gap-0.5 overflow-y-auto p-1.5",
   "tl-panel-row":
-    "flex w-full cursor-pointer items-center gap-2.5 rounded-md border-0 bg-transparent px-2 py-1.5 text-left " +
-    "transition-colors hover:bg-stone-100 dark:hover:bg-stone-700/70 " +
-    "outline-none focus-visible:ring-2 focus-visible:ring-revision-ring focus-visible:ring-inset",
+    "flex w-full cursor-pointer items-center gap-2.5 rounded-lg border-0 bg-transparent px-2 py-2 text-left " +
+    "transition-colors hover:bg-hover outline-none focus-visible:ring-2 focus-visible:ring-brand-ring " +
+    "focus-visible:ring-inset",
   "tl-panel-row-main": "flex min-w-0 flex-1 flex-col gap-0.5",
-  "tl-panel-row-kind": "font-sans text-xs font-medium text-stone-700 dark:text-stone-200",
-  "tl-panel-row-detail":
-    "truncate font-mono text-[11px] tabular-nums text-stone-500 dark:text-stone-400",
-  "tl-panel-row-rev":
-    "shrink-0 font-mono text-[11px] tabular-nums text-revision dark:text-revision-ring",
+  "tl-panel-row-kind": "text-xs font-medium text-ink",
+  "tl-panel-row-detail": "truncate font-mono text-[11px] tabular-nums text-ink-muted",
+  "tl-panel-row-rev": "shrink-0 font-mono text-[11px] tabular-nums text-brand-text",
 
-  // The marginalia key: a quiet wrapped row naming each seal-mark in view. A
-  // static `tl-seal` mirrors the marker's stamp (sans the absolute positioning
-  // and hover lift) so the legend and the stratum read as one vocabulary.
+  // The legend: a quiet wrapped row naming each seal in view (always shown so the
+  // vocabulary is learnable up front, never hidden behind a hover).
   "tl-legend": "m-0 flex flex-wrap items-center gap-x-4 gap-y-1.5 p-0",
-  "tl-legend-item": "inline-flex items-center gap-1.5 text-xs text-stone-600 dark:text-stone-300",
-  "tl-seal":
-    "inline-grid size-4 place-items-center rounded-full border bg-white text-[12px] leading-none " +
-    "shadow-[0_1px_2px_oklch(0%_0_0/0.18)] dark:bg-stone-800",
+  "tl-legend-item": "inline-flex items-center gap-1.5 text-xs text-ink-secondary",
+  "tl-seal": "tl-chip",
 
   // ── Progress (determinate + indeterminate + error) ────────────────────────
-  "progress-track": "h-2 w-full overflow-hidden rounded-full bg-stone-200 dark:bg-stone-700",
-  "progress-fill": "h-full rounded-full bg-revision transition-[width]",
-  // Layout only. The `dr-indeterminate` animation class is applied SEPARATELY on
-  // the element (ProgressView) rather than folded in here: it's a preflight class
-  // (keyframes + the slide/pulse rules + the reduced-motion override all live in
-  // the preflight below), not a generatable utility, so embedding it in this
-  // shortcut made UnoCSS warn "unmatched utility" and silently DROP it — leaving
-  // the bar a static one-third pill with no animation. Kept apart, the preflight
-  // `.dr-indeterminate` rules target the element directly and animate as intended.
-  "progress-indeterminate": "h-full w-1/3 rounded-full bg-revision",
+  "progress-track": "h-2 w-full overflow-hidden rounded-full bg-sunken",
+  "progress-fill": "h-full rounded-full bg-brand transition-[width]",
+  // Layout only; the `dr-indeterminate` animation class is applied SEPARATELY on
+  // the element (it's a preflight class, not a generatable utility).
+  "progress-indeterminate": "h-full w-1/3 rounded-full bg-brand",
 
-  // ── PrivacyBanner: a collapsed-by-default "what am I looking at?" disclosure.
-  // Calm/neutral by design — this is orientation, not a hazard, so it wears a
-  // soft stone surface (no alarming hue/left-border) with the indigo info mark.
-  "banner-note":
-    "overflow-hidden rounded-md border border-stone-200 bg-stone-50 text-sm " +
-    "dark:border-stone-700 dark:bg-stone-800/50",
-  "banner-note-summary":
-    "flex cursor-pointer list-none select-none items-center gap-2 px-3 py-2 font-medium " +
-    "text-stone-600 outline-none transition-colors hover:text-stone-900 " +
-    "focus-visible:ring-2 focus-visible:ring-revision-ring " +
-    "dark:text-stone-300 dark:hover:text-stone-100",
-  // Non-color affordance: the chevron rotates on open (parent carries `group`).
-  "banner-note-chevron":
-    "size-3.5 shrink-0 text-stone-400 transition-transform duration-200 " +
-    "group-open:rotate-90 dark:text-stone-500",
-  "banner-note-body": "flex flex-col gap-1.5 px-3 pb-3 pt-0.5 text-stone-600 dark:text-stone-400",
+  // ── Info / privacy note: a calm, OPEN-by-default reassurance card ──────────
+  // Friendly brand-soft surface with an info mark — orientation, not a hazard.
+  "banner-card": "flex gap-3 rounded-2xl bg-brand-soft px-4 py-3.5",
+  "banner-icon": "mt-0.5 size-5 shrink-0 text-brand-text",
+  "banner-title": "text-[0.9375rem] font-semibold text-ink",
+  "banner-body": "text-[0.875rem] leading-relaxed text-ink-secondary text-pretty",
+  "banner-more":
+    "mt-1 inline-flex items-center gap-1 self-start rounded-md text-[0.8125rem] font-medium text-brand-text " +
+    "outline-none transition-colors hover:text-ink focus-visible:ring-2 focus-visible:ring-brand-ring",
+
+  // ── Status notes (pending / success / error) — icon-paired, never bare ────
+  "note-base": "flex items-start gap-2.5 rounded-xl px-3.5 py-3 text-[0.875rem] leading-relaxed",
+  "note-info": "note-base bg-brand-soft text-ink",
+  "note-success": "note-base bg-success-soft text-ink",
+  "note-warning": "note-base bg-[var(--dr-warning-soft)] text-ink",
+  "note-icon": "mt-px size-[1.15rem] shrink-0",
+
+  // ── The manuscript leaf: an elevated sheet with a graphite binding margin ──
+  // `before:` draws the ruled binding margin — pure decoration, graphite-neutral
+  // so it never collides with the strike/suggest hues. This is the one surface
+  // where the "manuscript" heritage reads literally.
+  "dr-leaf":
+    "relative rounded-2xl bg-surface px-6 py-9 sm:px-12 shadow-[var(--dr-shadow-lg)] " +
+    "before:pointer-events-none before:absolute before:inset-y-7 before:left-4 before:w-px " +
+    "before:bg-hairline-strong sm:before:left-9",
 
   // ── Document-rendering primitives (color ALWAYS + a non-color affordance) ──
   "doc-column":
-    "mx-auto max-w-[68ch] whitespace-pre-wrap break-words font-serif text-[1.0625rem] leading-[1.8] " +
-    "text-stone-900 dark:text-stone-100",
-  "doc-accepted": "text-stone-900 dark:text-stone-100",
-  // Suggested insert: color + underline + label affordance.
+    "mx-auto max-w-[68ch] whitespace-pre-wrap break-words font-serif text-[1.0625rem] leading-[1.8] text-ink",
+  "doc-accepted": "text-ink",
+  // Suggested insert: color + dotted underline + label affordance.
   "doc-suggest":
-    "rounded-sm bg-suggest-soft text-suggest underline decoration-suggest decoration-dotted " +
-    "underline-offset-2 dark:bg-suggest-softDark dark:text-suggest",
+    "rounded-[3px] bg-suggest-soft px-[1px] text-suggest underline decoration-suggest decoration-dotted underline-offset-2",
   // Marked for deletion: color + line-through + label affordance.
-  "doc-strike":
-    "rounded-sm bg-strike-soft text-strike line-through decoration-strike " +
-    "dark:bg-strike-softDark dark:text-strike",
+  "doc-strike": "rounded-[3px] bg-strike-soft px-[1px] text-strike line-through decoration-strike",
   // Opaque structures: an inline labeled chip carrying icon + text (never bare).
   "doc-opaque":
-    "mx-0.5 inline-flex items-center gap-1 rounded border border-stone-300 bg-stone-100 " +
-    "px-1.5 py-0.5 align-baseline font-sans text-xs text-stone-600 " +
-    "dark:border-stone-600 dark:bg-stone-700 dark:text-stone-300",
-  // The writing caret (nib): a thin rounded inline mark trailing the run the current
-  // revision wrote, tinted to that author's hue (set inline). Same nib vocabulary as the
-  // timeline playhead (`tl-thumb`) — a standing stroke, not a block cursor — so the page
-  // and its transport share one "now-writing" gesture. The soft-blink + reduced-motion
-  // freeze live in the preflight (a layout-only utility can't carry keyframes).
+    "mx-0.5 inline-flex items-center gap-1 rounded-md bg-sunken px-1.5 py-0.5 align-baseline " +
+    "font-sans text-xs text-ink-secondary ring-1 ring-hairline",
+  // The writing caret (nib): a thin rounded inline mark trailing the run the
+  // current revision wrote, tinted to that author's hue (set inline). Same nib
+  // vocabulary as the timeline playhead. Soft-blink + reduced-motion freeze in
+  // the preflight (a layout-only utility can't carry keyframes).
   "doc-caret":
     "inline-block h-[1.15em] w-[2px] -mb-[0.18em] mx-[0.5px] rounded-full align-baseline " +
-    "shadow-[0_1px_2px_oklch(0%_0_0/0.28)]",
+    "shadow-[0_1px_2px_var(--dr-caret-shadow)]",
 
-  // ── Data / chrome typography helpers ──────────────────────────────────────
-  "dr-counter": "font-mono text-sm tabular-nums text-stone-600 dark:text-stone-400",
-  // The determinate progress figure: the bar's percentage as a readable number
-  // in the playhead indigo. `tabular-nums` holds the digits steady so the figure
-  // doesn't reflow as it climbs (9% → 10% → 100%).
-  "dr-percent":
-    "font-mono text-base font-semibold tabular-nums text-revision dark:text-revision-ring",
-  "dr-eyebrow":
-    "font-mono text-[11px] uppercase tracking-[0.16em] text-stone-500 dark:text-stone-400",
-
-  // ── Insights contributor chips + hover/click detail card ───────────────────
-  // Each distinct contributor is an interactive chip; hover/focus — or a click to
-  // pin — lifts a small paper card carrying content-free details only (display name,
-  // the viewer's own email when known, a revision count, and the active window). The
-  // card reuses the timeline tip's vocabulary (paper surface, soft lift, mono detail).
+  // ── Insights: contributor chips + stat tiles + hover/click detail card ────
+  // Clean stat tiles (label + big figure) in a simple responsive row — NOT
+  // icon-on-card grids. Each distinct contributor is an interactive chip; hover
+  // /focus — or a click to pin — lifts a small paper card of content-free details.
+  "dr-stat": "flex flex-col gap-0.5",
+  "dr-stat-value":
+    "[font-family:var(--dr-font-display)] text-[1.625rem] font-semibold leading-none tabular-nums text-ink",
+  "dr-stat-label": "text-[0.8125rem] text-ink-muted",
   "author-chip":
-    "inline-flex items-center gap-1.5 rounded border border-stone-300 bg-transparent px-2 py-0.5 " +
-    "text-xs text-stone-600 transition-colors cursor-pointer " +
-    "hover:bg-stone-100 hover:text-stone-800 " +
-    "outline-none focus-visible:ring-2 focus-visible:ring-revision-ring " +
-    "dark:border-stone-600 dark:text-stone-300 dark:hover:bg-stone-700/70 dark:hover:text-stone-100",
-  // The collaborator's Google-assigned colour, as a small ringed dot (colour set inline).
-  "author-dot": "size-2 shrink-0 rounded-full border border-black/10 dark:border-white/20",
-  // The lifted card: positioned ABOVE the chip (the insights panel is the page's last
-  // surface, so an upward card clears the viewport bottom instead of falling below it —
-  // mirroring the timeline tips). Accepts the pointer so the email stays selectable.
+    "inline-flex items-center gap-1.5 rounded-full bg-surface px-2.5 py-1 text-[0.8125rem] text-ink-secondary " +
+    "ring-1 ring-hairline transition-colors cursor-pointer hover:bg-hover hover:text-ink " +
+    "outline-none focus-visible:ring-2 focus-visible:ring-brand-ring",
+  // The collaborator's Google-assigned colour, as a small ringed dot (set inline).
+  "author-dot": "size-2.5 shrink-0 rounded-full ring-1 ring-[var(--dr-dot-ring)]",
   "author-pop":
-    "absolute left-0 bottom-[calc(100%+0.4rem)] z-20 flex w-max min-w-[12rem] max-w-[18rem] flex-col gap-1.5 " +
-    "rounded-lg border border-stone-200 bg-white px-3 py-2 text-left " +
-    "shadow-[0_10px_30px_-12px_oklch(0%_0_0/0.4)] dark:border-stone-700 dark:bg-stone-800",
-  "author-pop-name":
-    "flex items-center gap-1.5 font-sans text-[13px] font-semibold text-stone-800 dark:text-stone-100",
+    "absolute left-0 bottom-[calc(100%+0.45rem)] z-[60] flex w-max min-w-[12rem] max-w-[18rem] flex-col gap-1.5 " +
+    "rounded-2xl bg-surface px-3.5 py-3 text-left ring-1 ring-hairline shadow-[var(--dr-shadow-lg)]",
+  "author-pop-name": "flex items-center gap-1.5 text-[13px] font-semibold text-ink",
   "author-pop-row": "flex items-baseline justify-between gap-3",
-  "author-pop-key":
-    "font-mono text-[10px] uppercase tracking-[0.12em] text-stone-400 dark:text-stone-500",
-  "author-pop-val":
-    "break-all text-right font-mono text-[11px] tabular-nums text-stone-700 dark:text-stone-200",
+  "author-pop-key": "text-[11px] font-medium text-ink-muted",
+  "author-pop-val": "break-all text-right font-mono text-[11px] tabular-nums text-ink-secondary",
   "author-pop-range":
-    "border-t border-stone-200/70 pt-1 font-mono text-[10px] tabular-nums text-stone-500 " +
-    "dark:border-stone-700 dark:text-stone-400",
+    "border-t border-hairline pt-1.5 font-mono text-[10px] tabular-nums text-ink-muted",
 };
 
 export default defineConfig({
-  // `dark: "class"` pins class-based dark mode (Wind4's default, pinned so the
-  // `.dark` toggle — not the OS media query — is the single source of truth).
+  // `dark: "class"` pins class-based dark mode (the `.dark` toggle — not the OS
+  // media query — is the single source of truth, driven by the Seam-E applier).
   presets: [presetWind4({ reset: true, dark: "class" })],
 
   // Deterministic CSS variable ordering — see sortUnoVarBlocks above.
   transformers: [sortUnoVarBlocks],
 
   theme: {
+    // Fonts: presetWind4's DEFAULT `--font-sans` / `--font-serif` / `--font-mono`
+    // are already the friendly humanist system stacks we want (system-ui-led sans,
+    // Georgia serif, ui-monospace) — zero external font fetch, honoring the
+    // local-first / no-network promise — so we keep them. The one custom face is a
+    // rounded DISPLAY stack (`--dr-font-display`, defined in the preflight and used
+    // via `[font-family:var(--dr-font-display)]`), which gives a warm rounded
+    // headline on Apple devices and a graceful humanist fallback elsewhere.
+
+    // Colors map to semantic CSS variables flipped under `.dark` (preflight
+    // below). DESIGN.md carries the human-readable table + the AA verification.
     colors: {
-      // Revision-indigo: the "now"/playhead accent and primary action color.
-      revision: {
-        DEFAULT: "oklch(54% 0.13 264)",
-        soft: "oklch(62% 0.11 264)",
-        ring: "oklch(70% 0.10 264)",
+      canvas: "var(--dr-canvas)",
+      surface: "var(--dr-surface)",
+      sunken: "var(--dr-sunken)",
+      hover: "var(--dr-hover)",
+      hairline: "var(--dr-hairline)",
+      "hairline-strong": "var(--dr-hairline-strong)",
+      ink: {
+        DEFAULT: "var(--dr-ink)",
+        secondary: "var(--dr-ink-secondary)",
+        muted: "var(--dr-ink-muted)",
+        faint: "var(--dr-ink-faint)",
       },
-      // Suggested-insert (paired with an underline + label, never color-only).
-      suggest: {
-        DEFAULT: "oklch(52% 0.12 165)",
-        soft: "oklch(95% 0.03 165)",
-        softDark: "oklch(38% 0.06 165)",
+      brand: {
+        DEFAULT: "var(--dr-brand)",
+        hover: "var(--dr-brand-hover)",
+        text: "var(--dr-brand-text)",
+        soft: "var(--dr-brand-soft)",
+        ring: "var(--dr-brand-ring)",
+        on: "var(--dr-on-brand)",
       },
-      // Marked-for-deletion (paired with a strike + label).
-      strike: {
-        DEFAULT: "oklch(55% 0.16 35)",
-        soft: "oklch(95% 0.03 35)",
-        softDark: "oklch(40% 0.08 35)",
+      accent: {
+        DEFAULT: "var(--dr-accent)",
+        strong: "var(--dr-accent-strong)",
+        soft: "var(--dr-accent-soft)",
       },
-      // Reserved caution/warning accent (paired with an icon, never color-only).
-      caution: {
-        DEFAULT: "oklch(58% 0.12 75)",
-        soft: "oklch(96% 0.04 80)",
-        softDark: "oklch(36% 0.06 75)",
-      },
+      // Functional document-state colors (preserved; each pairs with an affordance).
+      suggest: { DEFAULT: "var(--dr-suggest)", soft: "var(--dr-suggest-soft)" },
+      strike: { DEFAULT: "var(--dr-strike)", soft: "var(--dr-strike-soft)" },
+      // UI status.
+      success: { DEFAULT: "var(--dr-success)", soft: "var(--dr-success-soft)" },
+      danger: { DEFAULT: "var(--dr-danger)", soft: "var(--dr-danger-soft)" },
+      warning: "var(--dr-warning)",
     },
   },
 
   // Shortcuts live in a module const (above) so `safelist` can list them all.
   shortcuts,
   // WHY safelist: @wxt-dev/unocss has every HTML entrypoint import the SAME
-  // `virtual:uno.css`, which Vite dedups to ONE shared CSS chunk (the build's
-  // "imported multiple times … using the first occurrence" warning). Shortcut
+  // `virtual:uno.css`, which Vite dedups to ONE shared CSS chunk. Shortcut
   // GENERATION then keys off whichever entry is scanned first, so shortcuts used
-  // only by replay-page components (the timeline channel, the leaf, progress, the
-  // banner) were silently dropped from the shipped chunk and rendered UNSTYLED.
-  // Safelisting every shortcut forces all of them into the shared chunk no matter
-  // the entry order; insertion order is stable, so the determinism contract holds.
+  // only by replay-page components were silently dropped from the shipped chunk
+  // and rendered UNSTYLED. Safelisting every shortcut forces all of them into the
+  // shared chunk no matter the entry order; insertion order is stable, so the
+  // determinism contract holds.
   //
-  // `relative` is the one BARE utility (not a shortcut) that does load-bearing work
-  // in a replay-only component: it is the chip wrapper's class in SummaryInsights —
-  // the positioning context the hover/click detail card (`author-pop`, `absolute`)
-  // anchors to. It hits the SAME shared-chunk hazard: when the first-scanned entry
-  // never emits a standalone `relative`, the utility is dropped from the shipped
-  // chunk, the `<li>` falls back to `position: static`, and the card resolves its
-  // containing block to <body> — painting itself off-screen so it never appears.
-  // Safelist it explicitly so the card always anchors to its chip.
-  //
-  // `sr-only` is the same hazard for a bare accessibility utility: it labels the
-  // non-accepted runs in DocumentViewport (and a <legend> in DiagnosticsPreferences)
-  // for screen readers while the descriptive text stays off the visible page. When
-  // the first-scanned entry never emits a standalone `sr-only`, the rule is dropped
-  // from the shipped chunk, the spans lose their visually-hidden clip, and the label
-  // ("Suggested insertion: ", "Marked for deletion: ") paints inline in the reading
-  // column during replay. Safelist it so the labels stay screen-reader-only.
-  safelist: [...Object.keys(shortcuts), "relative", "sr-only"],
+  // The trailing bare utilities hit the SAME shared-chunk hazard when no scanned
+  // entry emits them standalone: `relative` (the positioning context the insights
+  // hover card anchors to), `sr-only` (off-screen labels for non-accepted runs and
+  // a legend), and `hidden` (the collapsed half of the privacy "more" disclosure).
+  safelist: [...Object.keys(shortcuts), "relative", "sr-only", "hidden"],
 
   preflights: [
     {
-      // Declarative motion suppression: the timeline/scrubber/progress transitions
-      // above are neutralized under `prefers-reduced-motion: reduce`, so motion is
-      // build-visible and verifiable rather than hidden in component logic. The App
-      // additionally caps the JS auto-advance cadence (Step 6).
       getCSS: () => `
-/* Drive the native UA color-scheme from the SAME pinned \`.dark\` class that the
-   Seam-E applier toggles on <html>. Without this the document stays at the
-   default \`light\` scheme, so native form controls (<select>, number inputs,
-   checkboxes) and scrollbars render with light-mode chrome — dark glyphs — even
-   under \`.dark\`, where surfaces like \`dr-panel\` only flip the background. That
-   produces dark-on-dark, near-unreadable controls on the otherwise-dark Options
-   page. Setting color-scheme makes every native control follow the theme. */
-:root { color-scheme: light; }
-.dark { color-scheme: dark; }
+/* ── Semantic design tokens (light) ──────────────────────────────────────────
+   The single source of truth for color. Components reference these via Uno's
+   theme colors (bg-canvas, text-ink, …); dark mode flips the values below. All
+   pairs are WCAG-AA verified (see DESIGN.md). \`color-scheme\` drives native
+   controls/scrollbars to match.
 
+   Scoped to \`:root, :host\` (mirroring presetWind4's own theme block) so the
+   variables resolve in BOTH the full pages (\`:root\` = <html>) AND the content-
+   script SHADOW ROOTS (\`:host\` = the shadow host), where \`:root\` matches nothing.
+   Without \`:host\`, the in-page "Replay revisions" affordance would render with
+   unresolved \`var(--dr-*)\` colors. \`:root\` in a shadow sheet matches nothing, so
+   this never leaks color-scheme onto the Google Docs page. */
+:root,
+:host {
+  color-scheme: light;
+
+  /* The one custom face: a rounded DISPLAY stack (warm rounded headline on Apple,
+     graceful humanist fallback elsewhere). No .dark override — fonts don't theme.
+     System-only: no external font fetch (honors the local-first promise). */
+  --dr-font-display: ui-rounded, "SF Pro Rounded", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  --dr-canvas: oklch(0.975 0.004 75);
+  --dr-surface: oklch(0.995 0.0015 75);
+  --dr-sunken: oklch(0.955 0.005 75);
+  --dr-hover: oklch(0.945 0.005 75);
+  --dr-hairline: oklch(0.905 0.005 75);
+  --dr-hairline-strong: oklch(0.845 0.006 75);
+
+  --dr-ink: oklch(0.27 0.02 264);
+  --dr-ink-secondary: oklch(0.42 0.018 264);
+  --dr-ink-muted: oklch(0.50 0.015 264);
+  --dr-ink-faint: oklch(0.60 0.012 264);
+
+  --dr-brand: oklch(0.52 0.16 264);
+  --dr-brand-hover: oklch(0.46 0.16 264);
+  --dr-brand-text: oklch(0.47 0.16 264);
+  --dr-brand-soft: oklch(0.95 0.025 264);
+  --dr-brand-ring: oklch(0.62 0.14 264);
+  --dr-on-brand: oklch(0.99 0 0);
+
+  --dr-accent: oklch(0.80 0.13 80);
+  --dr-accent-strong: oklch(0.53 0.12 65);
+  --dr-accent-soft: oklch(0.95 0.04 80);
+
+  --dr-suggest: oklch(0.49 0.12 165);
+  --dr-suggest-soft: oklch(0.95 0.03 165);
+  --dr-strike: oklch(0.51 0.17 35);
+  --dr-strike-soft: oklch(0.95 0.03 35);
+
+  --dr-success: oklch(0.50 0.13 155);
+  --dr-success-soft: oklch(0.95 0.03 155);
+  --dr-danger: oklch(0.50 0.18 25);
+  --dr-danger-soft: oklch(0.95 0.03 25);
+  --dr-danger-line: oklch(0.50 0.18 25 / 0.35);
+  --dr-warning: oklch(0.62 0.13 70);
+  --dr-warning-soft: oklch(0.95 0.04 75);
+
+  /* The always-light brand-mark tile (no .dark override → stable in both themes). */
+  --dr-chip: oklch(0.97 0.003 75);
+
+  /* Elevation — soft, layered, low-opacity (Apple register). Never paired with a
+     wide border on the same element (the ghost-card tell). */
+  --dr-shadow-sm: 0 1px 2px oklch(0% 0 0 / 0.05);
+  --dr-shadow-md: 0 2px 8px -2px oklch(0% 0 0 / 0.08), 0 6px 16px -8px oklch(0% 0 0 / 0.06);
+  --dr-shadow-lg: 0 12px 32px -12px oklch(0% 0 0 / 0.16);
+  --dr-inset-shadow: oklch(0% 0 0 / 0.07);
+  --dr-brand-shadow: oklch(0.52 0.13 264 / 0.45);
+  --dr-caret-shadow: oklch(0% 0 0 / 0.28);
+  --dr-seal-1: oklch(0.89 0.004 75);
+  --dr-seal-2: oklch(0.94 0.003 75);
+  --dr-dot-ring: oklch(0% 0 0 / 0.12);
+
+  /* Motion easing (no bounce/elastic). */
+  --dr-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --dr-ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+}
+
+/* ── Semantic design tokens (dark) — a warm charcoal, not a cold gray ─────────
+   Comes AFTER :root so equal-specificity rules resolve to dark when .dark is set
+   on <html>. Markup colors flip to a LIGHT ink on a dark tint so they stay AA. */
+.dark,
+:host(.dark) {
+  color-scheme: dark;
+
+  --dr-canvas: oklch(0.205 0.006 75);
+  --dr-surface: oklch(0.255 0.007 75);
+  --dr-sunken: oklch(0.175 0.006 75);
+  --dr-hover: oklch(0.31 0.008 75);
+  --dr-hairline: oklch(0.33 0.008 75);
+  --dr-hairline-strong: oklch(0.40 0.009 75);
+
+  --dr-ink: oklch(0.955 0.004 75);
+  --dr-ink-secondary: oklch(0.82 0.006 75);
+  --dr-ink-muted: oklch(0.70 0.006 75);
+  --dr-ink-faint: oklch(0.58 0.006 75);
+
+  --dr-brand: oklch(0.52 0.16 264);
+  --dr-brand-hover: oklch(0.58 0.16 264);
+  --dr-brand-text: oklch(0.74 0.13 264);
+  --dr-brand-soft: oklch(0.30 0.06 264);
+  --dr-brand-ring: oklch(0.70 0.12 264);
+  --dr-on-brand: oklch(0.99 0 0);
+
+  --dr-accent: oklch(0.82 0.12 80);
+  --dr-accent-strong: oklch(0.84 0.11 80);
+  --dr-accent-soft: oklch(0.32 0.06 70);
+
+  --dr-suggest: oklch(0.88 0.08 165);
+  --dr-suggest-soft: oklch(0.34 0.05 165);
+  --dr-strike: oklch(0.84 0.10 35);
+  --dr-strike-soft: oklch(0.36 0.07 35);
+
+  --dr-success: oklch(0.80 0.12 155);
+  --dr-success-soft: oklch(0.32 0.05 155);
+  --dr-danger: oklch(0.82 0.13 28);
+  --dr-danger-soft: oklch(0.34 0.07 25);
+  --dr-danger-line: oklch(0.82 0.13 28 / 0.40);
+  --dr-warning: oklch(0.82 0.12 80);
+  --dr-warning-soft: oklch(0.33 0.05 75);
+
+  --dr-shadow-sm: 0 1px 2px oklch(0% 0 0 / 0.4);
+  --dr-shadow-md: 0 2px 8px -2px oklch(0% 0 0 / 0.5), 0 6px 16px -8px oklch(0% 0 0 / 0.4);
+  --dr-shadow-lg: 0 12px 32px -12px oklch(0% 0 0 / 0.6);
+  --dr-inset-shadow: oklch(0% 0 0 / 0.25);
+  --dr-brand-shadow: oklch(0.55 0.15 264 / 0.5);
+  --dr-caret-shadow: oklch(0% 0 0 / 0.5);
+  --dr-seal-1: oklch(0.33 0.006 75);
+  --dr-seal-2: oklch(0.29 0.006 75);
+  --dr-dot-ring: oklch(100% 0 0 / 0.2);
+}
+
+/* A friendly, on-brand text selection. */
+::selection { background: var(--dr-brand-soft); }
+
+/* ── Reduced motion ──────────────────────────────────────────────────────────
+   Every transition/animation degrades to a crossfade or instant state. */
 @media (prefers-reduced-motion: reduce) {
-  .tl-fill, .tl-thumb, .tl-track, .tl-marker, .tl-cluster, .progress-fill, .btn-base { transition: none !important; }
-  /* The reading-column affordance tooltip below fades in; drop the fade (it still
-     appears instantly on hover) so reduced-motion users get no transition at all. */
+  .tl-fill, .tl-thumb, .tl-track, .tl-marker, .tl-cluster, .progress-fill, .btn-base,
+  .seg-item { transition: none !important; }
   .doc-suggest::after, .doc-strike::after { transition: none !important; }
-  /* Freeze the writing caret to a steady mark — still present and colour-coded, just
-     not blinking — so the attribution cue survives without vestibular motion. */
+  /* Freeze the writing caret to a steady mark — still present and colour-coded. */
   .doc-caret { animation: none !important; opacity: 1 !important; }
-  /* Don't freeze the indeterminate bar (a static one-third pill reads as a
-     broken/stalled load). Instead drop the travelling sweep for a vestibular-
-     safe opacity pulse over the FULL track, so reduced-motion users still get a
-     clear "still working" signal while the upper bound is being discovered. */
+  /* Don't freeze the indeterminate bar (a static pill reads as stalled). Pulse the
+     FULL track instead so "still working" stays clear without travelling motion. */
   .dr-indeterminate {
     width: 100% !important;
     transform: none !important;
     animation: dr-indeterminate-pulse 1.5s ease-in-out infinite !important;
   }
 }
+
 /* "Discovering" is honestly indeterminate — the revision upper bound isn't known
-   yet, so there is no percentage to show. A continuous linear sweep communicates
-   liveness without faking determinate progress; the determinate fill takes over
-   for the "fetching" phase once checkpoints start landing. */
+   yet. A continuous sweep communicates liveness without faking determinate
+   progress; the determinate fill takes over once checkpoints start landing. */
 @keyframes dr-indeterminate-slide {
   0% { transform: translateX(-100%); }
   100% { transform: translateX(300%); }
@@ -453,8 +592,7 @@ export default defineConfig({
 .dr-indeterminate { animation: dr-indeterminate-slide 1.1s linear infinite; }
 
 /* The writing caret's soft blink — a living "now-writing" pulse rather than a hard
-   on/off, so it reads as a nib resting on the page, not a terminal cursor. Frozen
-   under reduced-motion above. */
+   on/off, so it reads as a nib resting on the page. Frozen under reduced-motion. */
 @keyframes dr-caret-blink {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.25; }
@@ -462,18 +600,10 @@ export default defineConfig({
 .doc-caret { animation: dr-caret-blink 1.1s ease-in-out infinite; }
 
 /* Reading-column affordance tooltips (suggested insertion / marked for deletion).
-   These non-accepted runs previously surfaced their label through the native
-   \`title\` attribute, whose tooltip is OS/browser-timed: it appears only after a
-   built-in ~0.5–1s hover dwell AND resets that timer on every scroll, so right
-   after scrolling the label felt unresponsive (the reported "hold for ~1s, worse
-   after scrolling" symptom). The label is content-free chrome — §9.6 affordances
-   must read instantly — so it is moved off \`title\` and onto a CSS :hover
-   pseudo-element that paints the moment the pointer enters and re-resolves on
-   scroll-under-cursor, at zero JS / main-thread cost. The text rides a
-   \`data-doc-tip\` attribute (i18n stays single-source); the inline \`sr-only\` span
-   keeps carrying the same text for assistive tech. The seal/author popovers
-   (\`tl-tip\`, \`author-pop\`) were already instant (pointerenter-driven, no debounce)
-   and are unaffected. */
+   Moved off the OS-timed \`title\` attribute onto a :hover pseudo-element that
+   paints the moment the pointer enters and re-resolves on scroll-under-cursor, at
+   zero JS cost. The text rides \`data-doc-tip\` (i18n stays single-source); the
+   inline \`sr-only\` span keeps the same text for assistive tech. */
 .doc-suggest, .doc-strike { position: relative; }
 .doc-suggest::after, .doc-strike::after {
   content: attr(data-doc-tip);
@@ -481,29 +611,23 @@ export default defineConfig({
   left: 50%;
   bottom: calc(100% + 0.4rem);
   transform: translateX(-50%);
-  z-index: 20;
+  z-index: 60;
   width: max-content;
   max-width: 16rem;
   pointer-events: none;
-  border-radius: 0.5rem;
-  border: 1px solid oklch(92.3% 0.003 48.7);
-  background: #fff;
-  padding: 0.125rem 0.5rem;
-  font-family: ui-sans-serif, system-ui, sans-serif;
+  border-radius: 0.625rem;
+  background: var(--dr-surface);
+  box-shadow: var(--dr-shadow-lg), 0 0 0 1px var(--dr-hairline);
+  padding: 0.1875rem 0.5rem;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   font-size: 11px;
   font-weight: 500;
   line-height: 1.4;
-  color: oklch(37.4% 0.01 67.6);
-  box-shadow: 0 10px 30px -12px oklch(0% 0 0/0.4);
+  color: var(--dr-ink-secondary);
   opacity: 0;
   transition: opacity 100ms ease-out;
 }
 .doc-suggest:hover::after, .doc-strike:hover::after { opacity: 1; }
-.dark .doc-suggest::after, .dark .doc-strike::after {
-  border-color: oklch(37.4% 0.01 67.6);
-  background: oklch(26.8% 0.007 34.3);
-  color: oklch(97% 0.001 106.4);
-}
 `,
     },
   ],

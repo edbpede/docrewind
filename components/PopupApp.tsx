@@ -5,12 +5,13 @@
 // `entrypoints/popup/` entrypoint; `action` needs no permission, so the privacy
 // invariant — permissions:["storage"], host:docs.google.com — is untouched).
 //
-// It is a quiet, fixed-width archival card matching the replay/options surfaces:
-// the same theme applier, BrandMark chip, and `btn-*`/`dr-*` tokens. Two views
-// live in one popup — an overview (what DocRewind is + quick actions) and an
-// About ledger (version/author/license/source) — toggled in place so the popup
-// never needs a second page. "Options" hands off to the real options page via
-// `runtime.openOptionsPage()` (no `tabs` permission required).
+// A friendly, fixed-width little app (360px) in the warm Apple-Settings register:
+// the shared theme applier, BrandMark chip, and `btn-*`/`dr-*` tokens. Two views
+// live in one popup — an overview (what DocRewind is, a calm privacy reassurance,
+// and quick actions) and an About ledger (version/author/license/source as a
+// grouped iOS row list) — toggled in place so the popup never needs a second page.
+// "Options" hands off to the real options page via `runtime.openOptionsPage()`
+// (no `tabs` permission required).
 //
 // Solid idioms: `props.x` (never destructured), `class` (never `className`).
 
@@ -18,6 +19,13 @@ import type { Component, JSX } from "solid-js";
 import { createSignal, Show } from "solid-js";
 import { browser } from "wxt/browser";
 import BrandMark from "@/components/BrandMark";
+import {
+  IconArrowLeft,
+  IconExternal,
+  IconInfo,
+  IconSettings,
+  IconShield,
+} from "@/components/icons";
 import { useThemeSync } from "@/components/theme-sync";
 import { strings } from "@/lib/i18n/strings";
 
@@ -32,23 +40,24 @@ function appVersion(): string {
   }
 }
 
-/** An external link styled as a quiet, focusable inline action. */
+/** An external link styled as a quiet, focusable inline action with an icon. */
 const ExternalLink: Component<{ href: string; children: JSX.Element }> = (props) => (
   <a
     href={props.href}
     target="_blank"
     rel="noreferrer noopener"
-    class="rounded text-revision underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-revision-ring"
+    class="dr-link inline-flex items-center gap-1"
   >
     {props.children}
+    <IconExternal size={14} class="shrink-0 text-ink-faint" />
   </a>
 );
 
-/** One label/value row in the About ledger. */
+/** One label/value row in the About ledger (the iOS grouped-row pattern). */
 const DetailRow: Component<{ label: string; children: JSX.Element }> = (props) => (
-  <div class="flex items-baseline justify-between gap-3 py-1">
-    <dt class="dr-eyebrow shrink-0">{props.label}</dt>
-    <dd class="text-right text-sm">{props.children}</dd>
+  <div class="dr-row">
+    <dt class="dr-row-label shrink-0">{props.label}</dt>
+    <dd class="m-0 min-w-0 text-right text-[0.9375rem]">{props.children}</dd>
   </div>
 );
 
@@ -64,81 +73,86 @@ const PopupApp: Component = () => {
   }
 
   return (
-    <div class="dr-surface w-80 max-w-full">
-      <div class="flex flex-col gap-4 p-4">
-        <Show
-          when={view() === "about"}
-          fallback={
-            <>
-              <header class="flex items-center gap-3">
-                <BrandMark size={36} />
-                <div class="flex min-w-0 flex-col">
-                  <span class="truncate text-base font-semibold leading-tight">
-                    {strings.app.brandName}
-                  </span>
-                  <span class="dr-eyebrow">{strings.app.mastheadEyebrow}</span>
-                </div>
-                <span class="ml-auto inline-flex shrink-0 items-center rounded-full border border-stone-300 px-2 py-0.5 font-mono text-xs tabular-nums text-stone-600 dark:border-stone-600 dark:text-stone-400">
-                  v{version}
-                </span>
-              </header>
-
-              <p class="text-sm leading-relaxed text-stone-600 dark:text-stone-300">
-                {popup.description}
-              </p>
-
-              <p class="dr-eyebrow flex items-center gap-1.5 text-stone-500 dark:text-stone-400">
-                <span aria-hidden="true" class="text-revision">
-                  ●
-                </span>
-                {popup.privacyNote}
-              </p>
-
-              <div class="flex gap-2 pt-1">
-                <button type="button" class="btn-primary flex-1" onClick={openOptions}>
-                  {popup.optionsButton}
-                </button>
-                <button type="button" class="btn-secondary" onClick={() => setView("about")}>
-                  {popup.aboutButton}
-                </button>
+    <div class="dr-surface w-90 max-w-full">
+      <Show
+        when={view() === "about"}
+        fallback={
+          <div class="flex flex-col gap-5 p-5">
+            <header class="flex items-center gap-3.5">
+              <BrandMark size={40} />
+              <div class="flex min-w-0 flex-col gap-0.5">
+                <span class="dr-subheading truncate">{strings.app.brandName}</span>
+                <span class="dr-muted text-pretty">{popup.tagline}</span>
               </div>
-            </>
-          }
-        >
+              <span class="dr-badge ml-auto shrink-0 self-start font-mono tabular-nums">
+                v{version}
+              </span>
+            </header>
+
+            <p class="dr-body text-pretty">{popup.description}</p>
+
+            <div class="banner-card">
+              <IconShield class="banner-icon" />
+              <div class="flex flex-col">
+                <span class="banner-title">{popup.privacyNote}</span>
+              </div>
+            </div>
+
+            <div class="flex flex-col gap-2.5">
+              <button type="button" class="btn-primary btn-block btn-lg" onClick={openOptions}>
+                <IconSettings size={18} />
+                {popup.optionsButton}
+              </button>
+              <button
+                type="button"
+                class="btn-secondary btn-block"
+                onClick={() => setView("about")}
+              >
+                <IconInfo size={18} />
+                {popup.aboutButton}
+              </button>
+            </div>
+          </div>
+        }
+      >
+        <div class="flex flex-col gap-4 p-5">
           <header class="flex items-center gap-2">
             <button
               type="button"
-              class="btn-ghost px-2 py-1"
+              class="btn-ghost px-2.5"
               aria-label={popup.backHint}
               onClick={() => setView("main")}
             >
-              <span aria-hidden="true">←</span> {popup.backButton}
+              <IconArrowLeft size={18} />
+              {popup.backButton}
             </button>
-            <h2 class="ml-1 text-sm font-semibold">{popup.aboutHeading}</h2>
+            <h2 class="dr-subheading ml-1">{popup.aboutHeading}</h2>
           </header>
 
-          <div class="flex flex-col items-center gap-1.5 py-1 text-center">
-            <BrandMark size={44} label={strings.app.brandName} />
-            <span class="text-base font-semibold">{strings.app.brandName}</span>
-            <span class="text-xs text-stone-500 dark:text-stone-400">{popup.tagline}</span>
+          <div class="flex flex-col items-center gap-2 py-1 text-center">
+            <BrandMark size={48} label={strings.app.brandName} />
+            <span class="dr-heading">{strings.app.brandName}</span>
+            <span class="dr-muted">{popup.tagline}</span>
           </div>
 
-          <dl class="dr-card flex flex-col divide-y divide-stone-200/70 py-1 dark:divide-stone-700/70">
+          <dl class="dr-rows m-0">
             <DetailRow label={popup.versionLabel}>
-              <span class="font-mono tabular-nums">{version}</span>
+              <span class="font-mono tabular-nums text-ink-secondary">{version}</span>
             </DetailRow>
             <DetailRow label={popup.authorLabel}>
               <ExternalLink href={popup.authorUrl}>{popup.authorHandle}</ExternalLink>
             </DetailRow>
             <DetailRow label={popup.licenseLabel}>
-              <span class="font-mono text-xs">{popup.licenseValue}</span>
+              <span class="font-mono text-[0.8125rem] text-ink-secondary">
+                {popup.licenseValue}
+              </span>
             </DetailRow>
             <DetailRow label={popup.sourceLabel}>
               <ExternalLink href={popup.sourceUrl}>{popup.sourceText}</ExternalLink>
             </DetailRow>
           </dl>
-        </Show>
-      </div>
+        </div>
+      </Show>
     </div>
   );
 };

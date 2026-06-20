@@ -7,6 +7,7 @@
 
 import type { Component } from "solid-js";
 import { createResource, Show } from "solid-js";
+import { IconInfo, IconTrash } from "@/components/icons";
 import type { DocId } from "@/lib/domain/model";
 import { strings } from "@/lib/i18n/strings";
 import type { RevisionStore } from "@/lib/store";
@@ -42,40 +43,47 @@ const CacheControls: Component<CacheControlsProps> = (props) => {
     void refetch();
   }
 
+  // The "Cached data" group heading is owned by the parent OptionsApp (one
+  // heading per group); this component renders the storage readout + the clear
+  // actions beneath the budget rows.
   return (
-    <section class="dr-card" aria-labelledby="dr-cache-heading">
-      <h2 id="dr-cache-heading" class="mb-2 font-medium">
-        {strings.options.cacheHeading}
-      </h2>
-
+    <div class="dr-group">
       <Show
         when={usage()?.quota ? usage() : undefined}
         fallback={
-          <p class="mb-3 text-sm text-stone-500 dark:text-stone-400">
-            {strings.options.usageUnknown}
+          <p class="note-info" role="status">
+            <IconInfo size={18} class="note-icon" />
+            <span>{strings.options.usageUnknown}</span>
           </p>
         }
       >
         {(estimate) => (
-          <p class="dr-counter mb-3">
-            {formatMib(estimate().usage)} / {formatMib(estimate().quota)}
-          </p>
+          <div class="dr-rows">
+            <div class="dr-row">
+              <span class="dr-row-label">{strings.options.cacheHeading}</span>
+              <span class="dr-counter">
+                {formatMib(estimate().usage)} / {formatMib(estimate().quota)}
+              </span>
+            </div>
+          </div>
         )}
       </Show>
 
-      <div class="flex flex-wrap gap-2">
+      <div class="flex flex-wrap gap-2 px-1">
         <Show when={props.docId}>
           {(docId) => (
             <button type="button" class="btn-secondary" onClick={() => void clearDocument(docId())}>
+              <IconTrash size={18} />
               {strings.options.clearCurrent}
             </button>
           )}
         </Show>
-        <button type="button" class="btn-secondary" onClick={() => void clearAll()}>
+        <button type="button" class="btn-danger" onClick={() => void clearAll()}>
+          <IconTrash size={18} />
           {strings.options.clearAll}
         </button>
       </div>
-    </section>
+    </div>
   );
 };
 
