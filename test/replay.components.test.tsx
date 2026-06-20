@@ -729,6 +729,9 @@ describe("replay UI components", () => {
   it("does not disengage follow on the component's own programmatic scrollTo", () => {
     vi.stubGlobal("scrollTo", vi.fn());
     syncRaf();
+    // scrollHeight/innerHeight: realistic scrollable page so maxScroll (4232) >> target (~786).
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(768);
+    vi.spyOn(document.documentElement, "scrollHeight", "get").mockReturnValue(5000);
     // Caret far below the band → recompute calls scrollTo → sets progScroll flag.
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(domRect(900, 920));
     const onFollowOff = vi.fn();
@@ -792,6 +795,10 @@ describe("replay UI components", () => {
     syncRaf();
     let mockScrollY = 0;
     vi.spyOn(window, "scrollY", "get").mockImplementation(() => mockScrollY);
+    // scrollHeight/innerHeight: realistic scrollable page so maxScroll (4232) >> target (~786),
+    // making the markProgrammatic clamp a no-op and progScrollTarget equal to capturedTarget.
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(768);
+    vi.spyOn(document.documentElement, "scrollHeight", "get").mockReturnValue(5000);
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(domRect(900, 920));
     const onFollowOff = vi.fn();
     render(() => (
@@ -826,6 +833,50 @@ describe("replay UI components", () => {
 
     // User scroll clearly away from the settled target — disengages follow exactly once.
     mockScrollY = capturedTarget - 50;
+    window.dispatchEvent(new Event("scroll"));
+    expect(onFollowOff).toHaveBeenCalledTimes(1);
+  });
+
+  // ── Claim: clamped-maxScroll guard (progScrollTarget upper-bound fix) ─────────
+  it("clamps progScrollTarget to the reachable max-scroll when the raw followScroll target exceeds the document bottom, so progScrollReached trips at the clamped landing and a user scroll away disengages", () => {
+    let capturedTarget = 0;
+    const scrollTo = vi.fn((opts: ScrollToOptions) => {
+      capturedTarget = opts.top ?? 0;
+    });
+    vi.stubGlobal("scrollTo", scrollTo);
+    syncRaf();
+    let mockScrollY = 0;
+    vi.spyOn(window, "scrollY", "get").mockImplementation(() => mockScrollY);
+    // innerHeight=300, scrollHeight=800 → maxScroll=500. followScroll target
+    // with caretTop=900: max(0, 0+900-300*0.38)=786 > 500, so after the fix
+    // progScrollTarget = min(786, 500) = 500.
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(300);
+    vi.spyOn(document.documentElement, "scrollHeight", "get").mockReturnValue(800);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(domRect(900, 920));
+    const onFollowOff = vi.fn();
+    render(() => (
+      <DocumentViewport
+        segments={caretSegments}
+        caret={{ revision: 2, color: "#000000" }}
+        follow
+        onFollowOff={onFollowOff}
+      />
+    ));
+    // The browser receives the raw (unclamped) followScroll target (~786).
+    expect(scrollTo).toHaveBeenCalled();
+    expect(capturedTarget).toBeGreaterThan(500);
+
+    // Simulate the browser landing at the clamped max-scroll (500).
+    // Without the fix, progScrollTarget would be ~786, so |500-786|>2 and
+    // progScrollReached would never trip — suppression stays stuck for 1200ms.
+    // With the fix, progScrollTarget=500, so the landing is within PROG_SCROLL_TOLERANCE_PX
+    // and progScrollReached trips immediately.
+    mockScrollY = 500;
+    window.dispatchEvent(new Event("scroll"));
+    expect(onFollowOff).not.toHaveBeenCalled(); // reached clamped target — suppressed
+
+    // A subsequent user scroll clearly away (50px) now disengages exactly once.
+    mockScrollY = 550;
     window.dispatchEvent(new Event("scroll"));
     expect(onFollowOff).toHaveBeenCalledTimes(1);
   });

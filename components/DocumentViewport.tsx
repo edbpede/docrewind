@@ -235,7 +235,8 @@ const DocumentViewport: Component<DocumentViewportProps> = (props) => {
   let progScrollTimer: ReturnType<typeof setTimeout> | undefined;
   const markProgrammatic = (target: number): void => {
     progScroll = true;
-    progScrollTarget = target;
+    const maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+    progScrollTarget = Math.min(target, maxScroll);
     progScrollReached = false;
     clearTimeout(progScrollTimer);
     progScrollTimer = setTimeout(() => {
