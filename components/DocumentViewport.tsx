@@ -226,24 +226,50 @@ const DocumentViewport: Component<DocumentViewportProps> = (props) => {
   // The guard stays active (progScroll=true) until AFTER the target is reached, so
   // the easing tail is suppressed too. Once the tail is seen (progScrollReached=true),
   // any scroll event that moves clearly away from the target is genuine user intent
-  // and disengages follow. A 1200 ms safety timeout clears the guard if the target
-  // is never reached (e.g. clamped at page bottom).
+  // and disengages follow.
+  //
+  // The guard self-clears after PROG_SCROLL_IDLE_MS of NO programmatic scroll activity.
+  // This is an INACTIVITY window — re-armed by markProgrammatic AND by every scroll
+  // event we classify as our own (mid-animation or easing tail) — not a wall-clock cap.
+  // A single smooth `scrollTo` over a large distance animates well past a second
+  // (Chromium scales the duration with distance, measured up to a ~1.5s cap), so a
+  // fixed cap expires mid-flight: the animation's own remaining frames then fall through
+  // to the user-scroll branch and wrongly disengage follow — the large-jump / "around
+  // revision 50" regression, made worse when a pure-deletion revision yields no caret so
+  // recompute stops re-issuing markProgrammatic. An inactivity window only fires once the
+  // animation has truly gone quiet — target reached, or stalled (e.g. clamped short at
+  // the page bottom) — so the guard stays correct for an animation of any duration.
   const PROG_SCROLL_TOLERANCE_PX = 2;
+  const PROG_SCROLL_IDLE_MS = 1200;
   let progScroll = false;
   let progScrollTarget: number | undefined;
   let progScrollReached = false;
+  // The distance to target at the previous scroll event we classified as our own.
+  // A smooth `scrollTo` animation is MONOTONIC — every frame closes the gap to the
+  // target, never widens it — so a mid-animation event whose distance to target GREW
+  // beyond tolerance is motion the animation could not have produced (a scrollbar drag
+  // pulling away), the one cue that separates a genuine drag from the normal approach.
+  let progScrollDist = Number.POSITIVE_INFINITY;
   let progScrollTimer: ReturnType<typeof setTimeout> | undefined;
-  const markProgrammatic = (target: number): void => {
-    progScroll = true;
-    const maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
-    progScrollTarget = Math.min(target, maxScroll);
-    progScrollReached = false;
+  // (Re)start the inactivity timer that releases the guard once our scroll goes quiet.
+  const armProgScrollIdleTimeout = (): void => {
     clearTimeout(progScrollTimer);
     progScrollTimer = setTimeout(() => {
       progScroll = false;
       progScrollTarget = undefined;
       progScrollReached = false;
-    }, 1200);
+    }, PROG_SCROLL_IDLE_MS);
+  };
+  const markProgrammatic = (target: number): void => {
+    progScroll = true;
+    const maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+    progScrollTarget = Math.min(target, maxScroll);
+    progScrollReached = false;
+    // Seed with the real starting gap (target assigned on the line above, so never
+    // undefined here) — not Infinity, or the reversal check below could never trip on
+    // the very first scroll event, misclassifying an immediate drag-away as programmatic.
+    progScrollDist = Math.abs(window.scrollY - progScrollTarget);
+    armProgScrollIdleTimeout();
   };
 
   const recompute = (): void => {
@@ -324,35 +350,57 @@ const DocumentViewport: Component<DocumentViewportProps> = (props) => {
       if (!e.defaultPrevented && NAV_KEYS.has(e.key)) onUserScroll();
     };
     // Pill visibility + scrollbar-drag disengage: runs on every scroll event.
-    // Three-way guard while progScroll is active:
+    // Four-way guard while progScroll is active:
     //   1. Within tolerance of target → mark as reached, suppress (easing tail).
     //   2. Beyond tolerance AND already reached → user moved away; clear guard + disengage.
-    //   3. Beyond tolerance AND not yet reached → mid-animation; suppress.
-    // After the guard clears (reached+moved, or safety timeout), events disengage normally.
+    //   3. Beyond tolerance, not yet reached, but distance to target GREW → a drag
+    //      pulling away mid-animation (the animation only ever closes the gap); disengage.
+    //   4. Beyond tolerance, not yet reached, distance shrank → mid-animation; suppress.
+    // After the guard clears (reached+moved, drag-away, or safety timeout), events
+    // disengage normally.
+    const clearProgScrollGuard = (): void => {
+      progScroll = false;
+      progScrollTarget = undefined;
+      progScrollReached = false;
+      clearTimeout(progScrollTimer);
+    };
     const onScroll = (): void => {
       schedule();
       if (!progScroll) {
         onUserScroll();
         return;
       }
-      if (
-        progScrollTarget !== undefined &&
-        Math.abs(window.scrollY - progScrollTarget) <= PROG_SCROLL_TOLERANCE_PX
-      ) {
-        // Landing frame or easing tail — suppress, note that we've reached the target.
+      const dist =
+        progScrollTarget === undefined
+          ? Number.POSITIVE_INFINITY
+          : Math.abs(window.scrollY - progScrollTarget);
+      if (dist <= PROG_SCROLL_TOLERANCE_PX) {
+        // Landing frame or easing tail — suppress, note we've reached the target, and
+        // keep the guard alive: the easing tail keeps emitting events for a while.
         progScrollReached = true;
+        progScrollDist = dist;
+        armProgScrollIdleTimeout();
         return;
       }
       if (progScrollReached) {
         // Moved clearly away after settling: genuine user intent. Clear guard and disengage.
-        progScroll = false;
-        progScrollTarget = undefined;
-        progScrollReached = false;
-        clearTimeout(progScrollTimer);
+        clearProgScrollGuard();
         onUserScroll();
         return;
       }
-      // Still mid-animation (before reaching target) — suppress.
+      if (dist > progScrollDist + PROG_SCROLL_TOLERANCE_PX) {
+        // Moving AWAY from the target mid-animation — our own smooth scroll never widens
+        // the gap, so this is a scrollbar drag (the one gesture with no wheel/touch/key
+        // fast-path). Clear the guard and disengage before the idle timer would snap back.
+        clearProgScrollGuard();
+        onUserScroll();
+        return;
+      }
+      // Still mid-animation (before reaching target, gap shrinking) — suppress, and keep
+      // the guard alive so a long smooth scroll never outlives the inactivity window
+      // mid-flight. Track this frame's distance so the next event can spot a reversal.
+      progScrollDist = dist;
+      armProgScrollIdleTimeout();
     };
     // Pill visibility for window resize (no disengage needed).
     const onView = (): void => schedule();
