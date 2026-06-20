@@ -38,7 +38,11 @@ const PrivacyBanner: Component<PrivacyBannerProps> = (props) => {
         <span class="banner-title">{strings.privacy.bannerTitle}</span>
         <IconChevronDown class="banner-chevron" data-expanded={expanded() ? "true" : "false"} />
       </button>
-      <div class="banner-collapse" data-collapsed={expanded() ? "false" : "true"}>
+      <div
+        class="banner-collapse"
+        data-collapsed={expanded() ? "false" : "true"}
+        aria-hidden={!expanded()}
+      >
         <div class="banner-clip">
           <div id={detailId} class="banner-detail">
             <p class="banner-body">{strings.privacy.bannerBody}</p>

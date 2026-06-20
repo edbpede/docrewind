@@ -237,7 +237,7 @@ export default defineContentScript({
       // SECOND row above it (its shared parent is a block), which a fixed-height
       // toolbar then clips. Submission: after the attachment card. Inline styles
       // only (no UnoCSS utility classes, which the shared-chunk dedup can drop) —
-      // the button itself uses the safelisted `btn-secondary`/`btn-compact`
+      // the button itself uses the safelisted `btn-secondary`/`btn-secondary-compact`
       // shortcuts, so it stays styled inside the shadow root.
       append: (anchor, el) => {
         const loc = parseClassroomLocation(location.href);

@@ -23,7 +23,7 @@ export interface ReplayAffordanceProps {
   /** Invoked on the user's explicit click — never automatically. */
   readonly onActivate: () => void;
   /**
-   * Render the smaller `btn-compact` chip used inside dense host chrome — the
+   * Render the smaller `btn-secondary-compact` chip used inside dense host chrome — the
    * Google Classroom grading toolbar and submission card, where the default
    * (Docs-titlebar) size crowds or clips the embedding surface. Defaults to the
    * full size.

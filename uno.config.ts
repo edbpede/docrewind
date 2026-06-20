@@ -596,7 +596,7 @@ export default defineConfig({
    Every transition/animation degrades to a crossfade or instant state. */
 @media (prefers-reduced-motion: reduce) {
   .tl-fill, .tl-thumb, .tl-track, .tl-marker, .tl-cluster, .progress-fill, .btn-base,
-  .seg-item, .banner-collapse, .banner-chevron { transition: none !important; }
+  .btn-secondary-compact, .seg-item, .banner-collapse, .banner-chevron { transition: none !important; }
   .doc-suggest::after, .doc-strike::after { transition: none !important; }
   /* Freeze the writing caret to a steady mark — still present and colour-coded. */
   .doc-caret { animation: none !important; opacity: 1 !important; }
