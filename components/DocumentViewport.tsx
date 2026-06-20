@@ -265,7 +265,10 @@ const DocumentViewport: Component<DocumentViewportProps> = (props) => {
     const maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
     progScrollTarget = Math.min(target, maxScroll);
     progScrollReached = false;
-    progScrollDist = Number.POSITIVE_INFINITY;
+    // Seed with the real starting gap (target assigned on the line above, so never
+    // undefined here) — not Infinity, or the reversal check below could never trip on
+    // the very first scroll event, misclassifying an immediate drag-away as programmatic.
+    progScrollDist = Math.abs(window.scrollY - progScrollTarget);
     armProgScrollIdleTimeout();
   };
 
