@@ -75,6 +75,14 @@ export const IconHistory: Component<IconProps> = (props) => (
   </Svg>
 );
 
+/** Crosshair — the "follow / lock onto the active edit" mark (transport toggle). */
+export const IconCrosshair: Component<IconProps> = (props) => (
+  <Svg {...props}>
+    <circle cx="12" cy="12" r="7.5" />
+    <path d="M12 1.5v4M12 18.5v4M1.5 12h4M18.5 12h4" />
+  </Svg>
+);
+
 // ── Chrome ─────────────────────────────────────────────────────────────────
 export const IconSettings: Component<IconProps> = (props) => (
   <Svg {...props}>

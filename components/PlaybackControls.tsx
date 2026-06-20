@@ -10,7 +10,7 @@
 
 import type { Component } from "solid-js";
 import { Index, Show } from "solid-js";
-import { IconPause, IconPlay, IconRestart } from "@/components/icons";
+import { IconCrosshair, IconPause, IconPlay, IconRestart } from "@/components/icons";
 import { speedLabel, strings } from "@/lib/i18n/strings";
 
 /** The fixed playback-speed multipliers. */
@@ -22,6 +22,8 @@ export interface PlaybackControlsProps {
   readonly onPlayPause: () => void;
   readonly onRestart: () => void;
   readonly onSpeed: (speed: number) => void;
+  readonly follow: boolean;
+  readonly onFollowChange: (follow: boolean) => void;
 }
 
 const PlaybackControls: Component<PlaybackControlsProps> = (props) => {
@@ -48,6 +50,25 @@ const PlaybackControls: Component<PlaybackControlsProps> = (props) => {
       >
         <IconRestart size={18} />
         <span>{strings.controls.restart}</span>
+      </button>
+
+      {/* "Follow edits": a sticky lock-to-caret toggle (like a video game's "lock to
+          player"). On by default; the viewport auto-scrolls to keep the active edit in
+          view during non-linear playback. A real toggle — aria-pressed carries the state,
+          paired with a brand tint and the crosshair icon (never colour alone, §9.11). */}
+      <button
+        type="button"
+        class={
+          props.follow
+            ? "btn-base bg-brand-soft text-brand-text ring-1 ring-brand-ring"
+            : "btn-base bg-surface text-ink ring-1 ring-hairline-strong hover:bg-hover"
+        }
+        aria-pressed={props.follow}
+        aria-label={strings.controls.followCaret}
+        onClick={() => props.onFollowChange(!props.follow)}
+      >
+        <IconCrosshair size={18} />
+        <span>{strings.controls.followCaret}</span>
       </button>
 
       {/* A real <fieldset>/<legend> for the speed group (native group semantics —

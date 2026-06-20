@@ -33,11 +33,29 @@
 // opaque author key (never the raw Gaia token).
 
 import type { Component, JSX } from "solid-js";
-import { createMemo, Index, Match, Show, Switch } from "solid-js";
-import { IconComment, IconFile, IconImage, IconList, IconTable } from "@/components/icons";
+import {
+  createEffect,
+  createMemo,
+  createSignal,
+  Index,
+  Match,
+  onCleanup,
+  onMount,
+  Show,
+  Switch,
+} from "solid-js";
+import {
+  IconChevronDown,
+  IconComment,
+  IconFile,
+  IconImage,
+  IconList,
+  IconTable,
+} from "@/components/icons";
 import type { OpaqueStructure } from "@/lib/decoder/types";
 import { contributedBy, strings } from "@/lib/i18n/strings";
 import type { Segment } from "@/lib/reconstruction/render";
+import { type CaretVisibility, caretVisibility, followScroll } from "@/lib/replay/follow";
 
 /** A clear per-kind icon for an embedded non-text element (image, table, …) — far
  *  more legible than the old generic ▤ glyph. Called inside reactive JSX so it
@@ -84,6 +102,15 @@ export interface DocumentViewportProps {
   readonly highlight?: DocumentHighlight | null;
   /** Map from a revision id to its author's opaque key. Joins segments to authors. */
   readonly authorKeyByRevision?: ReadonlyMap<number, string>;
+  /** When false, the viewport does not auto-scroll to keep the caret in view.
+   *  Absent/true → follow enabled (the host owns the toggle state). */
+  readonly follow?: boolean;
+  /** Scroll behaviour for follow + jump: "smooth" at ≤1×, "auto" when stepping faster. */
+  readonly scrollBehavior?: ScrollBehavior;
+  /** Fired on a genuine user scroll gesture (wheel/touch) so the host disengages follow. */
+  readonly onFollowOff?: () => void;
+  /** Fired when the user taps "Jump to edit" so the host re-engages follow. */
+  readonly onFollowOn?: () => void;
 }
 
 // The author hue when a contributor carried no assigned colour (the self-resolution
@@ -168,11 +195,124 @@ const DocumentViewport: Component<DocumentViewportProps> = (props) => {
 
   const caretColor = (): string => props.caret?.color ?? ATTRIBUTION_FALLBACK;
 
+  // ── Follow-caret auto-scroll (legibility during NON-LINEAR playback) ─────────
+  // When playback jumps between distant sections, keep the active edit in view. The
+  // geometry decisions are pure (`lib/replay/follow`); here we only read the caret's
+  // box and drive `window.scrollTo`. Every measure is deferred into ONE
+  // requestAnimationFrame so we never read layout inside the reactive tick (which
+  // would interleave with the per-frame segment rebuild and thrash) and never run
+  // more than one scroll per frame — keeping the TICK_MS cadence clean.
+  let rootEl: HTMLElement | undefined;
+  const [caretView, setCaretView] = createSignal<CaretVisibility>("visible");
+
+  const measureCaret = (): { readonly top: number; readonly bottom: number } | null => {
+    const el = rootEl?.querySelector<HTMLElement>(".doc-caret");
+    if (el === null || el === undefined) {
+      return null;
+    }
+    const rect = el.getBoundingClientRect();
+    return { top: rect.top, bottom: rect.bottom };
+  };
+
+  let rafId: number | undefined;
+  const recompute = (): void => {
+    rafId = undefined;
+    if (typeof window === "undefined") {
+      return;
+    }
+    const box = measureCaret();
+    if (box === null) {
+      // No caret this frame (pure deletion / strict mid-run insert) — hold position.
+      setCaretView("visible");
+      return;
+    }
+    const vh = window.innerHeight;
+    if (props.follow !== false) {
+      const decision = followScroll(box.top, box.bottom, vh, window.scrollY);
+      if (decision.scroll) {
+        window.scrollTo({ top: decision.top, behavior: props.scrollBehavior ?? "smooth" });
+      }
+      // Following keeps the caret in view, so the off-screen pill never shows.
+      setCaretView("visible");
+      return;
+    }
+    setCaretView(caretVisibility(box.top, box.bottom, vh));
+  };
+  const schedule = (): void => {
+    if (typeof requestAnimationFrame === "undefined") {
+      recompute();
+      return;
+    }
+    if (rafId !== undefined) {
+      return; // a measure is already queued for this frame
+    }
+    rafId = requestAnimationFrame(recompute);
+  };
+
+  // React to the caret moving (a tick or a scrub), its run growing, and the follow
+  // toggle flipping. These are the tracked reads; the DOM measure runs off the
+  // reactive path in `recompute`.
+  createEffect(() => {
+    void caretIndex();
+    void props.segments.length;
+    void props.follow;
+    schedule();
+  });
+
+  onMount(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    // A real user gesture (wheel / touch drag) means "I'm driving now" — disengage
+    // follow so playback stops yanking the page. We listen for INPUT events, not the
+    // `scroll` event, so our own programmatic scrollTo is never mistaken for intent.
+    const onUserScroll = (): void => {
+      if (props.follow !== false) {
+        props.onFollowOff?.();
+      }
+    };
+    // Pill visibility tracks the viewport: recompute on scroll/resize (read-only).
+    const onView = (): void => schedule();
+    window.addEventListener("wheel", onUserScroll, { passive: true });
+    window.addEventListener("touchmove", onUserScroll, { passive: true });
+    window.addEventListener("scroll", onView, { passive: true });
+    window.addEventListener("resize", onView, { passive: true });
+    onCleanup(() => {
+      window.removeEventListener("wheel", onUserScroll);
+      window.removeEventListener("touchmove", onUserScroll);
+      window.removeEventListener("scroll", onView);
+      window.removeEventListener("resize", onView);
+    });
+  });
+  onCleanup(() => {
+    if (rafId !== undefined && typeof cancelAnimationFrame !== "undefined") {
+      cancelAnimationFrame(rafId);
+    }
+  });
+
+  // The off-screen "Jump to edit" affordance: only while follow is OFF (when on we
+  // scroll to the caret, so it is never lost) and the caret has actually left the
+  // viewport. Clicking snaps to the caret and re-engages follow.
+  const showPill = (): boolean => props.follow === false && caretView() !== "visible";
+  const onJump = (): void => {
+    const box = measureCaret();
+    if (box !== null && typeof window !== "undefined") {
+      const decision = followScroll(box.top, box.bottom, window.innerHeight, window.scrollY);
+      window.scrollTo({ top: decision.top, behavior: props.scrollBehavior ?? "smooth" });
+    }
+    props.onFollowOn?.();
+  };
+
   // The manuscript leaf: an elevated sheet with a ruled binding margin. Both the
   // written page and the blank-page note rest on the same paper so scrubbing back
   // to the start never drops out of the manuscript frame.
   return (
-    <section class="dr-leaf">
+    <section
+      class="dr-leaf"
+      ref={(el) => {
+        rootEl = el;
+      }}
+    >
       <Show
         when={props.segments.length > 0}
         fallback={<p class="doc-column italic text-ink-muted">{strings.viewport.empty}</p>}
@@ -277,6 +417,21 @@ const DocumentViewport: Component<DocumentViewportProps> = (props) => {
             }}
           </Index>
         </article>
+      </Show>
+      {/* Off-screen edit indicator: a non-jarring alternative to forcing a scroll
+          while the user is driving. Points toward the active edit and re-engages
+          follow on tap. `position: fixed`, so it floats over the viewport edge. */}
+      <Show when={showPill()}>
+        <button type="button" class="dr-jump-pill" onClick={onJump}>
+          <span
+            class="inline-flex"
+            classList={{ "rotate-180": caretView() === "above" }}
+            aria-hidden="true"
+          >
+            <IconChevronDown size={16} />
+          </span>
+          <span>{strings.viewport.jumpToEdit}</span>
+        </button>
       </Show>
     </section>
   );

@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import DocumentViewport from "@/components/DocumentViewport";
+import PlaybackControls from "@/components/PlaybackControls";
 import SummaryInsights from "@/components/SummaryInsights";
 import Timeline, { clusterMarkers, type TimelineMarker } from "@/components/Timeline";
 import TimelineLegend from "@/components/TimelineLegend";
@@ -46,6 +47,7 @@ describe("replay UI components", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
   it("scrubs the timeline with pointer input across the padded interior", async () => {
@@ -575,5 +577,130 @@ describe("replay UI components", () => {
     ));
     expect(screen.getByText("plain").getAttribute("aria-describedby")).toBeNull();
     expect(screen.queryByText(/Contributed by/)).toBeNull();
+  });
+  // ── Follow-caret auto-scroll + off-screen indicator ─────────────────────────
+  // A stubbed rAF runs the deferred measure synchronously; a mocked caret rect drives
+  // the (pure) band decision. `window.scrollTo` is jsdom-unimplemented, so it is stubbed.
+  function domRect(top: number, bottom: number): DOMRect {
+    return {
+      top,
+      bottom,
+      left: 0,
+      right: 10,
+      width: 10,
+      height: bottom - top,
+      x: 0,
+      y: top,
+      toJSON: () => ({}),
+    } as DOMRect;
+  }
+  function syncRaf(): void {
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+      cb(0);
+      return 1;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+  }
+  const caretSegments: Segment[] = [
+    { kind: "accepted-text", text: "Hello ", fromRevision: 1, toRevision: 1, revisions: [1] },
+    { kind: "accepted-text", text: "world", fromRevision: 2, toRevision: 2, revisions: [2] },
+  ];
+
+  it("auto-scrolls to keep the caret in view when follow is on and it leaves the band", () => {
+    const scrollTo = vi.fn();
+    vi.stubGlobal("scrollTo", scrollTo);
+    syncRaf();
+    // Caret far below the reading band (innerHeight≈768; band bottom ≈ 599) → must scroll.
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(domRect(900, 920));
+    render(() => (
+      <DocumentViewport segments={caretSegments} caret={{ revision: 2, color: "#000000" }} follow />
+    ));
+    expect(scrollTo).toHaveBeenCalled();
+  });
+
+  it("shows a 'Jump to edit' pill instead of scrolling when follow is off and the caret is off-screen", () => {
+    const scrollTo = vi.fn();
+    vi.stubGlobal("scrollTo", scrollTo);
+    syncRaf();
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(domRect(900, 920));
+    render(() => (
+      <DocumentViewport
+        segments={caretSegments}
+        caret={{ revision: 2, color: "#000000" }}
+        follow={false}
+      />
+    ));
+    expect(scrollTo).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Jump to edit" })).toBeTruthy();
+  });
+
+  it("points the jump pill upward when the active edit is above the viewport", () => {
+    vi.stubGlobal("scrollTo", vi.fn());
+    syncRaf();
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(domRect(-50, -30));
+    render(() => (
+      <DocumentViewport
+        segments={caretSegments}
+        caret={{ revision: 2, color: "#000000" }}
+        follow={false}
+      />
+    ));
+    const pill = screen.getByRole("button", { name: "Jump to edit" });
+    expect(pill.querySelector(".rotate-180")).toBeTruthy();
+  });
+
+  it("disengages follow on a genuine user scroll gesture (wheel)", () => {
+    vi.stubGlobal("scrollTo", vi.fn());
+    syncRaf();
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(domRect(100, 120));
+    const onFollowOff = vi.fn();
+    render(() => (
+      <DocumentViewport
+        segments={caretSegments}
+        caret={{ revision: 2, color: "#000000" }}
+        follow
+        onFollowOff={onFollowOff}
+      />
+    ));
+    window.dispatchEvent(new Event("wheel"));
+    expect(onFollowOff).toHaveBeenCalled();
+  });
+
+  it("re-engages follow and snaps to the caret when the jump pill is tapped", () => {
+    const scrollTo = vi.fn();
+    vi.stubGlobal("scrollTo", scrollTo);
+    syncRaf();
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(domRect(900, 920));
+    const onFollowOn = vi.fn();
+    render(() => (
+      <DocumentViewport
+        segments={caretSegments}
+        caret={{ revision: 2, color: "#000000" }}
+        follow={false}
+        onFollowOn={onFollowOn}
+      />
+    ));
+    fireEvent.click(screen.getByRole("button", { name: "Jump to edit" }));
+    expect(onFollowOn).toHaveBeenCalled();
+    expect(scrollTo).toHaveBeenCalled();
+  });
+
+  it("PlaybackControls exposes a Follow edits toggle reflecting its state", () => {
+    const onFollowChange = vi.fn();
+    render(() => (
+      <PlaybackControls
+        playing={false}
+        speed={1}
+        follow
+        onPlayPause={() => {}}
+        onRestart={() => {}}
+        onSpeed={() => {}}
+        onFollowChange={onFollowChange}
+      />
+    ));
+    const toggle = screen.getByRole("button", { name: "Follow edits" });
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(toggle);
+    expect(onFollowChange).toHaveBeenCalledWith(false);
   });
 });

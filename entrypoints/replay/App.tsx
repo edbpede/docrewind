@@ -278,6 +278,10 @@ const ReplaySurface: Component<{
   const [currentIndex, setCurrentIndex] = createSignal(0);
   const [playing, setPlaying] = createSignal(false);
   const [speed, setSpeed] = createSignal(1);
+  // Follow-caret: when on (default), the viewport auto-scrolls to keep the active edit
+  // in view during non-linear playback. A genuine user scroll disengages it; the toggle
+  // and a Timeline scrub re-engage it (see the viewport + scrub wiring below).
+  const [follow, setFollow] = createSignal(true);
 
   // Progress / liveness state (driven by the checkpoint poll + late ack).
   const [phase, setPhase] = createSignal<ProgressPhase>("discovering");
@@ -287,6 +291,13 @@ const ReplaySurface: Component<{
   const [retrievalDoneRunId, setRetrievalDoneRunId] = createSignal<number | null>(null);
 
   const [prefersReducedMotion, setPrefersReducedMotion] = createSignal(false);
+
+  // Scroll behaviour for the follow + jump: a single smooth glide at ≤1× reads well, but
+  // an 8 fps step at 2×/4× outruns a ~400ms smooth scroll (it would perpetually lag), and
+  // reduced-motion always wants an instant cut. Derived once; the viewport just consumes it.
+  const followBehavior = createMemo<ScrollBehavior>(() =>
+    prefersReducedMotion() ? "auto" : playing() && speed() <= 1 ? "smooth" : "auto",
+  );
 
   // Identity-display preference (default ON; opt-out). When on, an author resolves to
   // a real display name harvested for the open document (PRD §9.7); when the user has
@@ -884,7 +895,7 @@ const ReplaySurface: Component<{
 
                     {/* The margin: transport + the writing-activity stratum, with the
                         frame's revision count and archival dateline framing the scrubber. */}
-                    <section class="flex flex-col gap-3">
+                    <section class="sticky top-0 z-20 flex flex-col gap-3 bg-canvas pt-1 pb-2">
                       <PlaybackControls
                         playing={playing()}
                         speed={speed()}
@@ -894,6 +905,8 @@ const ReplaySurface: Component<{
                           setCurrentIndex(0);
                         }}
                         onSpeed={(value) => setSpeed(value)}
+                        follow={follow()}
+                        onFollowChange={setFollow}
                       />
                       <div class="flex flex-col gap-1.5">
                         <div class="flex items-baseline justify-between gap-3">
@@ -906,7 +919,10 @@ const ReplaySurface: Component<{
                           currentIndex={currentIndex()}
                           max={maxIndex()}
                           events={markers()}
-                          onScrub={(index) => setCurrentIndex(index)}
+                          onScrub={(index) => {
+                            setCurrentIndex(index);
+                            setFollow(true); // a scrub is "take me here" — re-engage follow.
+                          }}
                         />
                         <TimelineLegend events={markers()} />
                       </div>
@@ -921,6 +937,10 @@ const ReplaySurface: Component<{
                       caret={caret()}
                       highlight={highlight()}
                       authorKeyByRevision={authorKeyByRevision()}
+                      follow={follow()}
+                      scrollBehavior={followBehavior()}
+                      onFollowOff={() => setFollow(false)}
+                      onFollowOn={() => setFollow(true)}
                     />
 
                     {/* The colophon: content-free insights close the record. Foregrounding
