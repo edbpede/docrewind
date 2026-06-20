@@ -39,7 +39,11 @@ allowed_display_hosts=("github.com")
 status=0
 
 # Collect production source files (skip tests, specs, fixtures).
-mapfile -t files < <(
+# Portable equivalent of `mapfile -t` (bash 4+); macOS ships bash 3.2.
+files=()
+while IFS= read -r file; do
+  files+=("$file")
+done < <(
   find "${scan_dirs[@]}" -type f \( -name '*.ts' -o -name '*.tsx' \) \
     ! -name '*.test.ts' ! -name '*.test.tsx' ! -name '*.spec.ts' \
     ! -path '*/fixtures/*' | sort
