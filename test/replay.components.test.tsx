@@ -970,6 +970,64 @@ describe("replay UI components", () => {
     expect(onFollowOff).toHaveBeenCalledTimes(1);
   });
 
+  // ── Claim: large smooth-scroll outlives the fixed guard (inactivity-timer fix) ──
+  it("does not disengage follow when a large smooth-scroll animation runs longer than the guard timeout: the inactivity timer re-arms on each programmatic frame and only releases the guard after the scroll goes quiet", () => {
+    vi.useFakeTimers();
+    try {
+      const scrollTo = vi.fn();
+      vi.stubGlobal("scrollTo", scrollTo);
+      syncRaf();
+      let mockScrollY = 0;
+      vi.spyOn(window, "scrollY", "get").mockImplementation(() => mockScrollY);
+      vi.spyOn(window, "innerHeight", "get").mockReturnValue(768);
+      // A very tall page (≈ a long doc around revision 50): maxScroll ≫ target, so the
+      // followScroll target is reachable and the markProgrammatic clamp is a no-op.
+      vi.spyOn(document.documentElement, "scrollHeight", "get").mockReturnValue(200_000);
+      // Caret far below the band at render → one large programmatic smooth scroll fires.
+      let mockCaretRect = domRect(900, 920);
+      vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+        () => mockCaretRect,
+      );
+      const onFollowOff = vi.fn();
+      render(() => (
+        <DocumentViewport
+          segments={caretSegments}
+          caret={{ revision: 2, color: "#000000" }}
+          follow
+          onFollowOff={onFollowOff}
+        />
+      ));
+      expect(scrollTo).toHaveBeenCalledTimes(1);
+
+      // The page is now gliding toward the target and the caret has entered the band, so
+      // recompute returns decision.scroll=false and NEVER re-issues markProgrammatic. (This
+      // mirrors a pure-deletion stretch where measureCaret returns null and likewise stops
+      // re-arming the guard.) Only onScroll's own classification keeps the guard alive now.
+      mockCaretRect = domRect(300, 320);
+      mockScrollY = 300; // mid-animation: > PROG_SCROLL_TOLERANCE_PX from the ~608px target.
+
+      // Chromium animates a large smooth scroll for ~1.5s — past the 1200ms guard. Emit the
+      // animation's mid-flight scroll frames spread across 1600ms total. With a fixed
+      // wall-clock timeout the guard expires after 1200ms and the next frame is misread as a
+      // user gesture; with the inactivity timer each frame re-arms it, so it never fires.
+      for (let i = 0; i < 4; i++) {
+        vi.advanceTimersByTime(400);
+        window.dispatchEvent(new Event("scroll"));
+      }
+      expect(onFollowOff).not.toHaveBeenCalled();
+
+      // The animation goes quiet (target reached, no more frames). After a full idle window
+      // with NO programmatic activity the guard releases — proving the safety net still
+      // works — so a genuine later user scroll disengages follow exactly once.
+      mockScrollY = 608; // settled near the target, so the release is not a "moved away".
+      vi.advanceTimersByTime(1300);
+      window.dispatchEvent(new Event("scroll"));
+      expect(onFollowOff).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   // ── Claim B: defaultPrevented guard on nav-key handler ────────────────────────
   it("does not disengage follow when a NAV_KEYS keydown was already handled (defaultPrevented) by a descendant element, e.g. the timeline slider", () => {
     vi.stubGlobal("scrollTo", vi.fn());

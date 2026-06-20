@@ -226,24 +226,40 @@ const DocumentViewport: Component<DocumentViewportProps> = (props) => {
   // The guard stays active (progScroll=true) until AFTER the target is reached, so
   // the easing tail is suppressed too. Once the tail is seen (progScrollReached=true),
   // any scroll event that moves clearly away from the target is genuine user intent
-  // and disengages follow. A 1200 ms safety timeout clears the guard if the target
-  // is never reached (e.g. clamped at page bottom).
+  // and disengages follow.
+  //
+  // The guard self-clears after PROG_SCROLL_IDLE_MS of NO programmatic scroll activity.
+  // This is an INACTIVITY window — re-armed by markProgrammatic AND by every scroll
+  // event we classify as our own (mid-animation or easing tail) — not a wall-clock cap.
+  // A single smooth `scrollTo` over a large distance animates well past a second
+  // (Chromium scales the duration with distance, measured up to a ~1.5s cap), so a
+  // fixed cap expires mid-flight: the animation's own remaining frames then fall through
+  // to the user-scroll branch and wrongly disengage follow — the large-jump / "around
+  // revision 50" regression, made worse when a pure-deletion revision yields no caret so
+  // recompute stops re-issuing markProgrammatic. An inactivity window only fires once the
+  // animation has truly gone quiet — target reached, or stalled (e.g. clamped short at
+  // the page bottom) — so the guard stays correct for an animation of any duration.
   const PROG_SCROLL_TOLERANCE_PX = 2;
+  const PROG_SCROLL_IDLE_MS = 1200;
   let progScroll = false;
   let progScrollTarget: number | undefined;
   let progScrollReached = false;
   let progScrollTimer: ReturnType<typeof setTimeout> | undefined;
-  const markProgrammatic = (target: number): void => {
-    progScroll = true;
-    const maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
-    progScrollTarget = Math.min(target, maxScroll);
-    progScrollReached = false;
+  // (Re)start the inactivity timer that releases the guard once our scroll goes quiet.
+  const armProgScrollIdleTimeout = (): void => {
     clearTimeout(progScrollTimer);
     progScrollTimer = setTimeout(() => {
       progScroll = false;
       progScrollTarget = undefined;
       progScrollReached = false;
-    }, 1200);
+    }, PROG_SCROLL_IDLE_MS);
+  };
+  const markProgrammatic = (target: number): void => {
+    progScroll = true;
+    const maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+    progScrollTarget = Math.min(target, maxScroll);
+    progScrollReached = false;
+    armProgScrollIdleTimeout();
   };
 
   const recompute = (): void => {
@@ -339,8 +355,10 @@ const DocumentViewport: Component<DocumentViewportProps> = (props) => {
         progScrollTarget !== undefined &&
         Math.abs(window.scrollY - progScrollTarget) <= PROG_SCROLL_TOLERANCE_PX
       ) {
-        // Landing frame or easing tail — suppress, note that we've reached the target.
+        // Landing frame or easing tail — suppress, note we've reached the target, and
+        // keep the guard alive: the easing tail keeps emitting events for a while.
         progScrollReached = true;
+        armProgScrollIdleTimeout();
         return;
       }
       if (progScrollReached) {
@@ -352,7 +370,9 @@ const DocumentViewport: Component<DocumentViewportProps> = (props) => {
         onUserScroll();
         return;
       }
-      // Still mid-animation (before reaching target) — suppress.
+      // Still mid-animation (before reaching target) — suppress, and keep the guard
+      // alive so a long smooth scroll never outlives the inactivity window mid-flight.
+      armProgScrollIdleTimeout();
     };
     // Pill visibility for window resize (no disengage needed).
     const onView = (): void => schedule();
