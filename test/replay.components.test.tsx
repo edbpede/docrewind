@@ -782,4 +782,84 @@ describe("replay UI components", () => {
     fireEvent.click(toggle);
     expect(onFollowChange).toHaveBeenCalledWith(false);
   });
+  // ── Claim A: target-aware programmatic-scroll guard (easing-tail safe) ──────
+  it("suppresses all easing-tail scroll events within tolerance of the auto-scroll target and disengages follow only when a user scroll moves clearly away after settling", () => {
+    let capturedTarget = 0;
+    const scrollTo = vi.fn((opts: ScrollToOptions) => {
+      capturedTarget = opts.top ?? 0;
+    });
+    vi.stubGlobal("scrollTo", scrollTo);
+    syncRaf();
+    let mockScrollY = 0;
+    vi.spyOn(window, "scrollY", "get").mockImplementation(() => mockScrollY);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(domRect(900, 920));
+    const onFollowOff = vi.fn();
+    render(() => (
+      <DocumentViewport
+        segments={caretSegments}
+        caret={{ revision: 2, color: "#000000" }}
+        follow
+        onFollowOff={onFollowOff}
+      />
+    ));
+    // Component called scrollTo; capture the programmatic target.
+    expect(scrollTo).toHaveBeenCalled();
+    expect(capturedTarget).toBeGreaterThan(0);
+
+    // Mid-animation: scrollY well below target — suppressed.
+    mockScrollY = Math.floor(capturedTarget / 2);
+    window.dispatchEvent(new Event("scroll"));
+    expect(onFollowOff).not.toHaveBeenCalled();
+
+    // Easing tail: multiple consecutive within-2px frames — ALL suppressed (the fix).
+    mockScrollY = capturedTarget - 1.5;
+    window.dispatchEvent(new Event("scroll"));
+    expect(onFollowOff).not.toHaveBeenCalled();
+
+    mockScrollY = capturedTarget - 0.4;
+    window.dispatchEvent(new Event("scroll"));
+    expect(onFollowOff).not.toHaveBeenCalled();
+
+    mockScrollY = capturedTarget;
+    window.dispatchEvent(new Event("scroll"));
+    expect(onFollowOff).not.toHaveBeenCalled();
+
+    // User scroll clearly away from the settled target — disengages follow exactly once.
+    mockScrollY = capturedTarget - 50;
+    window.dispatchEvent(new Event("scroll"));
+    expect(onFollowOff).toHaveBeenCalledTimes(1);
+  });
+
+  // ── Claim B: defaultPrevented guard on nav-key handler ────────────────────────
+  it("does not disengage follow when a NAV_KEYS keydown was already handled (defaultPrevented) by a descendant element, e.g. the timeline slider", () => {
+    vi.stubGlobal("scrollTo", vi.fn());
+    syncRaf();
+    // Caret in view so no programmatic scrollTo fires (progScroll stays false).
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(domRect(100, 120));
+    const onFollowOff = vi.fn();
+    render(() => (
+      <DocumentViewport
+        segments={caretSegments}
+        caret={{ revision: 2, color: "#000000" }}
+        follow
+        onFollowOff={onFollowOff}
+      />
+    ));
+
+    // A child element (e.g. the timeline slider) calls preventDefault on Arrow before
+    // it bubbles to the window keydown handler.
+    const el = document.createElement("div");
+    document.body.appendChild(el);
+    el.addEventListener("keydown", (e) => e.preventDefault());
+    el.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }),
+    );
+    document.body.removeChild(el);
+    expect(onFollowOff).not.toHaveBeenCalled();
+
+    // PageDown is NOT handled by the timeline slider (no preventDefault), so it still
+    // disengages document follow.
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "PageDown", cancelable: true }));
+    expect(onFollowOff).toHaveBeenCalledTimes(1);
+  });
 });

@@ -221,15 +221,27 @@ const DocumentViewport: Component<DocumentViewportProps> = (props) => {
   // Programmatic-scroll guard: set before every window.scrollTo call we issue so
   // the `scroll` event listener can distinguish our own position adjustments from
   // genuine user-initiated scrolls (keyboard nav, scrollbar drag). Smooth-scroll
-  // animations emit multiple `scroll` events over time, so the flag stays set for
-  // 1200 ms after the last scrollTo call — long enough to outlast any animation.
+  // animations emit multiple `scroll` events: intermediate frames are far from the
+  // target, then a cluster of easing-tail frames land within PROG_SCROLL_TOLERANCE_PX.
+  // The guard stays active (progScroll=true) until AFTER the target is reached, so
+  // the easing tail is suppressed too. Once the tail is seen (progScrollReached=true),
+  // any scroll event that moves clearly away from the target is genuine user intent
+  // and disengages follow. A 1200 ms safety timeout clears the guard if the target
+  // is never reached (e.g. clamped at page bottom).
+  const PROG_SCROLL_TOLERANCE_PX = 2;
   let progScroll = false;
+  let progScrollTarget: number | undefined;
+  let progScrollReached = false;
   let progScrollTimer: ReturnType<typeof setTimeout> | undefined;
-  const markProgrammatic = (): void => {
+  const markProgrammatic = (target: number): void => {
     progScroll = true;
+    progScrollTarget = target;
+    progScrollReached = false;
     clearTimeout(progScrollTimer);
     progScrollTimer = setTimeout(() => {
       progScroll = false;
+      progScrollTarget = undefined;
+      progScrollReached = false;
     }, 1200);
   };
 
@@ -248,7 +260,7 @@ const DocumentViewport: Component<DocumentViewportProps> = (props) => {
     if (props.follow !== false) {
       const decision = followScroll(box.top, box.bottom, vh, window.scrollY);
       if (decision.scroll) {
-        markProgrammatic();
+        markProgrammatic(decision.top);
         window.scrollTo({ top: decision.top, behavior: props.scrollBehavior ?? "smooth" });
       }
 
@@ -308,13 +320,38 @@ const DocumentViewport: Component<DocumentViewportProps> = (props) => {
       "End",
     ]);
     const onKeyNav = (e: KeyboardEvent): void => {
-      if (NAV_KEYS.has(e.key)) onUserScroll();
+      if (!e.defaultPrevented && NAV_KEYS.has(e.key)) onUserScroll();
     };
     // Pill visibility + scrollbar-drag disengage: runs on every scroll event.
-    // Skipped for our own programmatic scrollTo calls (progScroll guard).
+    // Three-way guard while progScroll is active:
+    //   1. Within tolerance of target → mark as reached, suppress (easing tail).
+    //   2. Beyond tolerance AND already reached → user moved away; clear guard + disengage.
+    //   3. Beyond tolerance AND not yet reached → mid-animation; suppress.
+    // After the guard clears (reached+moved, or safety timeout), events disengage normally.
     const onScroll = (): void => {
       schedule();
-      if (!progScroll) onUserScroll();
+      if (!progScroll) {
+        onUserScroll();
+        return;
+      }
+      if (
+        progScrollTarget !== undefined &&
+        Math.abs(window.scrollY - progScrollTarget) <= PROG_SCROLL_TOLERANCE_PX
+      ) {
+        // Landing frame or easing tail — suppress, note that we've reached the target.
+        progScrollReached = true;
+        return;
+      }
+      if (progScrollReached) {
+        // Moved clearly away after settling: genuine user intent. Clear guard and disengage.
+        progScroll = false;
+        progScrollTarget = undefined;
+        progScrollReached = false;
+        clearTimeout(progScrollTimer);
+        onUserScroll();
+        return;
+      }
+      // Still mid-animation (before reaching target) — suppress.
     };
     // Pill visibility for window resize (no disengage needed).
     const onView = (): void => schedule();
@@ -346,7 +383,7 @@ const DocumentViewport: Component<DocumentViewportProps> = (props) => {
     const box = measureCaret();
     if (box !== null && typeof window !== "undefined") {
       const decision = followScroll(box.top, box.bottom, window.innerHeight, window.scrollY);
-      markProgrammatic();
+      markProgrammatic(decision.top);
       window.scrollTo({ top: decision.top, behavior: props.scrollBehavior ?? "smooth" });
     }
     props.onFollowOn?.();
