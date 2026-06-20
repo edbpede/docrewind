@@ -22,20 +22,27 @@ import { IconHistory } from "@/components/icons";
 export interface ReplayAffordanceProps {
   /** Invoked on the user's explicit click — never automatically. */
   readonly onActivate: () => void;
+  /**
+   * Render the smaller `btn-compact` chip used inside dense host chrome — the
+   * Google Classroom grading toolbar and submission card, where the default
+   * (Docs-titlebar) size crowds or clips the embedding surface. Defaults to the
+   * full size.
+   */
+  readonly compact?: boolean;
 }
 
 const ReplayAffordance: Component<ReplayAffordanceProps> = (props) => {
   return (
     <button
       type="button"
-      class="btn-secondary self-center whitespace-nowrap"
+      class={`${props.compact ? "btn-secondary-compact" : "btn-secondary"} self-center whitespace-nowrap`}
       aria-label="Replay this document's revision history"
       on:click={() => props.onActivate()}
     >
       {/* A clock-with-rewind mark in the brand accent: enough identity to be
           findable in the Docs toolbar, on a neutral pill that still feels native.
           Replaces the ambiguous ⟲ glyph (often read as undo/refresh). */}
-      <IconHistory size={18} class="text-brand-text" />
+      <IconHistory size={props.compact ? 16 : 18} class="text-brand-text" />
       <span>Replay revisions</span>
     </button>
   );

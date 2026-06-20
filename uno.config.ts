@@ -158,6 +158,20 @@ const shortcuts = {
     "btn-base bg-surface text-danger ring-1 ring-[var(--dr-danger-line)] hover:bg-danger-soft",
   // Taller variant for hero CTAs (≥44px touch target).
   "btn-lg": "min-h-[2.75rem] px-5 text-base",
+  // Compact secondary chip for dense HOST chrome (Google Classroom's grading
+  // toolbar and submission card), where the default 2.5rem pill crowds — and at
+  // narrow widths clips against — the embedding surface. SELF-CONTAINED (not a
+  // `btn-secondary` + size-override): two shortcuts setting the same property on
+  // one element resolve by Uno's internal utility order, not class order, so an
+  // override would silently lose to `btn-base`. Used in place of `btn-secondary`.
+  "btn-secondary-compact":
+    "inline-flex min-h-[2rem] cursor-pointer select-none items-center justify-center gap-1.5 " +
+    "rounded-lg px-3 text-[0.8125rem] font-medium leading-none " +
+    "transition-[background-color,color,box-shadow,transform] duration-150 ease-[var(--dr-ease-out)] " +
+    "outline-none focus-visible:ring-2 focus-visible:ring-brand-ring focus-visible:ring-offset-2 " +
+    "focus-visible:ring-offset-canvas active:translate-y-px " +
+    "disabled:pointer-events-none disabled:opacity-45 " +
+    "bg-surface text-ink ring-1 ring-hairline-strong hover:bg-hover",
   "btn-block": "w-full",
 
   // ── Segmented control (theme / speed / diagnostics) ───────────────────────

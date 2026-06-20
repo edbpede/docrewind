@@ -54,11 +54,11 @@ function detectGradingDoc(): GradingDoc | null {
   return { docId, userIndex: detectUserIndex(src) };
 }
 
-// The grading view's action group (the row holding the native "Return" button). We
-// match Material action buttons structurally by `jsname` + position — NEVER by their
-// localized text — and mount as a sibling just before the group, so our control sits
-// in the open space to the left of "Return" rather than crowding it. Returns null
-// until that row exists.
+// The grading view's action group (the flex row holding the native "Return" button).
+// We match Material action buttons structurally by `jsname` + position — NEVER by
+// their localized text — and prepend INTO this group, so our control sits inline in
+// the open space to the left of "Return" on the same row. Returns null until that
+// row exists.
 function findGradingActionGroup(): Element | null {
   const buttons = Array.from(
     document.querySelectorAll<HTMLElement>('[jsname="LgbsSe"][role="button"]'),
@@ -231,14 +231,18 @@ export default defineContentScript({
       name: "docrewind-classroom-affordance",
       position: "inline",
       anchor: () => currentAnchor(),
-      // Placement differs per surface: beside the grading action group, or beneath
-      // the submission card. Inline styles only (no UnoCSS utility classes, which the
-      // shared-chunk dedup can drop) — the button itself uses the safelisted
-      // `btn-secondary` shortcut, so it stays styled inside the shadow root.
+      // Placement differs per surface. Grading: PREPEND into the action group so we
+      // sit inline, in the open space left of "Return", on its single button row —
+      // the group is a flex row, so a sibling-before would instead drop us onto a
+      // SECOND row above it (its shared parent is a block), which a fixed-height
+      // toolbar then clips. Submission: after the attachment card. Inline styles
+      // only (no UnoCSS utility classes, which the shared-chunk dedup can drop) —
+      // the button itself uses the safelisted `btn-secondary`/`btn-compact`
+      // shortcuts, so it stays styled inside the shadow root.
       append: (anchor, el) => {
         const loc = parseClassroomLocation(location.href);
         if (loc?.view === "submission") anchor.after(el);
-        else anchor.before(el);
+        else anchor.prepend(el);
       },
       // Keep page shortcuts from leaking into our control and vice versa.
       isolateEvents: ["keydown", "keyup", "click", "wheel"],
@@ -246,7 +250,7 @@ export default defineContentScript({
         render(
           () => (
             <div style={{ display: "inline-flex", "align-items": "center", margin: "0 0.5rem" }}>
-              <ReplayAffordance onActivate={onActivate} />
+              <ReplayAffordance onActivate={onActivate} compact />
             </div>
           ),
           container,
