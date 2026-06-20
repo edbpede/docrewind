@@ -242,21 +242,33 @@ function summarizeCluster(cluster: MarkerCluster, max: number): ClusterSummary {
   };
 }
 
-// A fixed horizontal safe area reserved at EACH end of the track. The index-0 and
-// index-max marks otherwise sit flush against (and half-clipped by) the rounded
-// track ends, where they read as edge artefacts and are awkward to aim at. With
-// this inset the boundary marks stand clear in their own margin. The whole
-// applied-count axis — markers, the fill ramp, the playhead nib, and the popovers
-// — maps through `posPct`/`fillWidth` below, and `scrubFromClientX` inverts the
-// same mapping, so the padded coordinate system is the single source of truth.
-const EDGE_INSET_PX = 12;
+// The track reserves a horizontal SAFE AREA at each end, put to two distinct uses.
+//
+//  • EDGE_INSET_PX — the inset of the applied-count AXIS. Markers, the fill ramp,
+//    the popovers, and `scrubFromClientX` all map through `posPct`/`fillWidth`
+//    into the band [EDGE_INSET_PX, 100% − EDGE_INSET_PX], so a boundary seal
+//    stands clear of (and is never half-clipped by) the rounded track ends. Sized
+//    to clear a whole seal: half a marker (~9px) + the ~5px rounded-cap radius +
+//    breathing room.
+//
+//  • PLAYHEAD_REST_PX — where the playhead nib RESTS at the two endpoints. The
+//    first real marker anchors at applied-count ~1 of hundreds — i.e. essentially
+//    index 0 — so on the shared linear axis the index-0 nib and that first marker
+//    would coincide; the axis inset alone shifts both inward together and never
+//    separates them. So at revision 0 (and at max) the nib parks in the end margin
+//    instead: BEFORE the first marker, AFTER the last. For every interior index it
+//    still follows the SAME `posPct` as the markers (see `thumbLeft`), so a scrub
+//    lands the nib exactly on the marker it points at; only the resting endpoints
+//    park, and the nib's `left` transition glides that small step.
+const EDGE_INSET_PX = 28;
+const PLAYHEAD_REST_PX = 9;
 
 const Timeline: Component<TimelineProps> = (props) => {
   let track: HTMLDivElement | undefined;
   let activePointerId: number | null = null;
   const fraction = createMemo(() => (props.max > 0 ? props.currentIndex / props.max : 0));
 
-  // Map an applied-count `index` to its physical left offset within the track,
+  // Map an applied-count `index` to its physical left offset on the markers axis,
   // interpolating across the inset interior: index 0 lands at `EDGE_INSET_PX`,
   // index `max` at `100% − EDGE_INSET_PX`. Expressed as a `calc` so the safe area
   // is a fixed pixel width at any track size (rather than a width-relative %).
@@ -265,12 +277,33 @@ const Timeline: Component<TimelineProps> = (props) => {
     return `calc(${EDGE_INSET_PX}px + (100% - ${EDGE_INSET_PX * 2}px) * ${frac.toFixed(4)})`;
   };
 
-  // The progress ramp shares the inset interior: it begins at the index-0 anchor
-  // (left = EDGE_INSET_PX) and its width spans the same usable band, so its leading
-  // edge stays glued to the playhead nib at every position.
-  const fillWidth = createMemo(
-    () => `calc((100% - ${EDGE_INSET_PX * 2}px) * ${fraction().toFixed(4)})`,
-  );
+  // The playhead nib's left offset. It rides the markers axis (`posPct`) for every
+  // interior revision so a scrub lands it exactly on its marker, but RESTS in the
+  // end margin at the two endpoints — parked before the first marker at revision 0,
+  // after the last marker at `max` — so the nib never sits on top of a boundary seal.
+  const thumbLeft = (index: number): string => {
+    if (props.max <= 0 || index <= 0) {
+      return `${PLAYHEAD_REST_PX}px`;
+    }
+    if (index >= props.max) {
+      return `calc(100% - ${PLAYHEAD_REST_PX}px)`;
+    }
+    return posPct(index);
+  };
+
+  // The progress ramp begins at the index-0 axis anchor (left = EDGE_INSET_PX) and
+  // its leading edge stays glued to the nib: across the interior it spans the usable
+  // band; at `max` it extends the extra end margin out to the parked nib so the
+  // filled ramp still meets it; at revision 0 it is empty.
+  const fillWidth = createMemo(() => {
+    if (props.max <= 0 || props.currentIndex <= 0) {
+      return "0px";
+    }
+    if (props.currentIndex >= props.max) {
+      return `calc(100% - ${EDGE_INSET_PX + PLAYHEAD_REST_PX}px)`;
+    }
+    return `calc((100% - ${EDGE_INSET_PX * 2}px) * ${fraction().toFixed(4)})`;
+  });
 
   // Measured track width feeds collision stacking. It stays 0 until layout is
   // observed (jsdom keeps it 0), so stacking is inert until there is a real width
@@ -614,7 +647,7 @@ const Timeline: Component<TimelineProps> = (props) => {
           );
         }}
       </Show>
-      <div class="tl-thumb" style={{ left: posPct(props.currentIndex) }} />
+      <div class="tl-thumb" style={{ left: thumbLeft(props.currentIndex) }} />
     </div>
   );
 };
