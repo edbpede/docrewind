@@ -71,6 +71,9 @@ export const strings = {
     pause: "Pause",
     restart: "Restart",
     speedGroup: "Playback speed",
+    // The "follow edits" transport toggle: when on, the viewport auto-scrolls to keep
+    // the writing caret in view during non-linear playback (jumping between sections).
+    followCaret: "Follow edits",
   },
   timeline: {
     label: "Revision timeline",
@@ -92,6 +95,9 @@ export const strings = {
     // the author's display name by `contributedBy` so assistive tech announces who
     // wrote the highlighted run. Content-free: a name only, never document text.
     contributedBy: "Contributed by",
+    // The off-screen affordance shown when "follow edits" is off and the active edit
+    // has scrolled out of view — clicking it re-engages follow and snaps to the caret.
+    jumpToEdit: "Jump to edit",
   },
   progress: {
     discovering: "Discovering revisions…",

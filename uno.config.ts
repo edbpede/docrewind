@@ -359,6 +359,16 @@ const shortcuts = {
     "inline-block h-[1.15em] w-[2px] -mb-[0.18em] mx-[0.5px] rounded-full align-baseline " +
     "shadow-[0_1px_2px_var(--dr-caret-shadow)]",
 
+  // The off-screen "Jump to edit" affordance — a floating brand pill pointing at the
+  // active edit when follow is off and the caret has scrolled away. Fixed to the
+  // viewport so it stays reachable regardless of scroll position.
+  "dr-jump-pill":
+    "fixed bottom-6 left-1/2 z-40 -translate-x-1/2 inline-flex cursor-pointer items-center gap-1.5 " +
+    "rounded-full bg-brand px-4 py-2 text-[0.875rem] font-medium text-brand-on shadow-[var(--dr-shadow-lg)] " +
+    "transition-colors duration-150 ease-[var(--dr-ease-out)] hover:bg-brand-hover " +
+    "outline-none focus-visible:ring-2 focus-visible:ring-brand-ring focus-visible:ring-offset-2 " +
+    "focus-visible:ring-offset-canvas",
+
   // ── Insights: contributor chips + stat tiles + hover/click detail card ────
   // Clean stat tiles (label + big figure) in a simple responsive row — NOT
   // icon-on-card grids. Each distinct contributor is an interactive chip; hover
@@ -596,7 +606,7 @@ export default defineConfig({
    Every transition/animation degrades to a crossfade or instant state. */
 @media (prefers-reduced-motion: reduce) {
   .tl-fill, .tl-thumb, .tl-track, .tl-marker, .tl-cluster, .progress-fill, .btn-base,
-  .btn-secondary-compact, .seg-item, .banner-collapse, .banner-chevron { transition: none !important; }
+  .btn-secondary-compact, .seg-item, .banner-collapse, .banner-chevron, .dr-jump-pill { transition: none !important; }
   .doc-suggest::after, .doc-strike::after { transition: none !important; }
   /* Freeze the writing caret to a steady mark — still present and colour-coded. */
   .doc-caret { animation: none !important; opacity: 1 !important; }

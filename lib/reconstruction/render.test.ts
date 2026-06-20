@@ -150,4 +150,82 @@ describe("segmentsAt segment kinds", () => {
     expect(run?.kind === "accepted-text" ? run.fromRevision : -1).toBe(1);
     expect(run?.kind === "accepted-text" ? run.toRevision : -1).toBe(2);
   });
+
+  // ── Threaded inserts into pre-existing / base (Revision 0) content ───────────
+  // Regression: a real revision inserting INTO an older run must break that run so
+  // its `toRevision` names the inserting revision and the run ends exactly at the
+  // insertion point — otherwise the trailing base content overwrites `toRevision`
+  // back to 0 and the writing caret (painted after a run) is swept past the edit.
+  function baseThenChangelog(
+    base: string,
+    changelog: ReadonlyArray<Record<string, unknown>>,
+  ): DocumentModel {
+    const model = createModel();
+    for (const op of decodeSnapshot({
+      chunkedSnapshot: [[{ ty: "is", s: base, ibi: 1 }]],
+      changelog: [],
+    })) {
+      applyOperation(model, op, BASE_REVISION);
+    }
+    for (const revision of decodeOperations({ changelog })) {
+      applyRevision(model, revision);
+    }
+    return model;
+  }
+
+  test("an edit threaded INTO base content breaks the run at the insertion point", () => {
+    // Base "Hello World" (rev 0); rev 1 inserts "XYZ" before 'W' -> "Hello XYZWorld".
+    const model = baseThenChangelog("Hello World", [
+      { ty: "is", s: "XYZ", ibi: 7, revision_id: 1 },
+    ]);
+    const segments = segmentsAt(model);
+    // The run carrying the edit closes at the insertion point; the trailing base
+    // content is a SEPARATE run (it would otherwise reset toRevision back to 0).
+    expect(segments).toHaveLength(2);
+    const head = segments[0];
+    const tail = segments[1];
+    expect(head?.kind).toBe("accepted-text");
+    expect(tail?.kind).toBe("accepted-text");
+    if (head?.kind !== "accepted-text" || tail?.kind !== "accepted-text") return;
+    expect(head.text).toBe("Hello XYZ");
+    // The inserting revision (1) is the run's tail — the writing-caret join key.
+    expect(head.toRevision).toBe(1);
+    expect(head.fromRevision).toBe(0);
+    // The trailing base content stays pure pre-history (no spurious caret latch).
+    expect(tail.text).toBe("World");
+    expect(tail.fromRevision).toBe(0);
+    expect(tail.toRevision).toBe(0);
+    // Visibility is unchanged — only the run grouping differs.
+    expect(visibleText(segments)).toBe(currentText(model));
+  });
+
+  test("an edit PREPENDED before base content opens its own run carrying the revision", () => {
+    // Base "World" (rev 0); rev 1 inserts "Hi " at the very start -> "Hi World".
+    const model = baseThenChangelog("World", [{ ty: "is", s: "Hi ", ibi: 1, revision_id: 1 }]);
+    const segments = segmentsAt(model);
+    expect(segments).toHaveLength(2);
+    const head = segments[0];
+    if (head?.kind !== "accepted-text") throw new Error("expected leading accepted run");
+    expect(head.text).toBe("Hi ");
+    expect(head.fromRevision).toBe(1);
+    expect(head.toRevision).toBe(1);
+    expect(visibleText(segments)).toBe(currentText(model));
+  });
+
+  test("sequential typing across rising revisions still coalesces into one run", () => {
+    // No backward step: rev 1 then rev 2 appended onto base "x" -> a single run, so
+    // the monotonic-forward optimization (and the existing caret join) is preserved.
+    const model = baseThenChangelog("x", [
+      { ty: "is", s: "ab", ibi: 2, revision_id: 1 },
+      { ty: "is", s: "cd", ibi: 4, revision_id: 2 },
+    ]);
+    const segments = segmentsAt(model);
+    expect(segments).toHaveLength(1);
+    const run = segments[0];
+    if (run?.kind !== "accepted-text") throw new Error("expected one accepted run");
+    expect(run.text).toBe("xabcd");
+    expect(run.fromRevision).toBe(0);
+    expect(run.toRevision).toBe(2);
+    expect(visibleText(segments)).toBe(currentText(model));
+  });
 });

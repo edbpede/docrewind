@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import DocumentViewport from "@/components/DocumentViewport";
+import PlaybackControls from "@/components/PlaybackControls";
 import SummaryInsights from "@/components/SummaryInsights";
 import Timeline, { clusterMarkers, type TimelineMarker } from "@/components/Timeline";
 import TimelineLegend from "@/components/TimelineLegend";
@@ -46,6 +47,7 @@ describe("replay UI components", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
   it("scrubs the timeline with pointer input across the padded interior", async () => {
@@ -481,6 +483,30 @@ describe("replay UI components", () => {
     expect(container.querySelector(".doc-caret")).toBeTruthy();
   });
 
+  it("latches the caret at a mid-document insert point, not the trailing base run", () => {
+    // The post-fix shape for an edit threaded INTO Revision 0 base content: the run
+    // carrying the edit closes at the insertion point (toRevision=1) and the trailing
+    // base content is its OWN run (from/to 0). The caret must sit after the edit run,
+    // never sweep to the end of the surrounding base text — the reported nib bug.
+    const segments: Segment[] = [
+      {
+        kind: "accepted-text",
+        text: "Hello XYZ",
+        fromRevision: 0,
+        toRevision: 1,
+        revisions: [0, 1],
+      },
+      { kind: "accepted-text", text: "World", fromRevision: 0, toRevision: 0, revisions: [0] },
+    ];
+    const { container } = render(() => (
+      <DocumentViewport segments={segments} caret={{ revision: 1, color: "#00ff00" }} />
+    ));
+    const carets = container.querySelectorAll(".doc-caret");
+    expect(carets).toHaveLength(1);
+    // The caret is painted immediately after the inserting run, not the base run.
+    expect(carets[0]?.previousElementSibling?.textContent).toBe("Hello XYZ");
+  });
+
   it("paints no caret on a frame whose revision left no visible run", () => {
     const segments: Segment[] = [
       { kind: "accepted-text", text: "Hello", fromRevision: 1, toRevision: 1, revisions: [1] },
@@ -575,5 +601,405 @@ describe("replay UI components", () => {
     ));
     expect(screen.getByText("plain").getAttribute("aria-describedby")).toBeNull();
     expect(screen.queryByText(/Contributed by/)).toBeNull();
+  });
+  // ── Follow-caret auto-scroll + off-screen indicator ─────────────────────────
+  // A stubbed rAF runs the deferred measure synchronously; a mocked caret rect drives
+  // the (pure) band decision. `window.scrollTo` is jsdom-unimplemented, so it is stubbed.
+  function domRect(top: number, bottom: number): DOMRect {
+    return {
+      top,
+      bottom,
+      left: 0,
+      right: 10,
+      width: 10,
+      height: bottom - top,
+      x: 0,
+      y: top,
+      toJSON: () => ({}),
+    } as DOMRect;
+  }
+  function syncRaf(): void {
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+      cb(0);
+      return 1;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+  }
+  const caretSegments: Segment[] = [
+    { kind: "accepted-text", text: "Hello ", fromRevision: 1, toRevision: 1, revisions: [1] },
+    { kind: "accepted-text", text: "world", fromRevision: 2, toRevision: 2, revisions: [2] },
+  ];
+
+  it("auto-scrolls to keep the caret in view when follow is on and it leaves the band", () => {
+    const scrollTo = vi.fn();
+    vi.stubGlobal("scrollTo", scrollTo);
+    syncRaf();
+    // Caret far below the reading band (innerHeight≈768; band bottom ≈ 599) → must scroll.
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(domRect(900, 920));
+    render(() => (
+      <DocumentViewport segments={caretSegments} caret={{ revision: 2, color: "#000000" }} follow />
+    ));
+    expect(scrollTo).toHaveBeenCalled();
+  });
+
+  it("shows a 'Jump to edit' pill instead of scrolling when follow is off and the caret is off-screen", () => {
+    const scrollTo = vi.fn();
+    vi.stubGlobal("scrollTo", scrollTo);
+    syncRaf();
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(domRect(900, 920));
+    render(() => (
+      <DocumentViewport
+        segments={caretSegments}
+        caret={{ revision: 2, color: "#000000" }}
+        follow={false}
+      />
+    ));
+    expect(scrollTo).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Jump to edit" })).toBeTruthy();
+  });
+
+  it("points the jump pill upward when the active edit is above the viewport", () => {
+    vi.stubGlobal("scrollTo", vi.fn());
+    syncRaf();
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(domRect(-50, -30));
+    render(() => (
+      <DocumentViewport
+        segments={caretSegments}
+        caret={{ revision: 2, color: "#000000" }}
+        follow={false}
+      />
+    ));
+    const pill = screen.getByRole("button", { name: "Jump to edit" });
+    expect(pill.querySelector(".rotate-180")).toBeTruthy();
+  });
+
+  it("disengages follow on a genuine user scroll gesture (wheel)", () => {
+    vi.stubGlobal("scrollTo", vi.fn());
+    syncRaf();
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(domRect(100, 120));
+    const onFollowOff = vi.fn();
+    render(() => (
+      <DocumentViewport
+        segments={caretSegments}
+        caret={{ revision: 2, color: "#000000" }}
+        follow
+        onFollowOff={onFollowOff}
+      />
+    ));
+    window.dispatchEvent(new Event("wheel"));
+    expect(onFollowOff).toHaveBeenCalled();
+  });
+
+  it("disengages follow on keyboard navigation keys (keydown ArrowDown)", () => {
+    vi.stubGlobal("scrollTo", vi.fn());
+    syncRaf();
+    // Caret in view — no programmatic scrollTo fires, so progScroll stays false.
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(domRect(100, 120));
+    const onFollowOff = vi.fn();
+    render(() => (
+      <DocumentViewport
+        segments={caretSegments}
+        caret={{ revision: 2, color: "#000000" }}
+        follow
+        onFollowOff={onFollowOff}
+      />
+    ));
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown" }));
+    expect(onFollowOff).toHaveBeenCalled();
+  });
+
+  it("disengages follow on a non-wheel scroll event (scrollbar drag)", () => {
+    vi.stubGlobal("scrollTo", vi.fn());
+    syncRaf();
+    // Caret in view — recompute does not call scrollTo, so progScroll stays false.
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(domRect(100, 120));
+    const onFollowOff = vi.fn();
+    render(() => (
+      <DocumentViewport
+        segments={caretSegments}
+        caret={{ revision: 2, color: "#000000" }}
+        follow
+        onFollowOff={onFollowOff}
+      />
+    ));
+    window.dispatchEvent(new Event("scroll"));
+    expect(onFollowOff).toHaveBeenCalled();
+  });
+
+  it("does not disengage follow on the component's own programmatic scrollTo", () => {
+    vi.stubGlobal("scrollTo", vi.fn());
+    syncRaf();
+    // scrollHeight/innerHeight: realistic scrollable page so maxScroll (4232) >> target (~786).
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(768);
+    vi.spyOn(document.documentElement, "scrollHeight", "get").mockReturnValue(5000);
+    // Caret far below the band → recompute calls scrollTo → sets progScroll flag.
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(domRect(900, 920));
+    const onFollowOff = vi.fn();
+    render(() => (
+      <DocumentViewport
+        segments={caretSegments}
+        caret={{ revision: 2, color: "#000000" }}
+        follow
+        onFollowOff={onFollowOff}
+      />
+    ));
+    // Simulate the scroll events that window.scrollTo would emit during its animation.
+    window.dispatchEvent(new Event("scroll"));
+    expect(onFollowOff).not.toHaveBeenCalled();
+  });
+
+  it("re-engages follow and snaps to the caret when the jump pill is tapped", () => {
+    const scrollTo = vi.fn();
+    vi.stubGlobal("scrollTo", scrollTo);
+    syncRaf();
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(domRect(900, 920));
+    const onFollowOn = vi.fn();
+    render(() => (
+      <DocumentViewport
+        segments={caretSegments}
+        caret={{ revision: 2, color: "#000000" }}
+        follow={false}
+        onFollowOn={onFollowOn}
+      />
+    ));
+    fireEvent.click(screen.getByRole("button", { name: "Jump to edit" }));
+    expect(onFollowOn).toHaveBeenCalled();
+    expect(scrollTo).toHaveBeenCalled();
+  });
+
+  it("PlaybackControls exposes a Follow edits toggle reflecting its state", () => {
+    const onFollowChange = vi.fn();
+    render(() => (
+      <PlaybackControls
+        playing={false}
+        speed={1}
+        follow
+        onPlayPause={() => {}}
+        onRestart={() => {}}
+        onSpeed={() => {}}
+        onFollowChange={onFollowChange}
+      />
+    ));
+    const toggle = screen.getByRole("button", { name: "Follow edits" });
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(toggle);
+    expect(onFollowChange).toHaveBeenCalledWith(false);
+  });
+  // ── Claim A: target-aware programmatic-scroll guard (easing-tail safe) ──────
+  it("suppresses all easing-tail scroll events within tolerance of the auto-scroll target and disengages follow only when a user scroll moves clearly away after settling", () => {
+    let capturedTarget = 0;
+    const scrollTo = vi.fn((opts: ScrollToOptions) => {
+      capturedTarget = opts.top ?? 0;
+    });
+    vi.stubGlobal("scrollTo", scrollTo);
+    syncRaf();
+    let mockScrollY = 0;
+    vi.spyOn(window, "scrollY", "get").mockImplementation(() => mockScrollY);
+    // scrollHeight/innerHeight: realistic scrollable page so maxScroll (4232) >> target (~786),
+    // making the markProgrammatic clamp a no-op and progScrollTarget equal to capturedTarget.
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(768);
+    vi.spyOn(document.documentElement, "scrollHeight", "get").mockReturnValue(5000);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(domRect(900, 920));
+    const onFollowOff = vi.fn();
+    render(() => (
+      <DocumentViewport
+        segments={caretSegments}
+        caret={{ revision: 2, color: "#000000" }}
+        follow
+        onFollowOff={onFollowOff}
+      />
+    ));
+    // Component called scrollTo; capture the programmatic target.
+    expect(scrollTo).toHaveBeenCalled();
+    expect(capturedTarget).toBeGreaterThan(0);
+
+    // Mid-animation: scrollY well below target — suppressed.
+    mockScrollY = Math.floor(capturedTarget / 2);
+    window.dispatchEvent(new Event("scroll"));
+    expect(onFollowOff).not.toHaveBeenCalled();
+
+    // Easing tail: multiple consecutive within-2px frames — ALL suppressed (the fix).
+    mockScrollY = capturedTarget - 1.5;
+    window.dispatchEvent(new Event("scroll"));
+    expect(onFollowOff).not.toHaveBeenCalled();
+
+    mockScrollY = capturedTarget - 0.4;
+    window.dispatchEvent(new Event("scroll"));
+    expect(onFollowOff).not.toHaveBeenCalled();
+
+    mockScrollY = capturedTarget;
+    window.dispatchEvent(new Event("scroll"));
+    expect(onFollowOff).not.toHaveBeenCalled();
+
+    // User scroll clearly away from the settled target — disengages follow exactly once.
+    mockScrollY = capturedTarget - 50;
+    window.dispatchEvent(new Event("scroll"));
+    expect(onFollowOff).toHaveBeenCalledTimes(1);
+  });
+
+  // ── Fidelity: deferred-recompute ordering (async rAF, in-band caret after settle) ──
+  it("faithfully reproduces production deferred-recompute ordering: progScrollReached survives a recompute that sees the caret in-band after settle, then a user scroll away disengages follow", () => {
+    // Uses a manually-flushable rAF queue instead of syncRaf to exercise the true
+    // production path: each onScroll call schedules a NEW recompute frame (because
+    // recompute clears rafId on entry). The test mutates the caret rect between frames
+    // to reflect that the programmatic scroll actually landed — making recompute return
+    // decision.scroll=false so markProgrammatic is NOT called and progScrollReached
+    // survives into the user-scroll disengage check.
+    //
+    // A hypothetical bug that does NOT update the caret rect (keeps it at 900,920)
+    // would cause recompute to call markProgrammatic again, resetting progScrollReached
+    // to false, and the final onFollowOff assertion would FAIL — proving that the test
+    // genuinely distinguishes correct from buggy implementations.
+    const rafQueue: FrameRequestCallback[] = [];
+    let rafCounter = 1;
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+      rafQueue.push(cb);
+      return rafCounter++;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+
+    let capturedTarget = 0;
+    vi.stubGlobal(
+      "scrollTo",
+      vi.fn((opts: ScrollToOptions) => {
+        capturedTarget = opts.top ?? 0;
+      }),
+    );
+
+    let mockScrollY = 0;
+    vi.spyOn(window, "scrollY", "get").mockImplementation(() => mockScrollY);
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(768);
+    vi.spyOn(document.documentElement, "scrollHeight", "get").mockReturnValue(5000);
+
+    // Phase 1: caret far below the band. The variable is reassigned in phase 2 so
+    // the spy implementation closes over the binding, not the value.
+    let mockCaretRect: DOMRect = domRect(900, 920);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+      () => mockCaretRect,
+    );
+
+    const onFollowOff = vi.fn();
+    render(() => (
+      <DocumentViewport
+        segments={caretSegments}
+        caret={{ revision: 2, color: "#000000" }}
+        follow
+        onFollowOff={onFollowOff}
+      />
+    ));
+
+    // Frame 1: createEffect → schedule() → rAF queued. Flush it.
+    // recompute: caret (900,920) is below the band → decision.scroll=true →
+    //   markProgrammatic(target) → progScroll=true, progScrollReached=false.
+    // After recompute: rafId=undefined (cleared at entry).
+    expect(rafQueue.length).toBe(1);
+    rafQueue.shift()?.(0);
+    expect(capturedTarget).toBeGreaterThan(0);
+
+    // Phase 2: programmatic scroll has landed. Reflect the settled state:
+    //   • scrollY is now at the target (within PROG_SCROLL_TOLERANCE_PX=2).
+    //   • The caret rect updates to in-band because the page scrolled.
+    //     followScroll(300, 320, 768, capturedTarget): bandTopPx=153.6, bandBottomPx=598.88
+    //     → 300 ≥ 153.6 and 320 ≤ 598.88 → { scroll: false } → markProgrammatic NOT called.
+    mockScrollY = capturedTarget;
+    mockCaretRect = domRect(300, 320);
+
+    // Easing-tail scroll event at the target:
+    //   onScroll → schedule() queues frame2 (rafId was undefined after frame1)
+    //           → within-tolerance (|0| ≤ 2) → progScrollReached=true, suppressed.
+    window.dispatchEvent(new Event("scroll"));
+    expect(onFollowOff).not.toHaveBeenCalled();
+
+    // Frame 2: recompute with the now-in-band caret.
+    // decision.scroll=false → markProgrammatic NOT called → progScrollReached stays true.
+    // (If this frame ran with the OLD rect (900,920), markProgrammatic would fire,
+    // resetting progScrollReached=false, and the next assertion would fail — the test
+    // then correctly identifies the bug.)
+    expect(rafQueue.length).toBe(1);
+    rafQueue.shift()?.(0);
+    expect(onFollowOff).not.toHaveBeenCalled();
+
+    // Phase 3: user scrolls 50px past the settled target — clearly away.
+    // progScrollReached=true + |50| > PROG_SCROLL_TOLERANCE_PX → clear guard → disengage.
+    mockScrollY = capturedTarget + 50;
+    window.dispatchEvent(new Event("scroll"));
+    expect(onFollowOff).toHaveBeenCalledTimes(1);
+  });
+
+  // ── Claim: clamped-maxScroll guard (progScrollTarget upper-bound fix) ─────────
+  it("clamps progScrollTarget to the reachable max-scroll when the raw followScroll target exceeds the document bottom, so progScrollReached trips at the clamped landing and a user scroll away disengages", () => {
+    let capturedTarget = 0;
+    const scrollTo = vi.fn((opts: ScrollToOptions) => {
+      capturedTarget = opts.top ?? 0;
+    });
+    vi.stubGlobal("scrollTo", scrollTo);
+    syncRaf();
+    let mockScrollY = 0;
+    vi.spyOn(window, "scrollY", "get").mockImplementation(() => mockScrollY);
+    // innerHeight=300, scrollHeight=800 → maxScroll=500. followScroll target
+    // with caretTop=900: max(0, 0+900-300*0.38)=786 > 500, so after the fix
+    // progScrollTarget = min(786, 500) = 500.
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(300);
+    vi.spyOn(document.documentElement, "scrollHeight", "get").mockReturnValue(800);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(domRect(900, 920));
+    const onFollowOff = vi.fn();
+    render(() => (
+      <DocumentViewport
+        segments={caretSegments}
+        caret={{ revision: 2, color: "#000000" }}
+        follow
+        onFollowOff={onFollowOff}
+      />
+    ));
+    // The browser receives the raw (unclamped) followScroll target (~786).
+    expect(scrollTo).toHaveBeenCalled();
+    expect(capturedTarget).toBeGreaterThan(500);
+
+    // Simulate the browser landing at the clamped max-scroll (500).
+    // Without the fix, progScrollTarget would be ~786, so |500-786|>2 and
+    // progScrollReached would never trip — suppression stays stuck for 1200ms.
+    // With the fix, progScrollTarget=500, so the landing is within PROG_SCROLL_TOLERANCE_PX
+    // and progScrollReached trips immediately.
+    mockScrollY = 500;
+    window.dispatchEvent(new Event("scroll"));
+    expect(onFollowOff).not.toHaveBeenCalled(); // reached clamped target — suppressed
+
+    // A subsequent user scroll clearly away (50px) now disengages exactly once.
+    mockScrollY = 550;
+    window.dispatchEvent(new Event("scroll"));
+    expect(onFollowOff).toHaveBeenCalledTimes(1);
+  });
+
+  // ── Claim B: defaultPrevented guard on nav-key handler ────────────────────────
+  it("does not disengage follow when a NAV_KEYS keydown was already handled (defaultPrevented) by a descendant element, e.g. the timeline slider", () => {
+    vi.stubGlobal("scrollTo", vi.fn());
+    syncRaf();
+    // Caret in view so no programmatic scrollTo fires (progScroll stays false).
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(domRect(100, 120));
+    const onFollowOff = vi.fn();
+    render(() => (
+      <DocumentViewport
+        segments={caretSegments}
+        caret={{ revision: 2, color: "#000000" }}
+        follow
+        onFollowOff={onFollowOff}
+      />
+    ));
+
+    // A child element (e.g. the timeline slider) calls preventDefault on Arrow before
+    // it bubbles to the window keydown handler.
+    const el = document.createElement("div");
+    document.body.appendChild(el);
+    el.addEventListener("keydown", (e) => e.preventDefault());
+    el.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }),
+    );
+    document.body.removeChild(el);
+    expect(onFollowOff).not.toHaveBeenCalled();
+
+    // PageDown is NOT handled by the timeline slider (no preventDefault), so it still
+    // disengages document follow.
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "PageDown", cancelable: true }));
+    expect(onFollowOff).toHaveBeenCalledTimes(1);
   });
 });
