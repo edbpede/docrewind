@@ -170,8 +170,14 @@ export function clusterMarkers(
   }
 
   return groups.map((members) => {
-    const start = members[0]!.index; // sorted ascending
-    const end = members[members.length - 1]!.index;
+    const first = members[0];
+    const last = members[members.length - 1];
+    // groups only ever holds non-empty member arrays
+    if (first === undefined || last === undefined) {
+      throw new Error("clusterMarkers: unexpected empty group");
+    }
+    const start = first.index; // sorted ascending
+    const end = last.index;
     const mean = members.reduce((sum, m) => sum + m.index, 0) / members.length;
     return {
       id: members.map((m) => m.id).join("|"),
@@ -186,7 +192,8 @@ export function clusterMarkers(
 /** Graphite seal class for a mixed-kind cluster; the kind tone for a uniform one. */
 function clusterToneClass(cluster: MarkerCluster): string {
   const kinds = new Set(cluster.members.map((m) => m.kind));
-  return kinds.size === 1 ? markerToneClass(cluster.members[0]!.kind) : "tl-cluster-mixed";
+  const first = cluster.members[0];
+  return kinds.size === 1 && first ? markerToneClass(first.kind) : "tl-cluster-mixed";
 }
 
 /** One kind's tally within a cluster — the unit of both the peek ledger and aria. */
@@ -208,7 +215,7 @@ function clusterBreakdownRows(members: readonly TimelineMarker[]): ClusterBreakd
     counts.set(member.kind, (counts.get(member.kind) ?? 0) + 1);
   }
   return CLUSTER_KIND_ORDER.filter((kind) => counts.has(kind)).map((kind) => {
-    const count = counts.get(kind)!;
+    const count = counts.get(kind) ?? 0;
     const base = CLUSTER_KIND_LABEL[kind];
     return { kind, count, label: count === 1 ? base : `${base}s` };
   });
@@ -231,9 +238,9 @@ interface ClusterSummary {
 }
 
 function summarizeCluster(cluster: MarkerCluster, max: number): ClusterSummary {
-  if (cluster.members.length === 1) {
-    const marker = cluster.members[0]!;
-    return { title: marker.label, detail: marker.detail, rev: revisionOf(marker.index, max) };
+  const [first] = cluster.members;
+  if (cluster.members.length === 1 && first) {
+    return { title: first.label, detail: first.detail, rev: revisionOf(first.index, max) };
   }
   return {
     title: clusterCountLabel(cluster.members.length),
@@ -242,12 +249,68 @@ function summarizeCluster(cluster: MarkerCluster, max: number): ClusterSummary {
   };
 }
 
+// The track reserves a horizontal SAFE AREA at each end, put to two distinct uses.
+//
+//  • EDGE_INSET_PX — the inset of the applied-count AXIS. Markers, the fill ramp,
+//    the popovers, and `scrubFromClientX` all map through `posPct`/`fillWidth`
+//    into the band [EDGE_INSET_PX, 100% − EDGE_INSET_PX], so a boundary seal
+//    stands clear of (and is never half-clipped by) the rounded track ends. Sized
+//    to clear a whole seal: half a marker (~9px) + the ~5px rounded-cap radius +
+//    breathing room.
+//
+//  • PLAYHEAD_REST_PX — where the playhead nib RESTS at the two endpoints. The
+//    first real marker anchors at applied-count ~1 of hundreds — i.e. essentially
+//    index 0 — so on the shared linear axis the index-0 nib and that first marker
+//    would coincide; the axis inset alone shifts both inward together and never
+//    separates them. So at revision 0 (and at max) the nib parks in the end margin
+//    instead: BEFORE the first marker, AFTER the last. For every interior index it
+//    still follows the SAME `posPct` as the markers (see `thumbLeft`), so a scrub
+//    lands the nib exactly on the marker it points at; only the resting endpoints
+//    park, and the nib's `left` transition glides that small step.
+const EDGE_INSET_PX = 28;
+const PLAYHEAD_REST_PX = 9;
+
 const Timeline: Component<TimelineProps> = (props) => {
   let track: HTMLDivElement | undefined;
   let activePointerId: number | null = null;
   const fraction = createMemo(() => (props.max > 0 ? props.currentIndex / props.max : 0));
-  const pct = (value: number): string =>
-    `${(props.max > 0 ? (value / props.max) * 100 : 0).toFixed(2)}%`;
+
+  // Map an applied-count `index` to its physical left offset on the markers axis,
+  // interpolating across the inset interior: index 0 lands at `EDGE_INSET_PX`,
+  // index `max` at `100% − EDGE_INSET_PX`. Expressed as a `calc` so the safe area
+  // is a fixed pixel width at any track size (rather than a width-relative %).
+  const posPct = (index: number): string => {
+    const frac = props.max > 0 ? Math.max(0, Math.min(1, index / props.max)) : 0;
+    return `calc(${EDGE_INSET_PX}px + (100% - ${EDGE_INSET_PX * 2}px) * ${frac.toFixed(4)})`;
+  };
+
+  // The playhead nib's left offset. It rides the markers axis (`posPct`) for every
+  // interior revision so a scrub lands it exactly on its marker, but RESTS in the
+  // end margin at the two endpoints — parked before the first marker at revision 0,
+  // after the last marker at `max` — so the nib never sits on top of a boundary seal.
+  const thumbLeft = (index: number): string => {
+    if (props.max <= 0 || index <= 0) {
+      return `${PLAYHEAD_REST_PX}px`;
+    }
+    if (index >= props.max) {
+      return `calc(100% - ${PLAYHEAD_REST_PX}px)`;
+    }
+    return posPct(index);
+  };
+
+  // The progress ramp begins at the index-0 axis anchor (left = EDGE_INSET_PX) and
+  // its leading edge stays glued to the nib: across the interior it spans the usable
+  // band; at `max` it extends the extra end margin out to the parked nib so the
+  // filled ramp still meets it; at revision 0 it is empty.
+  const fillWidth = createMemo(() => {
+    if (props.max <= 0 || props.currentIndex <= 0) {
+      return "0px";
+    }
+    if (props.currentIndex >= props.max) {
+      return `calc(100% - ${EDGE_INSET_PX + PLAYHEAD_REST_PX}px)`;
+    }
+    return `calc((100% - ${EDGE_INSET_PX * 2}px) * ${fraction().toFixed(4)})`;
+  });
 
   // Measured track width feeds collision stacking. It stays 0 until layout is
   // observed (jsdom keeps it 0), so stacking is inert until there is a real width
@@ -271,7 +334,11 @@ const Timeline: Component<TimelineProps> = (props) => {
     }
   });
 
-  const clusters = createMemo(() => clusterMarkers(props.events, props.max, trackWidth()));
+  // Collision stacking runs in the SAME inset band the seals render into, so it
+  // measures against the usable interior width, not the raw track width.
+  const clusters = createMemo(() =>
+    clusterMarkers(props.events, props.max, Math.max(0, trackWidth() - EDGE_INSET_PX * 2)),
+  );
 
   // Hover/focus tooltip: a single popover, driven by the active cluster id, so the
   // seal itself stays a thin jump-to button. Set on enter/focus, cleared on
@@ -345,7 +412,11 @@ const Timeline: Component<TimelineProps> = (props) => {
       return;
     }
     const rect = track.getBoundingClientRect();
-    const ratio = rect.width > 0 ? (clientX - rect.left) / rect.width : 0;
+    // Invert `posPct`: the usable band runs from EDGE_INSET_PX to width −
+    // EDGE_INSET_PX, so a click anywhere in either safe-area margin clamps to the
+    // nearest bound (index 0 / max) rather than reading as a fractional position.
+    const usable = rect.width - EDGE_INSET_PX * 2;
+    const ratio = usable > 0 ? (clientX - rect.left - EDGE_INSET_PX) / usable : 0;
     const next = Math.round(Math.max(0, Math.min(1, ratio)) * props.max);
     props.onScrub(next);
   }
@@ -417,10 +488,10 @@ const Timeline: Component<TimelineProps> = (props) => {
       onPointerUp={endPointer}
       onPointerCancel={endPointer}
     >
-      <div class="tl-fill" style={{ width: `${fraction() * 100}%` }} />
+      <div class="tl-fill" style={{ left: `${EDGE_INSET_PX}px`, width: fillWidth() }} />
       <For each={clusters()}>
         {(cluster) => {
-          const single = cluster.members.length === 1 ? cluster.members[0]! : undefined;
+          const single = cluster.members.length === 1 ? cluster.members[0] : undefined;
           const summary = summarizeCluster(cluster, props.max);
           const ariaLabel = [summary.title, summary.detail, summary.rev]
             .filter((part): part is string => part !== undefined)
@@ -434,7 +505,7 @@ const Timeline: Component<TimelineProps> = (props) => {
                   ? `tl-cluster ${clusterToneClass(cluster)}`
                   : `tl-marker ${markerToneClass(single.kind)} p-0`
               }
-              style={{ left: pct(cluster.index) }}
+              style={{ left: posPct(cluster.index) }}
               aria-label={ariaLabel}
               aria-describedby={activeId() === cluster.id ? "tl-tip" : undefined}
               aria-haspopup={single === undefined ? "dialog" : undefined}
@@ -480,7 +551,7 @@ const Timeline: Component<TimelineProps> = (props) => {
               id="tl-tip"
               class="tl-tip"
               role="tooltip"
-              style={{ left: pct(cluster().index), transform: tipTransform(cluster().index) }}
+              style={{ left: posPct(cluster().index), transform: tipTransform(cluster().index) }}
             >
               <span class="tl-tip-title">{summary().title}</span>
               <Show
@@ -524,7 +595,7 @@ const Timeline: Component<TimelineProps> = (props) => {
               class="tl-panel"
               role="dialog"
               aria-label={summary().title}
-              style={{ left: pct(cluster().index), transform: tipTransform(cluster().index) }}
+              style={{ left: posPct(cluster().index), transform: tipTransform(cluster().index) }}
             >
               <div class="tl-panel-head">
                 <div class="tl-panel-heading">
@@ -583,7 +654,7 @@ const Timeline: Component<TimelineProps> = (props) => {
           );
         }}
       </Show>
-      <div class="tl-thumb" style={{ left: pct(props.currentIndex) }} />
+      <div class="tl-thumb" style={{ left: thumbLeft(props.currentIndex) }} />
     </div>
   );
 };

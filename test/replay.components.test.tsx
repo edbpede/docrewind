@@ -48,7 +48,7 @@ describe("replay UI components", () => {
     vi.unstubAllGlobals();
   });
 
-  it("scrubs the timeline with pointer input", async () => {
+  it("scrubs the timeline with pointer input across the padded interior", async () => {
     const onScrub = vi.fn();
     render(() => <Timeline currentIndex={0} max={10} events={[]} onScrub={onScrub} />);
     const slider = screen.getByRole("slider");
@@ -68,11 +68,70 @@ describe("replay UI components", () => {
     slider.hasPointerCapture = vi.fn(() => true);
     slider.releasePointerCapture = vi.fn();
 
-    await fireEvent.pointerDown(slider, { pointerId: 1, clientX: 75 });
-    await fireEvent.pointerMove(slider, { pointerId: 1, clientX: 25 });
-    await fireEvent.pointerUp(slider, { pointerId: 1, clientX: 25 });
+    // The markers axis is inset by EDGE_INSET_PX (28px) at each end, so on this
+    // 100px-wide mock the usable band is [28, 72] and a click maps through
+    // (clientX − 28) / 44.
+    await fireEvent.pointerDown(slider, { pointerId: 1, clientX: 64 });
+    await fireEvent.pointerMove(slider, { pointerId: 1, clientX: 36 });
+    await fireEvent.pointerUp(slider, { pointerId: 1, clientX: 36 });
 
-    expect(onScrub.mock.calls.map((call) => call[0])).toEqual([8, 3]);
+    // (64 − 28) / 44 ≈ 0.82 → 8;  (36 − 28) / 44 ≈ 0.18 → 2.
+    expect(onScrub.mock.calls.map((call) => call[0])).toEqual([8, 2]);
+  });
+
+  it("clamps pointer scrubs that land in either end safe area to the bounds", async () => {
+    const onScrub = vi.fn();
+    render(() => <Timeline currentIndex={0} max={10} events={[]} onScrub={onScrub} />);
+    const slider = screen.getByRole("slider");
+    slider.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        top: 0,
+        width: 100,
+        height: 10,
+        right: 100,
+        bottom: 10,
+        x: 0,
+        y: 0,
+        toJSON: () => {},
+      }) as DOMRect;
+    slider.setPointerCapture = vi.fn();
+    slider.hasPointerCapture = vi.fn(() => true);
+    slider.releasePointerCapture = vi.fn();
+
+    // A click inside the left margin (< 28px) clamps to index 0; one inside the
+    // right margin (> 72px) clamps to max — the inset never yields fractional
+    // positions beyond the boundary marks.
+    await fireEvent.pointerDown(slider, { pointerId: 1, clientX: 4 });
+    await fireEvent.pointerUp(slider, { pointerId: 1, clientX: 4 });
+    await fireEvent.pointerDown(slider, { pointerId: 2, clientX: 97 });
+    await fireEvent.pointerUp(slider, { pointerId: 2, clientX: 97 });
+
+    expect(onScrub.mock.calls.map((call) => call[0])).toEqual([0, 10]);
+  });
+
+  it("parks the playhead in the end margin at the resting endpoints, axis in between", () => {
+    const thumbLeft = (index: number, max: number): string => {
+      const { container } = render(() => (
+        <Timeline currentIndex={index} max={max} events={[]} onScrub={() => {}} />
+      ));
+      return (container.querySelector(".tl-thumb") as HTMLElement).style.left;
+    };
+
+    // Revision 0 rests in the LEFT margin (a fixed px), before the first marker —
+    // NOT on the inset axis (which begins at 28px) where an early marker sits.
+    expect(thumbLeft(0, 10)).toBe("9px");
+
+    // The final state rests in the RIGHT margin, after the last marker.
+    const atEnd = thumbLeft(10, 10);
+    expect(atEnd).toContain("9px");
+    expect(atEnd).toContain("100%");
+
+    // Any interior revision rides the shared inset axis (a `calc`), so scrubbing
+    // onto a marker lands the nib exactly on it.
+    const interior = thumbLeft(5, 10);
+    expect(interior).toContain("calc(28px");
+    expect(interior).not.toBe("9px");
   });
 
   it("scrubs the timeline with the keyboard (Arrow / Home / End)", async () => {

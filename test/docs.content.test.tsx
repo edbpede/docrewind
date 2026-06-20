@@ -28,6 +28,20 @@ describe("ReplayAffordance", () => {
     expect(onActivate).toHaveBeenCalledTimes(1);
   });
 
+  it("opts into the smaller chip only when compact (dense Classroom chrome)", () => {
+    const { getByRole, unmount } = renderTL(() => (
+      <ReplayAffordance onActivate={() => {}} compact />
+    ));
+    // Compact swaps the whole secondary class (self-contained, not a size override).
+    expect(getByRole("button").classList).toContain("btn-secondary-compact");
+    expect(getByRole("button").classList).not.toContain("btn-secondary");
+    unmount();
+    // Default (Docs titlebar) keeps the full-size secondary pill.
+    const { getByRole: getDefault } = renderTL(() => <ReplayAffordance onActivate={() => {}} />);
+    expect(getDefault("button").classList).toContain("btn-secondary");
+    expect(getDefault("button").classList).not.toContain("btn-secondary-compact");
+  });
+
   it("mounts inside a shadow root, isolated from the light DOM", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);

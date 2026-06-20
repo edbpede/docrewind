@@ -158,6 +158,20 @@ const shortcuts = {
     "btn-base bg-surface text-danger ring-1 ring-[var(--dr-danger-line)] hover:bg-danger-soft",
   // Taller variant for hero CTAs (≥44px touch target).
   "btn-lg": "min-h-[2.75rem] px-5 text-base",
+  // Compact secondary chip for dense HOST chrome (Google Classroom's grading
+  // toolbar and submission card), where the default 2.5rem pill crowds — and at
+  // narrow widths clips against — the embedding surface. SELF-CONTAINED (not a
+  // `btn-secondary` + size-override): two shortcuts setting the same property on
+  // one element resolve by Uno's internal utility order, not class order, so an
+  // override would silently lose to `btn-base`. Used in place of `btn-secondary`.
+  "btn-secondary-compact":
+    "inline-flex min-h-[2rem] cursor-pointer select-none items-center justify-center gap-1.5 " +
+    "rounded-lg px-3 text-[0.8125rem] font-medium leading-none " +
+    "transition-[background-color,color,box-shadow,transform] duration-150 ease-[var(--dr-ease-out)] " +
+    "outline-none focus-visible:ring-2 focus-visible:ring-brand-ring focus-visible:ring-offset-2 " +
+    "focus-visible:ring-offset-canvas active:translate-y-px " +
+    "disabled:pointer-events-none disabled:opacity-45 " +
+    "bg-surface text-ink ring-1 ring-hairline-strong hover:bg-hover",
   "btn-block": "w-full",
 
   // ── Segmented control (theme / speed / diagnostics) ───────────────────────
@@ -281,15 +295,32 @@ const shortcuts = {
   // the element (it's a preflight class, not a generatable utility).
   "progress-indeterminate": "h-full w-1/3 rounded-full bg-brand",
 
-  // ── Info / privacy note: a calm, OPEN-by-default reassurance card ──────────
-  // Friendly brand-soft surface with an info mark — orientation, not a hazard.
-  "banner-card": "flex gap-3 rounded-2xl bg-brand-soft px-4 py-3.5",
-  "banner-icon": "mt-0.5 size-5 shrink-0 text-brand-text",
-  "banner-title": "text-[0.9375rem] font-semibold text-ink",
+  // ── Info / privacy note: a calm, OPEN-by-default collapsible reassurance ───
+  // Friendly brand-soft surface with a shield mark — orientation, not a hazard.
+  // The title row is the disclosure trigger (a big, iOS-Settings-style tap
+  // target): the key trust line stays visible even when the detail is tucked,
+  // so reassurance remains a first impression. The detail height + chevron ease
+  // on a calm grid-rows transition (degraded under reduced-motion, below).
+  "banner-card": "flex flex-col rounded-xl bg-brand-soft px-3.5 py-2.5",
+  "banner-toggle":
+    "flex w-full items-center gap-2.5 rounded-md bg-transparent text-left outline-none " +
+    "transition-colors focus-visible:ring-2 focus-visible:ring-brand-ring",
+  "banner-icon": "size-5 shrink-0 text-brand-text",
+  "banner-title": "min-w-0 flex-1 text-[0.9375rem] font-semibold text-ink",
+  "banner-chevron":
+    "size-4 shrink-0 text-brand-text transition-transform duration-200 ease-[var(--dr-ease-out)] " +
+    "data-[expanded=false]:-rotate-90",
+  "banner-collapse":
+    "grid grid-rows-[1fr] transition-[grid-template-rows] duration-200 ease-[var(--dr-ease-out)] " +
+    "data-[collapsed=true]:grid-rows-[0fr]",
+  // The clip is the grid item and MUST stay padding-free: with border-box an
+  // element can't shrink below its own padding, so any padding here would leave
+  // the collapsed row that-many px tall instead of 0. Spacing lives on the inner
+  // `banner-detail` so the row truly collapses to nothing.
+  "banner-clip": "min-h-0 overflow-hidden",
+  "banner-detail": "flex flex-col gap-1 pt-2",
   "banner-body": "text-[0.875rem] leading-relaxed text-ink-secondary text-pretty",
-  "banner-more":
-    "mt-1 inline-flex items-center gap-1 self-start rounded-md text-[0.8125rem] font-medium text-brand-text " +
-    "outline-none transition-colors hover:text-ink focus-visible:ring-2 focus-visible:ring-brand-ring",
+  "banner-note": "text-[0.8125rem] leading-relaxed text-ink-muted text-pretty",
 
   // ── Status notes (pending / success / error) — icon-paired, never bare ────
   "note-base": "flex items-start gap-2.5 rounded-xl px-3.5 py-3 text-[0.875rem] leading-relaxed",
@@ -565,7 +596,7 @@ export default defineConfig({
    Every transition/animation degrades to a crossfade or instant state. */
 @media (prefers-reduced-motion: reduce) {
   .tl-fill, .tl-thumb, .tl-track, .tl-marker, .tl-cluster, .progress-fill, .btn-base,
-  .seg-item { transition: none !important; }
+  .btn-secondary-compact, .seg-item, .banner-collapse, .banner-chevron { transition: none !important; }
   .doc-suggest::after, .doc-strike::after { transition: none !important; }
   /* Freeze the writing caret to a steady mark — still present and colour-coded. */
   .doc-caret { animation: none !important; opacity: 1 !important; }
