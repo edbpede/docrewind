@@ -483,6 +483,30 @@ describe("replay UI components", () => {
     expect(container.querySelector(".doc-caret")).toBeTruthy();
   });
 
+  it("latches the caret at a mid-document insert point, not the trailing base run", () => {
+    // The post-fix shape for an edit threaded INTO Revision 0 base content: the run
+    // carrying the edit closes at the insertion point (toRevision=1) and the trailing
+    // base content is its OWN run (from/to 0). The caret must sit after the edit run,
+    // never sweep to the end of the surrounding base text — the reported nib bug.
+    const segments: Segment[] = [
+      {
+        kind: "accepted-text",
+        text: "Hello XYZ",
+        fromRevision: 0,
+        toRevision: 1,
+        revisions: [0, 1],
+      },
+      { kind: "accepted-text", text: "World", fromRevision: 0, toRevision: 0, revisions: [0] },
+    ];
+    const { container } = render(() => (
+      <DocumentViewport segments={segments} caret={{ revision: 1, color: "#00ff00" }} />
+    ));
+    const carets = container.querySelectorAll(".doc-caret");
+    expect(carets).toHaveLength(1);
+    // The caret is painted immediately after the inserting run, not the base run.
+    expect(carets[0]?.previousElementSibling?.textContent).toBe("Hello XYZ");
+  });
+
   it("paints no caret on a frame whose revision left no visible run", () => {
     const segments: Segment[] = [
       { kind: "accepted-text", text: "Hello", fromRevision: 1, toRevision: 1, revisions: [1] },

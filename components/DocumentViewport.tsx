@@ -170,11 +170,14 @@ const DocumentViewport: Component<DocumentViewportProps> = (props) => {
   };
 
   // The index of the run the caret trails: the LAST run the current revision touched —
-  // either one it OPENED (`fromRevision`) or one it EXTENDED at the tail (`toRevision`,
-  // the ordinary sequential-typing case, where its text coalesced into an older run).
+  // either one it OPENED (`fromRevision`) or one it EXTENDED/CLOSED at the tail
+  // (`toRevision`). `render.ts` breaks a run wherever an insertion threads into older
+  // (e.g. Revision 0 base/template) content, so even a mid-document edit closes a run
+  // at the insertion point whose `toRevision` names this frame's revision — the caret
+  // latches there instead of being swept to the tail of the surrounding base content.
   // Recomputed per frame (segments + caret both change on a tick); O(segments), trivial
-  // beside the segment rebuild itself. -1 when the current revision left no visible run
-  // (a pure deletion, or a strict mid-run insert) so no caret is painted that frame.
+  // beside the segment rebuild itself. -1 only when the current revision added no visible
+  // char this frame (a pure or suggested deletion), so no caret is painted that frame.
   const caretIndex = createMemo(() => {
     const caret = props.caret;
     if (caret === undefined || caret === null) {

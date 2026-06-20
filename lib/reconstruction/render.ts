@@ -21,11 +21,15 @@ import type { DocumentModel, SuggestionState } from "./model";
 /**
  * One rendered run. `fromRevision` / `toRevision` are the run's first / last
  * element's `insertRevision` — provenance only, NEVER a render-time time-cut.
- * Because a run coalesces contiguous same-kind chars regardless of which revision
- * wrote each, a run can straddle several revisions: `fromRevision` is the revision
- * that opened it, `toRevision` the revision that most recently extended its tail.
- * The replay caret uses the pair to find the run the current revision touched (it
- * either opened a fresh run or appended onto an existing one).
+ * Because a run coalesces contiguous same-kind chars whose insert revisions never
+ * step BACKWARD, a run can straddle several revisions: `fromRevision` is the revision
+ * that opened it, `toRevision` the revision that most recently extended its tail —
+ * which, under the monotonic-forward rule, is also the highest revision in the run.
+ * A char belonging to an OLDER revision than the tail (an insertion threaded into
+ * pre-existing/base content) opens a NEW run, so the boundary — and `toRevision` —
+ * land exactly at the insertion point. The replay caret (painted AFTER a run) uses
+ * the pair to latch onto the run the current revision touched: one it opened, or one
+ * it extended/closed at the tail (sequential typing and threaded-insert cases).
  *
  * `revisions` lists EVERY revision that contributed a char to the run (deduped,
  * order-insignificant), including the ones in the middle that `fromRevision` /
@@ -154,10 +158,17 @@ export function segmentsAt(model: DocumentModel): readonly Segment[] {
       }
       case "char": {
         const kind = textKindFor(el.suggestionState);
-        if (run !== null && run.kind === kind) {
+        // Coalesce contiguous same-kind chars, but ONLY while the insert revision does
+        // not step backward. Sequential typing inserts monotonically increasing
+        // revisions, so it stays one run (the optimized common case). An edit threaded
+        // INTO older content — most often Revision 0 base/template text — yields a char
+        // whose revision is LOWER than the run's tail; that BREAKS the run so its
+        // `toRevision` names the inserting revision and the run ends exactly at the
+        // insertion point. Without the break, the trailing base content overwrites
+        // `toRevision` back to 0 and sweeps the writing caret (painted after a run) past
+        // the real edit — the mis-aligned-nib bug on template-heavy docs.
+        if (run !== null && run.kind === kind && el.insertRevision >= run.toRevision) {
           run.text += el.char;
-          // Coalescing across revisions: the run's tail now belongs to this char's
-          // revision, so the caret can find the run a later revision extended.
           run.toRevision = el.insertRevision;
           run.revisions.add(el.insertRevision);
         } else {
