@@ -328,6 +328,12 @@ const DocumentViewport: Component<DocumentViewportProps> = (props) => {
   // playback — the large up/down-jump regression. While follow is engaged we are the
   // sole intended scroll driver, so suppress anchoring on the viewport scroller; when
   // the user takes over (follow off) restore the default so their reading position holds.
+  //
+  // Capture whatever inline `overflow-anchor` the `<html>` element carried before we
+  // first touched it, so unmount restores THAT value (not a hardcoded "") — leaving the
+  // scroller exactly as we found it even if other code had set an inline value.
+  const priorOverflowAnchor =
+    typeof document !== "undefined" ? document.documentElement.style.overflowAnchor : "";
   createEffect(() => {
     if (typeof document === "undefined") {
       return;
@@ -439,9 +445,10 @@ const DocumentViewport: Component<DocumentViewportProps> = (props) => {
       cancelAnimationFrame(rafId);
     }
     clearTimeout(progScrollTimer);
-    // Leave the viewport scroller as we found it (drop our anchoring suppression).
+    // Leave the viewport scroller as we found it (drop our anchoring suppression):
+    // restore the inline value captured before we first overrode it, not a blanket "".
     if (typeof document !== "undefined") {
-      document.documentElement.style.overflowAnchor = "";
+      document.documentElement.style.overflowAnchor = priorOverflowAnchor;
     }
   });
 
