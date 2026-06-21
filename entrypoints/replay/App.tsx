@@ -881,7 +881,7 @@ const ReplaySurface: Component<{
             <Suspense fallback={renderProgress()}>
               <Show when={loaded()} fallback={renderProgress()}>
                 {(data) => (
-                  <main class="mx-auto flex max-w-3xl flex-col gap-5 p-6 sm:p-8">
+                  <main class="mx-auto flex max-w-[58rem] flex-col gap-5 p-6 sm:p-8">
                     <header class="dr-masthead">
                       <div class="flex items-center gap-3">
                         <BrandMark size={40} />
