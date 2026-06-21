@@ -153,6 +153,9 @@ export const strings = {
     statAdded: "Characters added",
     statRemoved: "Characters removed",
     statSpan: "Time span",
+    // Y-axis context labels for the position scatter (content-free: orientation only).
+    axisDocStart: "Start of doc",
+    axisDocEnd: "End of doc",
   },
   options: {
     title: "DocRewind settings",
@@ -347,4 +350,43 @@ export function formatDayLabel(ms: number): string {
     month: "short",
     day: "numeric",
   });
+}
+
+/** A sub-day axis label for short-span documents — a clock time like "9 AM", or
+ *  "Sat, Oct 18, 9 AM" when the calendar day must be (re)established at a tick.
+ *  Date + clock only — never any document text. */
+export function formatHourLabel(ms: number, withDate = false): string {
+  if (Math.abs(ms) > 8.64e15) {
+    return "";
+  }
+  const time = new Date(ms).toLocaleTimeString(undefined, { hour: "numeric" });
+  return withDate ? `${formatDayLabel(ms)}, ${time}` : time;
+}
+
+/** A granular hover-tooltip stamp for the summary charts, e.g.
+ *  "Sat, Oct 18, 2:45 PM". Date + clock only — never any document text. */
+export function formatSummaryStamp(ms: number): string {
+  if (Math.abs(ms) > 8.64e15) {
+    return "";
+  }
+  return new Date(ms).toLocaleString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+/** A compact character-count label for the summary length axis and tooltip,
+ *  e.g. "5,240 chars". Count only — never any document text. */
+export function summaryCharCount(n: number): string {
+  return `${Math.max(0, Math.round(n)).toLocaleString()} chars`;
+}
+
+/** Relative edit-position readout for the summary tooltip, e.g. "At 45% of
+ *  document" (fraction in [0, 1]). Position only — never any document text. */
+export function summaryEditPosition(fraction: number): string {
+  const pct = Math.round(Math.min(1, Math.max(0, fraction)) * 100);
+  return `At ${pct}% of document`;
 }

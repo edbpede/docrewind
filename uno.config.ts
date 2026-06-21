@@ -288,6 +288,22 @@ const shortcuts = {
   "tl-legend-item": "inline-flex items-center gap-1.5 text-xs text-ink-secondary",
   "tl-seal": "tl-chip",
 
+  // ── Document-summary advanced view (hover tooltip + scrub feedback) ────────
+  // A floating paper card mirroring `tl-tip`, lifted to the tooltip layer and
+  // anchored to the scrub line so the hovered moment's stats read at the top of
+  // the chart. `pointer-events-none` keeps the pointer talking to the chart, not
+  // the card, so the hover never flickers.
+  "dr-sum-tip":
+    "pointer-events-none absolute top-2 z-[80] flex w-max max-w-[14rem] flex-col gap-1 " +
+    "rounded-xl bg-surface px-3 py-2 ring-1 ring-hairline shadow-[var(--dr-shadow-lg)]",
+  "dr-sum-tip-title": "text-[13px] font-semibold text-ink",
+  "dr-sum-tip-detail": "font-mono text-[11px] tabular-nums text-ink-muted",
+  // A quiet absolutely-positioned axis caption (length ceiling, doc-position
+  // bounds) matching the DayAxis aesthetic. `pointer-events-none` so it never
+  // intercepts a scrub.
+  "dr-sum-axis":
+    "pointer-events-none absolute z-[1] whitespace-nowrap text-[0.6875rem] text-ink-muted",
+
   // ── Progress (determinate + indeterminate + error) ────────────────────────
   "progress-track": "h-2 w-full overflow-hidden rounded-full bg-sunken",
   "progress-fill": "h-full rounded-full bg-brand transition-[width]",

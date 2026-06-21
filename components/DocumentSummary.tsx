@@ -24,10 +24,25 @@
 // `<For>`/`<Show>` over `.map()`/ternaries; components run once, signals read in JSX.
 
 import type { Component } from "solid-js";
-import { createMemo, For, Show } from "solid-js";
+import { createMemo, createSignal, For, Show } from "solid-js";
 import { IconChart } from "@/components/icons";
 import type { DecodedRevision } from "@/lib/domain/model";
-import { formatDayLabel, formatDuration, strings } from "@/lib/i18n/strings";
+import {
+  formatDayLabel,
+  formatDuration,
+  formatHourLabel,
+  formatSummaryStamp,
+  strings,
+  summaryCharCount,
+  summaryEditPosition,
+} from "@/lib/i18n/strings";
+import {
+  buildDayTicks,
+  buildHourTicks,
+  isShortSpan,
+  nearestPoint,
+  startOfDay,
+} from "@/lib/summary/axis";
 import { deriveDocumentSummary, type SummaryPoint } from "@/lib/summary/derive";
 
 export interface DocumentSummaryProps {
@@ -42,49 +57,30 @@ const PAD_BOTTOM = 16;
 const ACTIVITY_VB_H = 200;
 const POSITION_VB_H = 360;
 const MIN_LABEL_GAP_PCT = 7;
-const ONE_DAY_MS = 86_400_000;
 
 const LENGTH_FILL = "var(--dr-brand-soft)";
 const LENGTH_LINE = "var(--dr-brand)";
 const ACTIVITY_FILL = "var(--dr-accent-strong)";
 const POSITION_FILL = "var(--dr-ink-muted)";
 const GRID_STROKE = "var(--dr-hairline)";
+// Hover-scrub feedback: a crisp neutral playline mirrored across both charts, and
+// the lifted ring color for the emphasized data point under the cursor.
+const SCRUB_STROKE = "var(--dr-ink)";
+const SCRUB_RING = "var(--dr-surface)";
+const POSITION_LINE = "var(--dr-ink)";
 
 interface DayTick {
   readonly t: number;
   /** Left offset as a percent of the container width (matches the SVG x mapping). */
   readonly pct: number;
-}
-
-/** Day-boundary ticks (local midnights) spanning [start, end], thinned to a
- *  readable count. The first tick is the midnight of the start day (≤ start), so
- *  it anchors the leftmost label. Uses local time deliberately — a teacher reads
- *  "Sat, Oct 18" in their own timezone. */
-function buildDayTicks(start: number, end: number): readonly number[] {
-  if (!(end > start)) return [];
-  const ticks: number[] = [];
-  const cursor = new Date(start);
-  cursor.setHours(0, 0, 0, 0);
-  // Stride by whole days, but step in multi-day strides for pathological spans so
-  // the axis still reaches `end` within a bounded tick count (spaceTicks thins the
-  // result for display anyway). For spans under ~800 days the stride is 1 (every
-  // day); beyond that it widens just enough to keep the iteration count capped.
-  const totalDays = Math.ceil((end - cursor.getTime()) / ONE_DAY_MS) + 1;
-  const stepDays = Math.max(1, Math.ceil(totalDays / 800));
-  for (let i = 0; i < totalDays; i += stepDays) {
-    const ms = cursor.getTime();
-    if (ms > end) break;
-    ticks.push(ms);
-    cursor.setDate(cursor.getDate() + stepDays);
-    cursor.setHours(0, 0, 0, 0);
-  }
-  return ticks;
+  /** The precomputed axis label (a day or, for short spans, a clock time). */
+  readonly label: string;
 }
 
 /** Keep day-axis ticks from overprinting: drop any whose label would sit within
  *  `MIN_LABEL_GAP_PCT` of the previous kept one (the first is always kept). */
-function spaceTicks(ticks: readonly DayTick[]): DayTick[] {
-  const out: DayTick[] = [];
+function spaceTicks<T extends { readonly pct: number }>(ticks: readonly T[]): T[] {
+  const out: T[] = [];
   for (const tick of ticks) {
     const last = out[out.length - 1];
     if (last === undefined || tick.pct - last.pct >= MIN_LABEL_GAP_PCT) {
@@ -156,18 +152,34 @@ const DocumentSummary: Component<DocumentSummaryProps> = (props) => {
     return PAD_X + ((t - s.startTime) / span) * (VB_W - 2 * PAD_X);
   };
 
+  // Day-boundary ticks normally; hour-boundary ticks for a short single-session
+  // span so the axis isn't one undivided band. Labels are precomputed — a granular
+  // tick shows a clock time and re-shows the calendar day whenever it rolls over.
   const dayTicks = createMemo<readonly DayTick[]>(() => {
     const s = summary();
     if (!s.available) return [];
-    const all = buildDayTicks(s.startTime, s.endTime).map((t) => ({
-      t,
-      pct: (xLogical(t) / VB_W) * 100,
-    }));
+    const pctOf = (t: number): number => (xLogical(t) / VB_W) * 100;
+
+    if (isShortSpan(s.startTime, s.endTime)) {
+      const raw = buildHourTicks(s.startTime, s.endTime).map((t) => ({ t, pct: pctOf(t) }));
+      const spaced = spaceTicks(raw.filter((tick) => tick.pct >= 1.5 && tick.pct <= 99.5));
+      const base = spaced.length > 0 ? spaced : [{ t: s.startTime, pct: 0 }];
+      let prevDay = Number.NaN;
+      return base.map((tick, i) => {
+        const day = startOfDay(tick.t);
+        const withDate = i === 0 || day !== prevDay;
+        prevDay = day;
+        return { t: tick.t, pct: tick.pct, label: formatHourLabel(tick.t, withDate) };
+      });
+    }
+
+    const all = buildDayTicks(s.startTime, s.endTime).map((t) => ({ t, pct: pctOf(t) }));
     // Drop the start-day midnight (a sliver clamped to the left edge) so its label
     // never overprints the first full day; the partial first day reads unlabeled,
     // as in the reference. Fall back to the start day for a sub-day span.
     const spaced = spaceTicks(all.filter((tick) => tick.pct >= 1.5));
-    return spaced.length > 0 ? spaced : [{ t: s.startTime, pct: 0 }];
+    const base = spaced.length > 0 ? spaced : [{ t: s.startTime, pct: 0 }];
+    return base.map((tick) => ({ t: tick.t, pct: tick.pct, label: formatDayLabel(tick.t) }));
   });
 
   // ── Activity chart geometry (length area + activity strip) ──────────────────
@@ -209,6 +221,33 @@ const DocumentSummary: Component<DocumentSummaryProps> = (props) => {
   const scatter = createMemo<readonly SummaryPoint[]>(() =>
     summary().series.filter((p) => p.pos >= 0),
   );
+
+  // ── Shared hover scrub (cross-chart correlation) ────────────────────────────
+  // One signal feeds the scrub line on BOTH charts; `hoverChart` only decides
+  // which chart floats the tooltip. The pointer handlers live on the chart
+  // wrappers (not per-point), so the cost is independent of the revision count —
+  // even a few thousand revisions stay one cheap binary search per pointer move.
+  const [hover, setHover] = createSignal<SummaryPoint | null>(null);
+  const [hoverChart, setHoverChart] = createSignal<"activity" | "position" | null>(null);
+  const hoverPct = (): number => {
+    const p = hover();
+    return p === null ? 0 : (xLogical(p.t) / VB_W) * 100;
+  };
+  const moveHover = (chart: "activity" | "position", clientX: number, rect: DOMRect): void => {
+    const s = summary();
+    if (!s.available || rect.width <= 0) return;
+    const fx = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+    const targetT = s.startTime + fx * (s.endTime - s.startTime);
+    const point = nearestPoint(s.series, targetT);
+    if (point !== null) {
+      setHover(point);
+      setHoverChart(chart);
+    }
+  };
+  const clearHover = (): void => {
+    setHover(null);
+    setHoverChart(null);
+  };
 
   return (
     <Show
@@ -254,51 +293,102 @@ const DocumentSummary: Component<DocumentSummaryProps> = (props) => {
             </div>
           </div>
           <div class="relative">
-            <svg
-              role="img"
-              aria-label={strings.summary.activityAria}
-              viewBox={`0 0 ${VB_W} ${ACTIVITY_VB_H}`}
-              style={{ width: "100%", height: "auto", display: "block" }}
+            <div
+              class="relative"
+              data-chart="activity"
+              onPointerMove={(e) =>
+                moveHover("activity", e.clientX, e.currentTarget.getBoundingClientRect())
+              }
+              onPointerLeave={clearHover}
             >
-              <For each={dayTicks()}>
-                {(tick) => (
-                  <Show when={tick.pct > 0.5 && tick.pct < 99.5}>
-                    <line
-                      x1={xLogical(tick.t)}
-                      y1={PAD_TOP}
-                      x2={xLogical(tick.t)}
-                      y2={activityBaseY}
-                      style={{
-                        stroke: GRID_STROKE,
-                        "stroke-width": "1",
-                        "stroke-dasharray": "2 5",
-                      }}
+              <svg
+                role="img"
+                aria-label={strings.summary.activityAria}
+                viewBox={`0 0 ${VB_W} ${ACTIVITY_VB_H}`}
+                style={{ width: "100%", height: "auto", display: "block" }}
+              >
+                <For each={dayTicks()}>
+                  {(tick) => (
+                    <Show when={tick.pct > 0.5 && tick.pct < 99.5}>
+                      <line
+                        x1={xLogical(tick.t)}
+                        y1={PAD_TOP}
+                        x2={xLogical(tick.t)}
+                        y2={activityBaseY}
+                        style={{
+                          stroke: GRID_STROKE,
+                          "stroke-width": "1",
+                          "stroke-dasharray": "2 5",
+                        }}
+                      />
+                    </Show>
+                  )}
+                </For>
+                <path d={areaPath()} style={{ fill: LENGTH_FILL, "fill-opacity": "0.9" }} />
+                <path
+                  d={topLinePath()}
+                  style={{
+                    fill: "none",
+                    stroke: LENGTH_LINE,
+                    "stroke-width": "1.5",
+                    "stroke-opacity": "0.5",
+                    "stroke-linejoin": "round",
+                  }}
+                />
+                <For each={summary().series}>
+                  {(p) => (
+                    <circle
+                      cx={xLogical(p.t)}
+                      cy={activityDotY}
+                      r="2.8"
+                      style={{ fill: ACTIVITY_FILL, "fill-opacity": "0.7" }}
                     />
-                  </Show>
+                  )}
+                </For>
+                <Show when={hover()}>
+                  {(point) => (
+                    <>
+                      <line
+                        data-scrub
+                        x1={xLogical(point().t)}
+                        y1={PAD_TOP}
+                        x2={xLogical(point().t)}
+                        y2={activityBaseY}
+                        style={{
+                          stroke: SCRUB_STROKE,
+                          "stroke-width": "1.2",
+                          "stroke-opacity": "0.4",
+                        }}
+                      />
+                      <circle
+                        cx={xLogical(point().t)}
+                        cy={lengthY(point().length)}
+                        r="3.6"
+                        style={{ fill: LENGTH_LINE, stroke: SCRUB_RING, "stroke-width": "1.5" }}
+                      />
+                    </>
+                  )}
+                </Show>
+              </svg>
+              {/* Y-axis ceiling: the document's peak length, anchored to the top. */}
+              <span class="dr-sum-axis" style={{ top: "0.25rem", left: "0.5rem" }}>
+                {summaryCharCount(summary().maxLength)}
+              </span>
+              <Show when={hoverChart() === "activity" && hover()}>
+                {(point) => (
+                  <div
+                    class="dr-sum-tip"
+                    style={{ left: `${hoverPct()}%`, transform: labelTransform(hoverPct()) }}
+                  >
+                    <span class="dr-sum-tip-title">{formatSummaryStamp(point().t)}</span>
+                    <span class="dr-sum-tip-detail">{summaryCharCount(point().length)}</span>
+                    <Show when={point().pos >= 0}>
+                      <span class="dr-sum-tip-detail">{summaryEditPosition(point().pos)}</span>
+                    </Show>
+                  </div>
                 )}
-              </For>
-              <path d={areaPath()} style={{ fill: LENGTH_FILL, "fill-opacity": "0.9" }} />
-              <path
-                d={topLinePath()}
-                style={{
-                  fill: "none",
-                  stroke: LENGTH_LINE,
-                  "stroke-width": "1.5",
-                  "stroke-opacity": "0.5",
-                  "stroke-linejoin": "round",
-                }}
-              />
-              <For each={summary().series}>
-                {(p) => (
-                  <circle
-                    cx={xLogical(p.t)}
-                    cy={activityDotY}
-                    r="2.8"
-                    style={{ fill: ACTIVITY_FILL, "fill-opacity": "0.7" }}
-                  />
-                )}
-              </For>
-            </svg>
+              </Show>
+            </div>
             <DayAxis ticks={dayTicks()} />
           </div>
         </section>
@@ -312,40 +402,96 @@ const DocumentSummary: Component<DocumentSummaryProps> = (props) => {
             </div>
           </div>
           <div class="relative">
-            <svg
-              role="img"
-              aria-label={strings.summary.positionAria}
-              viewBox={`0 0 ${VB_W} ${POSITION_VB_H}`}
-              style={{ width: "100%", height: "auto", display: "block" }}
+            <div
+              class="relative"
+              data-chart="position"
+              onPointerMove={(e) =>
+                moveHover("position", e.clientX, e.currentTarget.getBoundingClientRect())
+              }
+              onPointerLeave={clearHover}
             >
-              <For each={dayTicks()}>
-                {(tick) => (
-                  <Show when={tick.pct > 0.5 && tick.pct < 99.5}>
-                    <line
-                      x1={xLogical(tick.t)}
-                      y1={PAD_TOP}
-                      x2={xLogical(tick.t)}
-                      y2={POSITION_VB_H - PAD_BOTTOM}
-                      style={{
-                        stroke: GRID_STROKE,
-                        "stroke-width": "1",
-                        "stroke-dasharray": "2 5",
-                      }}
+              <svg
+                role="img"
+                aria-label={strings.summary.positionAria}
+                viewBox={`0 0 ${VB_W} ${POSITION_VB_H}`}
+                style={{ width: "100%", height: "auto", display: "block" }}
+              >
+                <For each={dayTicks()}>
+                  {(tick) => (
+                    <Show when={tick.pct > 0.5 && tick.pct < 99.5}>
+                      <line
+                        x1={xLogical(tick.t)}
+                        y1={PAD_TOP}
+                        x2={xLogical(tick.t)}
+                        y2={POSITION_VB_H - PAD_BOTTOM}
+                        style={{
+                          stroke: GRID_STROKE,
+                          "stroke-width": "1",
+                          "stroke-dasharray": "2 5",
+                        }}
+                      />
+                    </Show>
+                  )}
+                </For>
+                <For each={scatter()}>
+                  {(p) => (
+                    <circle
+                      cx={xLogical(p.t)}
+                      cy={positionY(p.pos)}
+                      r="2.8"
+                      style={{ fill: POSITION_FILL, "fill-opacity": "0.5" }}
                     />
-                  </Show>
+                  )}
+                </For>
+                <Show when={hover()}>
+                  {(point) => (
+                    <>
+                      <line
+                        data-scrub
+                        x1={xLogical(point().t)}
+                        y1={PAD_TOP}
+                        x2={xLogical(point().t)}
+                        y2={POSITION_VB_H - PAD_BOTTOM}
+                        style={{
+                          stroke: SCRUB_STROKE,
+                          "stroke-width": "1.2",
+                          "stroke-opacity": "0.4",
+                        }}
+                      />
+                      <Show when={point().pos >= 0}>
+                        <circle
+                          cx={xLogical(point().t)}
+                          cy={positionY(point().pos)}
+                          r="3.6"
+                          style={{ fill: POSITION_LINE, stroke: SCRUB_RING, "stroke-width": "1.5" }}
+                        />
+                      </Show>
+                    </>
+                  )}
+                </Show>
+              </svg>
+              {/* Y-axis orientation: top = document start, bottom = document end. */}
+              <span class="dr-sum-axis" style={{ top: "0.25rem", left: "0.5rem" }}>
+                {strings.summary.axisDocStart}
+              </span>
+              <span class="dr-sum-axis" style={{ bottom: "0.25rem", left: "0.5rem" }}>
+                {strings.summary.axisDocEnd}
+              </span>
+              <Show when={hoverChart() === "position" && hover()}>
+                {(point) => (
+                  <div
+                    class="dr-sum-tip"
+                    style={{ left: `${hoverPct()}%`, transform: labelTransform(hoverPct()) }}
+                  >
+                    <span class="dr-sum-tip-title">{formatSummaryStamp(point().t)}</span>
+                    <span class="dr-sum-tip-detail">{summaryCharCount(point().length)}</span>
+                    <Show when={point().pos >= 0}>
+                      <span class="dr-sum-tip-detail">{summaryEditPosition(point().pos)}</span>
+                    </Show>
+                  </div>
                 )}
-              </For>
-              <For each={scatter()}>
-                {(p) => (
-                  <circle
-                    cx={xLogical(p.t)}
-                    cy={positionY(p.pos)}
-                    r="2.8"
-                    style={{ fill: POSITION_FILL, "fill-opacity": "0.5" }}
-                  />
-                )}
-              </For>
-            </svg>
+              </Show>
+            </div>
             <DayAxis ticks={dayTicks()} />
           </div>
         </section>
@@ -354,12 +500,14 @@ const DocumentSummary: Component<DocumentSummaryProps> = (props) => {
   );
 };
 
-/** The shared day-boundary label row beneath a chart, aligned to its gridlines. */
+/** The shared axis label row beneath a chart, aligned to its gridlines. Labels are
+ *  precomputed per tick (a calendar day, or a clock time for short-span docs). */
 const DayAxis: Component<{ readonly ticks: readonly DayTick[] }> = (props) => (
   <div class="relative" style={{ height: "1.25rem", "margin-top": "0.25rem", overflow: "hidden" }}>
     <For each={props.ticks}>
       {(tick) => (
         <span
+          data-axis-tick
           class="text-ink-muted"
           style={{
             position: "absolute",
@@ -369,7 +517,7 @@ const DayAxis: Component<{ readonly ticks: readonly DayTick[] }> = (props) => (
             "font-size": "0.6875rem",
           }}
         >
-          {formatDayLabel(tick.t)}
+          {tick.label}
         </span>
       )}
     </For>

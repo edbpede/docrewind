@@ -11,11 +11,16 @@ import {
   authorActiveRange,
   authorLabel,
   errorTitle,
+  formatDayLabel,
+  formatHourLabel,
+  formatSummaryStamp,
   opaqueLabel,
   percentLabel,
   revisionOf,
   speedLabel,
   strings,
+  summaryCharCount,
+  summaryEditPosition,
 } from "./strings";
 
 const ALL_STRUCTURES: readonly OpaqueStructure[] = [
@@ -82,5 +87,43 @@ describe("strings catalog", () => {
     expect(authorActiveRange(t0, t0)).not.toContain("–");
     const ranged = authorActiveRange(t0, t0 + 90 * 60 * 1000);
     expect(ranged).toContain("–");
+  });
+
+  it("adds summary axis context labels", () => {
+    expect(strings.summary.axisDocStart).toBe("Start of doc");
+    expect(strings.summary.axisDocEnd).toBe("End of doc");
+  });
+
+  it("formats a compact character count and clamps to zero", () => {
+    expect(summaryCharCount(0)).toBe("0 chars");
+    expect(summaryCharCount(-12)).toBe("0 chars");
+    expect(summaryCharCount(5240)).toContain("chars");
+    expect(summaryCharCount(5240).replace(/\D/g, "")).toBe("5240");
+  });
+
+  it("formats a relative edit position, clamped to [0, 100]%", () => {
+    expect(summaryEditPosition(0)).toBe("At 0% of document");
+    expect(summaryEditPosition(0.45)).toBe("At 45% of document");
+    expect(summaryEditPosition(1)).toBe("At 100% of document");
+    expect(summaryEditPosition(1.5)).toBe("At 100% of document");
+    expect(summaryEditPosition(-0.2)).toBe("At 0% of document");
+  });
+
+  it("formats an hour-axis label, prefixing the day only when asked", () => {
+    const t = Date.UTC(2026, 5, 21, 9, 0, 0);
+    const dayLabel = formatDayLabel(t);
+    const timeOnly = formatHourLabel(t, false);
+    const withDate = formatHourLabel(t, true);
+    expect(timeOnly.length).toBeGreaterThan(0);
+    expect(timeOnly).not.toContain(dayLabel);
+    expect(withDate).toBe(`${dayLabel}, ${timeOnly}`);
+    // Out-of-range stamps are rendered empty (Intl would otherwise throw).
+    expect(formatHourLabel(9e15)).toBe("");
+  });
+
+  it("formats a granular hover stamp and guards out-of-range input", () => {
+    const t = Date.UTC(2026, 5, 21, 14, 45, 0);
+    expect(formatSummaryStamp(t).length).toBeGreaterThan(0);
+    expect(formatSummaryStamp(9e15)).toBe("");
   });
 });
