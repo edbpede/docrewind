@@ -56,7 +56,7 @@ function inheritedMarksAt(chars: readonly CharElement[], at: number): TextMarks 
     if (el === undefined || el.deleteRevision !== null) {
       continue;
     }
-    return el.kind === "char" ? el.marks : undefined;
+    return el.kind === "char" && el.char !== "\n" ? el.marks : undefined;
   }
   return undefined;
 }
