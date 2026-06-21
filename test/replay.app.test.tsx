@@ -7,10 +7,11 @@ import { createMemoryStore } from "@/lib/db.memory";
 import { PARSER_VERSION } from "@/lib/decoder/version";
 import { asDocId, asRevisionId } from "@/lib/domain/ids";
 import type { DecodedRevision, RawPayload } from "@/lib/domain/model";
+import { strings } from "@/lib/i18n/strings";
 import type { RetrievalAck } from "@/lib/messaging";
 import { createModel } from "@/lib/reconstruction/model";
 import { retrievalError } from "@/lib/retrieval/errors";
-import { keepRawData } from "@/lib/settings";
+import { keepRawData, theme } from "@/lib/settings";
 
 const { sendMessageMock } = vi.hoisted(() => ({
   sendMessageMock: vi.fn(),
@@ -441,6 +442,33 @@ describe("Replay App run gating", () => {
     expect(freshPublicationIds).toHaveLength(1);
     expect(freshPublicationIds[0]).not.toBe("1");
     expect(await nextStore.getReplayPublication(DOC, freshPublicationIds[0] ?? "")).not.toBeNull();
+  });
+
+  it("offers the theme selector on the reconstructed replay surface", async () => {
+    sendMessageMock.mockResolvedValue({ ok: true });
+    installFakeWorker((request) => ({
+      kind: "done",
+      docId: request.docId,
+      runId: request.runId,
+      revisionCount: 1,
+      revisions: [decodedRevision()],
+      snapshots: [{ appliedCount: 0, model: createModel() }],
+      timeline: [],
+    }));
+    const store = createMemoryStore();
+
+    render(() => <App store={store} />);
+    await vi.waitFor(() => expect(screen.getByText(strings.app.optionsLink)).toBeTruthy());
+
+    expect(screen.getByRole("button", { name: strings.options.themeSystem })).toBeTruthy();
+    expect(screen.getByRole("button", { name: strings.options.themeLight })).toBeTruthy();
+    const dark = screen.getByRole("button", { name: strings.options.themeDark });
+
+    fireEvent.click(dark);
+    expect(dark.className).toContain("seg-item-active");
+    await vi.waitFor(async () => {
+      expect(await theme.getValue()).toBe("dark");
+    });
   });
 
   it("re-reads the current run publication even if another session changes the active pointer", async () => {

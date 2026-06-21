@@ -30,6 +30,7 @@ import PlaybackControls from "@/components/PlaybackControls";
 import PrivacyBanner from "@/components/PrivacyBanner";
 import ProgressView, { type ProgressPhase } from "@/components/ProgressView";
 import SummaryInsights from "@/components/SummaryInsights";
+import ThemeControl from "@/components/ThemeControl";
 import Timeline, { type TimelineMarker } from "@/components/Timeline";
 import TimelineLegend from "@/components/TimelineLegend";
 import { useThemeSync } from "@/components/theme-sync";
@@ -952,7 +953,7 @@ const ReplaySurface: Component<{
                       identities={identities() ?? {}}
                       onActiveAuthorChange={setActiveAuthorKey}
                     />
-                    <footer class="flex pt-1">
+                    <footer class="flex flex-wrap items-center justify-between gap-3 pt-1">
                       <a
                         class="dr-link inline-flex items-center gap-1.5"
                         href={`options.html?doc=${encodeURIComponent(props.docId)}`}
@@ -960,6 +961,7 @@ const ReplaySurface: Component<{
                         <IconSettings size={16} />
                         {strings.app.optionsLink}
                       </a>
+                      <ThemeControl bare />
                     </footer>
                   </main>
                 )}
