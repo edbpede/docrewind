@@ -52,11 +52,18 @@ import {
   IconList,
   IconTable,
 } from "@/components/icons";
+import type { TextMarks } from "@/lib/decoder/style-allowlist";
 import type { OpaqueStructure } from "@/lib/decoder/types";
 import { contributedBy, strings } from "@/lib/i18n/strings";
 import type { Block, BlockRun } from "@/lib/reconstruction/blocks";
 import type { Segment } from "@/lib/reconstruction/render";
 import { type CaretVisibility, caretVisibility, followScroll } from "@/lib/replay/follow";
+import {
+  blockMarkStyle,
+  listGlyphFor,
+  stripDisplayControlChars,
+  textMarkStyle,
+} from "@/lib/replay/style-css";
 
 /** A clear per-kind icon for an embedded non-text element (image, table, …) — far
  *  more legible than the old generic ▤ glyph. Called inside reactive JSX so it
@@ -219,15 +226,37 @@ const DocumentViewport: Component<DocumentViewportProps> = (props) => {
         ? highlightStyle(props.highlight?.color ?? ATTRIBUTION_FALLBACK, run().kind)
         : undefined;
     const describedBy = (): string | undefined => (highlighted() ? ATTR_DESC_ID : undefined);
-    // The paragraph mark ('\n') lives at the END of a block's last run; strip ONE
-    // for display, since paragraph separation comes from the block box, not the mark.
-    const shown = (text: string): string => (isLast() ? text.replace(/\n$/, "") : text);
+    // Merge a run's character marks (bold/italic/font/size) with any author-
+    // highlight style. `includeDecoration` is false for suggested/marked runs so an
+    // inline underline/strike never clobbers their kind-based affordance class.
+    const runStyle = (
+      marks: TextMarks | undefined,
+      includeDecoration: boolean,
+    ): JSX.CSSProperties | undefined => {
+      const markStyle = textMarkStyle(marks, includeDecoration);
+      const attr = attrStyle();
+      if (Object.keys(markStyle).length === 0 && attr === undefined) {
+        return undefined;
+      }
+      return { ...markStyle, ...attr } as JSX.CSSProperties;
+    };
+    // Strip C0 control chars (table/structural delimiters that ride in the stream)
+    // for display, then drop the ONE trailing paragraph-mark '\n' on a block's last
+    // run — paragraph separation comes from the block box, not the mark.
+    const shown = (text: string): string => {
+      const clean = stripDisplayControlChars(text);
+      return isLast() ? clean.replace(/\n$/, "") : clean;
+    };
     return (
       <>
         <Switch>
           <Match when={asKind(run(), "accepted-text")}>
             {(seg) => (
-              <span class="doc-accepted" style={attrStyle()} aria-describedby={describedBy()}>
+              <span
+                class="doc-accepted"
+                style={runStyle(seg().marks, true)}
+                aria-describedby={describedBy()}
+              >
                 {shown(seg().text)}
               </span>
             )}
@@ -237,7 +266,7 @@ const DocumentViewport: Component<DocumentViewportProps> = (props) => {
               <span
                 class="doc-suggest"
                 data-doc-tip={strings.viewport.suggestedInsert}
-                style={attrStyle()}
+                style={runStyle(seg().marks, false)}
                 aria-describedby={describedBy()}
               >
                 <span class="sr-only">{strings.viewport.suggestedInsert}: </span>
@@ -250,7 +279,7 @@ const DocumentViewport: Component<DocumentViewportProps> = (props) => {
               <span
                 class="doc-strike"
                 data-doc-tip={strings.viewport.markedForDeletion}
-                style={attrStyle()}
+                style={runStyle(seg().marks, false)}
                 aria-describedby={describedBy()}
               >
                 <span class="sr-only">{strings.viewport.markedForDeletion}: </span>
@@ -589,7 +618,14 @@ const DocumentViewport: Component<DocumentViewportProps> = (props) => {
                   </div>
                 </Match>
                 <Match when={block().kind === "paragraph"}>
-                  <p class="doc-block">
+                  <p class="doc-block" style={blockMarkStyle(block().marks)}>
+                    <Show when={block().list} keyed>
+                      {(list) => (
+                        <span class="doc-list-bullet" aria-hidden="true">
+                          {listGlyphFor(list)}&nbsp;
+                        </span>
+                      )}
+                    </Show>
                     <Index each={block().runs}>
                       {(run, index) => renderRun(run, () => index === block().runs.length - 1)}
                     </Index>

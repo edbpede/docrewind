@@ -24,6 +24,7 @@ import {
   unsafeAsRevisionId,
 } from "../domain/ids";
 import type { DecodedRevision } from "../domain/model";
+import { extractListMarks, extractParagraphMarks, extractTextMarks } from "./style-allowlist";
 import type { OpaqueStructure, Operation, UnknownOp } from "./types";
 
 const OPAQUE_STRUCTURES: ReadonlySet<string> = new Set<OpaqueStructure>([
@@ -172,6 +173,53 @@ function decodeOperation(raw: unknown, revisionId: RevisionId): Operation {
         position,
         revisionId,
       };
+    }
+    case "as":
+    case "astss": {
+      // ApplyStyle. `sm` is opaque; route it through the closed-output allowlist
+      // (R5) so only privacy-safe marks reach the model. Paragraph style sits on
+      // the paragraph-mark `\n` (si==ei); text style spans a run; list membership
+      // also rides the `\n`. Table / document / heading-stylesheet scopes are not
+      // modeled yet — they isolate as UnknownOp.
+      const st = asString(field(raw, "st"));
+      const si = asPositiveInt(field(raw, "si"));
+      const ei = asPositiveInt(field(raw, "ei"));
+      const sm = field(raw, "sm");
+      if (st === undefined || si === undefined || ei === undefined || si > ei || !isRecord(sm)) {
+        return unknownOp(raw, ty, revisionId);
+      }
+      const suggested = ty === "astss";
+      // A well-formed paragraph/text style op ALWAYS produces an ApplyStyle, even
+      // when nothing allowlisted is set: each op fully RESTATES its scope's style,
+      // so empty marks mean "revert to default" and must REPLACE (clear) any prior
+      // marks rather than degrade to UnknownOp (which would strand stale state).
+      if (st === "paragraph") {
+        return {
+          ty: "as",
+          scope: "paragraph",
+          si,
+          ei,
+          suggested,
+          paragraph: extractParagraphMarks(sm) ?? {},
+        };
+      }
+      if (st === "text") {
+        return { ty: "as", scope: "text", si, ei, suggested, text: extractTextMarks(sm) ?? {} };
+      }
+      if (st === "list") {
+        // ls_id null/absent => removed from list => empty op => clears membership.
+        const list = extractListMarks(sm);
+        return { ty: "as", scope: "list", si, ei, suggested, ...(list !== null ? { list } : {}) };
+      }
+      return unknownOp(raw, ty, revisionId);
+    }
+    case "te": {
+      // Place an embedded entity (image/object) at the live position `spi`.
+      const spi = asPositiveInt(field(raw, "spi"));
+      if (spi === undefined) {
+        return unknownOp(raw, ty, revisionId);
+      }
+      return { ty: "te", spi };
     }
     default:
       // Open-world: an unrecognized wire `ty` is expected — isolate + continue.

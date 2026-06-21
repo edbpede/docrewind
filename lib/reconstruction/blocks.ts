@@ -20,6 +20,7 @@
 // their '\n') because struck text is excluded from currentText, so a
 // suggestion-deleted paragraph mark must not forge a real paragraph boundary.
 
+import type { ListMark, ParagraphMarks } from "../decoder/style-allowlist";
 import type { DocumentModel } from "./model";
 import { type Segment, segmentsAt } from "./render";
 
@@ -32,10 +33,54 @@ export type BlockKind = "paragraph" | "embed";
  *  latch, author highlight) without depending on array position. */
 export type BlockRun = Segment & { readonly seq: number };
 
-/** A rendered block: a paragraph of text runs, or a single opaque embed. */
+/** A rendered block: a paragraph of text runs, or a single opaque embed. A
+ *  paragraph block carries its resolved `marks` (heading / alignment / spacing,
+ *  read from the terminating paragraph-mark `\n` — or the EndOfBody sentinel for
+ *  the final paragraph). Absent `marks` = the document default. BlockKind stays
+ *  `paragraph`/`embed`; heading vs. body is a property (`marks.headingLevel`), not
+ *  a separate kind, so a heading can still be aligned, indented, etc. */
 export interface Block {
   readonly kind: BlockKind;
   readonly runs: readonly BlockRun[];
+  readonly marks?: ParagraphMarks;
+  readonly list?: ListMark;
+}
+
+/** The resolved style of one paragraph: its block marks and list membership. */
+interface ParagraphStyle {
+  readonly block?: ParagraphMarks;
+  readonly list?: ListMark;
+}
+
+/**
+ * Collect the resolved paragraph-style marks in document order: one per VISIBLE
+ * paragraph-mark `\n` (a live, non-struck char), then one for the EndOfBody
+ * sentinel (the final paragraph's mark). This mirrors `blocksAt`'s paragraph
+ * emission exactly — the Nth real paragraph block corresponds to the Nth entry —
+ * so styles attach without depending on segment coalescing. Struck `\n` are
+ * skipped (they don't split a paragraph); the post-EOB footnote region is ignored.
+ */
+function collectParagraphMarks(model: DocumentModel): readonly ParagraphStyle[] {
+  const styles: ParagraphStyle[] = [];
+  const push = (block: ParagraphMarks | undefined, list: ListMark | undefined): void => {
+    styles.push({
+      ...(block !== undefined ? { block } : {}),
+      ...(list !== undefined ? { list } : {}),
+    });
+  };
+  for (const el of model.chars) {
+    if (el.deleteRevision !== null) {
+      continue;
+    }
+    if (el.kind === "eob") {
+      push(el.block, el.list);
+      break;
+    }
+    if (el.kind === "char" && el.char === "\n" && el.suggestionState !== "marked-for-deletion") {
+      push(el.block, el.list);
+    }
+  }
+  return styles;
 }
 
 /**
@@ -65,16 +110,32 @@ export function blocksAt(model: DocumentModel): readonly Block[] {
   // embed/EOF after non-newline content does not invent a spurious empty block.
   let openParagraphAfterNewline = false;
 
-  const emit = (kind: BlockKind): void => {
-    blocks.push({ kind, runs });
+  // Paragraph styles in document order; a REAL/final paragraph emit consumes the
+  // next one. Embed-split pseudo-paragraphs (a leftover run before an embed) do
+  // NOT consume — they are a fragment of a larger paragraph, not a boundary.
+  const paragraphMarks = collectParagraphMarks(model);
+  let paragraphIndex = 0;
+
+  const emitParagraph = (real: boolean): void => {
+    const style = real ? paragraphMarks[paragraphIndex++] : undefined;
+    blocks.push({
+      kind: "paragraph",
+      runs,
+      ...(style?.block !== undefined ? { marks: style.block } : {}),
+      ...(style?.list !== undefined ? { list: style.list } : {}),
+    });
+    runs = [];
+  };
+  const emitEmbed = (): void => {
+    blocks.push({ kind: "embed", runs });
     runs = [];
   };
 
   for (const segment of segmentsAt(model)) {
     if (segment.kind === "opaque-placeholder") {
-      if (runs.length > 0) emit("paragraph");
+      if (runs.length > 0) emitParagraph(false);
       runs.push({ ...segment, seq: seq++ });
-      emit("embed");
+      emitEmbed();
       openParagraphAfterNewline = false;
       continue;
     }
@@ -88,13 +149,13 @@ export function blocksAt(model: DocumentModel): readonly Block[] {
     for (const part of segment.text.split(/(?<=\n)/)) {
       runs.push({ ...segment, text: part, seq: seq++ });
       if (part.endsWith("\n")) {
-        emit("paragraph");
+        emitParagraph(true);
         openParagraphAfterNewline = true;
       } else {
         openParagraphAfterNewline = false;
       }
     }
   }
-  if (runs.length > 0 || openParagraphAfterNewline) emit("paragraph");
+  if (runs.length > 0 || openParagraphAfterNewline) emitParagraph(true);
   return blocks;
 }

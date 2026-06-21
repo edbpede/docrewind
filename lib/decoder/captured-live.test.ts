@@ -31,15 +31,23 @@ describe("captured live revisions/load — §24 (2026-06-12)", () => {
     expect(decoded[3]?.operations[0]).toEqual({ ty: "is", s: " Third one.", ibi: 38 });
   });
 
-  test("isolates the live `as` (ApplyStyle) ops via the open-world UnknownOp path", () => {
+  test("recognizes the paragraph-scope ApplyStyle and isolates unmodeled style scopes", () => {
     const decoded = decodeOperations(CAPTURED_SIMPLE_DOC.envelope);
     const mlti = decoded[0]?.operations[0];
     if (mlti?.ty !== "mlti") throw new Error("expected revision 1 to be mlti");
-    // Every style sub-op degrades to UnknownOp(opCode "as") — never aborts decode.
     expect(mlti.mts.length).toBeGreaterThan(0);
-    for (const sub of mlti.mts) {
-      expect(sub.ty).toBe("unknown");
-      if (sub.ty === "unknown") expect(sub.opCode).toBe("as");
+    // Paragraph/text style now decodes to a typed ApplyStyle; the document /
+    // headings / language scopes (and an out-of-range si) still isolate as
+    // UnknownOp(opCode "as") — decode never aborts on either path.
+    const recognized = mlti.mts.filter((s) => s.ty === "as");
+    const isolated = mlti.mts.filter((s) => s.ty === "unknown");
+    expect(recognized.length).toBeGreaterThan(0);
+    for (const s of recognized) {
+      if (s.ty === "as") expect(s.scope).toBe("paragraph");
+    }
+    expect(isolated.length).toBeGreaterThan(0);
+    for (const s of isolated) {
+      if (s.ty === "unknown") expect(s.opCode).toBe("as");
     }
   });
 

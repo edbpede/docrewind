@@ -11,6 +11,7 @@
 //
 // This is the mutable working model — fields are intentionally NOT readonly.
 
+import type { ListMark, ParagraphMarks, TextMarks } from "../decoder/style-allowlist";
 import type { OpaqueStructure } from "../decoder/types";
 import type { RevisionId } from "../domain/ids";
 import { PRE_HISTORY_REVISION } from "../domain/ids";
@@ -23,6 +24,16 @@ interface BaseElement {
   // null = live; a RevisionId = the revision that (accepted-)deleted it.
   deleteRevision: RevisionId | null;
   suggestionState: SuggestionState;
+  // Additive formatting (plan Phase 2/3). `block` rides on a paragraph-mark `\n`
+  // (and the EndOfBody sentinel for the final paragraph) — heading / alignment /
+  // spacing for the paragraph it terminates. `marks` rides on a text char — its
+  // bold / italic / font etc. Both are INTERNED, IMMUTABLE-BY-REPLACEMENT frozen
+  // objects (apply.ts assigns a fresh object, never mutates in place), so a shallow
+  // clone shares the reference safely. Time-travels for free with the element.
+  block?: ParagraphMarks;
+  marks?: TextMarks;
+  // List membership for the paragraph this `\n`/EOB terminates (Phase 4).
+  list?: ListMark;
 }
 
 /** A real text character (one Unicode code point). */
@@ -75,32 +86,34 @@ export function isEndOfBody(el: CharElement): el is BodyBoundary {
   return el.kind === "eob";
 }
 
-/** Deep-clone an element (primitive fields only — a shallow copy suffices). */
+/**
+ * Copy the BaseElement fields shared by every kind, INCLUDING the optional
+ * formatting (`block`/`marks`). These are interned, immutable-by-replacement
+ * objects, so sharing the reference across the clone is alias-safe (apply.ts never
+ * mutates a marks object in place). Optional fields are added only when present,
+ * keeping the clone exactOptionalPropertyTypes-clean.
+ */
+function cloneBase(el: CharElement): BaseElement {
+  const base: BaseElement = {
+    insertRevision: el.insertRevision,
+    deleteRevision: el.deleteRevision,
+    suggestionState: el.suggestionState,
+  };
+  if (el.block !== undefined) base.block = el.block;
+  if (el.marks !== undefined) base.marks = el.marks;
+  if (el.list !== undefined) base.list = el.list;
+  return base;
+}
+
+/** Clone an element (shallow — primitive fields plus interned formatting refs). */
 function cloneElement(el: CharElement): CharElement {
   switch (el.kind) {
     case "char":
-      return {
-        kind: "char",
-        char: el.char,
-        insertRevision: el.insertRevision,
-        deleteRevision: el.deleteRevision,
-        suggestionState: el.suggestionState,
-      };
+      return { kind: "char", char: el.char, ...cloneBase(el) };
     case "opaque":
-      return {
-        kind: "opaque",
-        structure: el.structure,
-        insertRevision: el.insertRevision,
-        deleteRevision: el.deleteRevision,
-        suggestionState: el.suggestionState,
-      };
+      return { kind: "opaque", structure: el.structure, ...cloneBase(el) };
     case "eob":
-      return {
-        kind: "eob",
-        insertRevision: el.insertRevision,
-        deleteRevision: el.deleteRevision,
-        suggestionState: el.suggestionState,
-      };
+      return { kind: "eob", ...cloneBase(el) };
     default: {
       const _exhaustive: never = el;
       return _exhaustive;

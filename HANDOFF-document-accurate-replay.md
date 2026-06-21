@@ -6,14 +6,71 @@
 
 # Handoff — Document-Accurate Replay Fidelity
 
-**Status:** Phase 0 + Phase 1 shipped on a branch. Phases 2–5 are **blocked** on a
-live Google Docs wire capture (see [The hard blocker](#the-hard-blocker)).
+**Status:** Phases 0–4 shipped. **The hard blocker is RESOLVED** — the Google Docs
+`revisions/load` style/entity wire format was reverse-engineered from a live
+authenticated capture (2026-06-21) and is now fully decoded. Phase 5 (paper toggle)
+is the only remaining phase (cosmetic, independent of the wire work). See
+[§0. Blocker resolved](#0-blocker-resolved-2026-06-21) below.
 
 **Branch:** `feat/replay-paragraph-blocks` (off `main`, pushed to `origin`)
 **Commit:** `93666f3` — `feat(viewport): render the reconstructed replay document as paragraph blocks`
 **PR (open when ready):** `https://github.com/edbpede/docrewind/pull/new/feat/replay-paragraph-blocks`
 
 ---
+
+## 0. Blocker resolved (2026-06-21) — the wire format, reverse-engineered
+
+Captured live (authenticated Helium over CDP) from the real test doc plus a
+purpose-built ground-truth doc (H1–H6, left/center/right/justify, bold, bullet +
+numbered lists, a 3×3 table). **All `sm`/`epm` key names are now known** and wired
+through a privacy-safe closed-output allowlist (`lib/decoder/style-allowlist.ts`).
+Full notes: the in-repo module docblocks + (machine-local) `/tmp/docrewind-wire-findings.md`.
+
+**Style op envelope:** `{ ty:"as"|"astss", st, si, ei, sm }`. Every property `X`
+carries an inherit flag `X_i` (`false`=explicitly set, `true`=inherited/ignore).
+
+| Scope (`st`) | Keys → meaning |
+|---|---|
+| `paragraph` (`ps_*`) | `ps_hd` 0=normal/1–6=H1–H6 · `ps_al` 0=left/1=center/2=right/3=justify · `ps_ls` line spacing · `ps_il`/`ps_ifl` indents |
+| `text` (`ts_*`) | `ts_bd` bold · `ts_it` italic · `ts_un` underline · `ts_st` strike · `ts_fs` size pt · `ts_ff` family (→ closed sans/serif/mono category) |
+| `list` (`ls_*`) | `ls_id` membership · `ls_nest` level |
+| `tbl` (`tbls_*`) | `tbls_cols.cv.opValue.length` = column count · `tbls_tblid` · `tbls_al` |
+
+**Entities:** `ae` defines `{ et:"inline"|"list", id, epm }`, `te` places at `spi`,
+`ue`/`sue` update. `epm.ee_eo` (image) carries `i_wth`/`i_ht` (dims, no pixels),
+`eo_type:0`. `epm.le_nb.nl_0..8` (list) carries `b_gt` (9=bullet, 10=decimal), `b_gs`
+glyph, `b_il` indent.
+
+**Corrections to this handoff's original assumptions:**
+1. **Open Question #3 RESOLVED:** paragraph style lives on the **terminating
+   paragraph-mark `\n`** (every paragraph `as` op is `si==ei` over the `\n`); the
+   final paragraph's mark is the EndOfBody sentinel. Marks therefore ride
+   `BaseElement` (the `\n`/EOB), not "the first char".
+2. **Tables are NOT `ae`/`te` entities.** They are `as st:"tbl"` style ops plus
+   structural **control characters** (U+0010–U+001C) inserted as text by an `is` op,
+   then per-cell `as st:"paragraph"`/`"text"` ops. Rows = cell-paragraphs ÷ columns.
+3. **`lib/fixtures/captured.ts` already carried REAL `sm` shapes** (document/headings
+   scopes); only `captured-rich.ts` had collapsed them. No new fixture was needed —
+   the decoder now recognizes the paragraph/text scopes those fixtures already held.
+
+**What shipped (Phases 2–4), verified end-to-end on the real doc:**
+- Phase 2 — paragraph marks: heading level (H1–H6 sized), alignment
+  (left/center/right/justify), line spacing, indent.
+- Phase 3 — char marks: bold/italic/underline/strikethrough, font size, font
+  category (system-stack only). Runs break on differing marks (`marksEqual`).
+- Phase 4 — `te` → opaque image placeholder; `st:list` → bullet glyph + level;
+  C0 control-char stripping at the viewport (table skeleton no longer renders as
+  garbage). New pure `lib/replay/style-css.ts` maps marks → CSS.
+- Live proof: rebuilt extension + authenticated replay of the ground-truth doc
+  renders H1–H6 (descending sizes), centered/right/justified paragraphs, bold, and
+  clean bullet lists — no control-char garbage. Bun pipeline run on the raw captured
+  wire reconstructs the same. Full gate green (compile · biome · purity · 363 bun ·
+  215 vitest · per-file coverage ≥85% · build · 5 e2e · manifest).
+
+**Still open (smaller, now unblocked):** Phase 5 paper toggle · ordered-list
+numbering (needs an `ae/list` entity registry to read `b_gt`; currently all lists
+render bullets) · full table-grid rendering (control chars are stripped, not yet
+drawn as a grid) · `ue`/`sue`/`ae` epm consumption (image aspect-ratio sizing).
 
 ## 1. Goal
 
