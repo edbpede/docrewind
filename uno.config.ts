@@ -329,18 +329,24 @@ const shortcuts = {
   "note-warning": "note-base bg-[var(--dr-warning-soft)] text-ink",
   "note-icon": "mt-px size-[1.15rem] shrink-0",
 
-  // ── The manuscript leaf: an elevated sheet with a graphite binding margin ──
-  // `before:` draws the ruled binding margin — pure decoration, graphite-neutral
-  // so it never collides with the strike/suggest hues. This is the one surface
-  // where the "manuscript" heritage reads literally.
+  // ── The document page: a centered US-Letter sheet on the canvas ────────────
+  // Mirrors a real Google Docs page so the replay reads 1:1 with the source: an
+  // 816px (8.5in @ 96dpi) white sheet, centered with `mx-auto`, lifted off the
+  // warm canvas by a hairline ring + soft shadow. Internal padding IS the page
+  // margin: a full 1in (96px) at desktop width, easing down on narrow viewports
+  // so the reading column never collapses. The sheet stays FLUID below 816px
+  // (responsive width — NOT a `scale` transform, which would distort the real
+  // `getBoundingClientRect`/scroll geometry the follow-caret measures). Square
+  // corners read as paper; `bg-surface` flips for dark via the token.
   "dr-leaf":
-    "relative rounded-2xl bg-surface px-6 py-9 sm:px-12 shadow-[var(--dr-shadow-lg)] " +
-    "before:pointer-events-none before:absolute before:inset-y-7 before:left-4 before:w-px " +
-    "before:bg-hairline-strong sm:before:left-9",
+    "relative mx-auto w-full max-w-[816px] bg-surface ring-1 ring-hairline " +
+    "shadow-[var(--dr-shadow-lg)] px-6 py-12 sm:px-12 sm:py-16 lg:px-[96px] lg:py-[96px]",
 
   // ── Document-rendering primitives (color ALWAYS + a non-color affordance) ──
+  // The reading column fills the page's margin box (no extra width cap) so lines
+  // wrap exactly where they do on the source page (PRD §9.6 spatial fidelity).
   "doc-column":
-    "mx-auto max-w-[68ch] whitespace-pre-wrap break-words font-serif text-[1.0625rem] leading-[1.8] text-ink",
+    "w-full whitespace-pre-wrap break-words font-serif text-[1.0625rem] leading-[1.8] text-ink",
   "doc-accepted": "text-ink",
   // Suggested insert: color + dotted underline + label affordance.
   "doc-suggest":

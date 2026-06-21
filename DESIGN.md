@@ -158,7 +158,10 @@ xl 22 (popup shell) · pill 9999 (chips, segmented control, toggles)`
 
 Soft, layered, low-opacity shadows (Apple-like). **Never** pair a 1px border with a
 wide drop shadow on the same element (the "ghost-card" tell): a surface is defined
-by background contrast + soft shadow, or by a hairline — pick one.
+by background contrast + soft shadow, or by a hairline — pick one. The lone
+sanctioned exception is the document leaf — a literal weighted page (`bg-surface`
+fill + a full page margin), not a hollow card, so a hairline ring + `lg` shadow
+read as paper lifted off the canvas, never as a ghost card.
 
 - `sm`: `0 1px 2px oklch(0 0 0/0.05)` — buttons, inputs
 - `md`: `0 2px 8px -2px oklch(0 0 0/0.08), 0 6px 16px -8px oklch(0 0 0/0.06)` — cards
@@ -192,9 +195,12 @@ it never blocks a task or gates content visibility.
   the active segment is a raised brand-tinted pill — clearly the selected one.
 - **Inputs**: `surface` fill, hairline, generous padding, brand focus ring; numeric
   budgets get a unit suffix and a friendly label, not "cap (MB)".
-- **The document leaf**: an elevated `surface` sheet with a soft `lg` shadow and a
-  quiet graphite binding margin; serif `doc` column ≤ 68ch. The one place the
-  "manuscript" reads literally.
+- **The document page**: a centered US-Letter sheet (816px / 8.5in @ 96dpi) on the
+  warm canvas, lifted by a hairline ring + soft `lg` shadow, with a full 1in (96px)
+  margin at desktop width that eases down on narrow viewports. The serif `doc`
+  column fills the page margin box so lines wrap as they do on the source page; the
+  sheet stays fluid below 816px (responsive width, not a scale transform). The one
+  place the "manuscript" reads literally.
 - **Timeline**: a soft channel (`surface-sunken`) with a brand fill that deepens
   toward the playhead; the playhead is a resting nib. Markers are friendly,
   legible seals carrying a glyph **with a visible legend** (the legend is shown, not
