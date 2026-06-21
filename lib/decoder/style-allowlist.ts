@@ -19,9 +19,12 @@
 //
 // PRIVACY BY ALLOWLIST (R5). The OUTPUT TYPES below are closed unions / numbers /
 // booleans only — never the raw `sm`, never verbatim document text, and NO open
-// string field at the type level. An unknown / malformed `sm` yields `null`, so the
-// decode funnel degrades the op to `UnknownOp` (opcode + byteLength only). The font
-// family is read internally only to bucket it into a closed generic CATEGORY
+// string field at the type level. A non-object `sm`, or one with nothing allowlisted
+// explicitly set, yields `null`; the decode funnel treats that as empty marks (`?? {}`),
+// preserving a full `ApplyStyle` whose empty scope means "revert to default" — only a
+// malformed structural shape or an unrecognized `st` scope degrades to `UnknownOp`
+// (opcode + byteLength only). The font family is read internally only to bucket it
+// into a closed generic CATEGORY
 // (sans/serif/mono) — the verbatim family name never leaves this module, and
 // DESIGN.md mandates system-fonts-only rendering anyway.
 
@@ -128,7 +131,8 @@ const ALIGNMENT_BY_CODE: Readonly<Record<number, Alignment>> = {
 
 /**
  * Extract closed paragraph marks from a raw `sm`, or `null` when nothing
- * allowlisted is explicitly set (the decode funnel then degrades to UnknownOp).
+ * allowlisted is explicitly set (the decode funnel then treats that as empty marks
+ * and keeps a full ApplyStyle meaning "revert to default", not UnknownOp).
  * Heading (ps_hd) is a named-style designation, authoritative whenever present and
  * not inherited; 0/normal and out-of-range values are omitted.
  */
@@ -175,7 +179,9 @@ export function extractParagraphMarks(sm: unknown): ParagraphMarks | null {
 
 /**
  * Extract closed character marks from a raw `sm`, or `null` when nothing
- * allowlisted is explicitly set. Booleans are recorded only when explicitly `true`.
+ * allowlisted is explicitly set (the decode funnel then treats that as empty marks
+ * and keeps a full ApplyStyle meaning "revert to default", not UnknownOp).
+ * Booleans are recorded only when explicitly `true`.
  */
 export function extractTextMarks(sm: unknown): TextMarks | null {
   if (!isRecord(sm)) return null;

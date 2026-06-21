@@ -92,6 +92,9 @@ export function blockMarkStyle(marks: ParagraphMarks | undefined): Record<string
   if (marks.indentStartPt !== undefined) {
     style["margin-inline-start"] = `${marks.indentStartPt}pt`;
   }
+  if (marks.indentFirstLinePt !== undefined) {
+    style["text-indent"] = `${marks.indentFirstLinePt}pt`;
+  }
   return style;
 }
 
@@ -114,5 +117,5 @@ export function listGlyphFor(list: ListMark): string {
  */
 export function stripDisplayControlChars(text: string): string {
   // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping C0 controls is the intent.
-  return text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "");
+  return text.replace(/[\u0000-\u0008\u000B-\u001F]/g, "");
 }

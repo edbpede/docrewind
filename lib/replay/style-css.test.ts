@@ -72,6 +72,11 @@ describe("blockMarkStyle", () => {
     expect(blockMarkStyle({ lineSpacing: 1.5 })["line-height"]).toBe("1.5");
     expect(blockMarkStyle({ indentStartPt: 36 })["margin-inline-start"]).toBe("36pt");
   });
+
+  test("first-line indent maps to text-indent, independent of block indent", () => {
+    expect(blockMarkStyle({ indentFirstLinePt: 18 })["text-indent"]).toBe("18pt");
+    expect(blockMarkStyle({ indentStartPt: 36 })["text-indent"]).toBeUndefined();
+  });
 });
 
 describe("listGlyphFor", () => {
@@ -91,5 +96,11 @@ describe("stripDisplayControlChars", () => {
       "keep\tthis\nandnotthat",
     );
     expect(stripDisplayControlChars("plain text")).toBe("plain text");
+  });
+
+  test("strips CR and other C0 controls (only TAB and NEWLINE survive)", () => {
+    expect(stripDisplayControlChars("a\rb")).toBe("ab");
+    expect(stripDisplayControlChars("abc")).toBe("abc");
+    expect(stripDisplayControlChars("line\r\nbreak")).toBe("line\nbreak");
   });
 });

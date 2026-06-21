@@ -225,27 +225,38 @@ paragraph blocks, setting up Phase 2+ to attach paragraph/char style.
 
 ---
 
-## 5. The hard blocker
+## 5. The hard blocker (RESOLVED — see §0; retained as historical context)
 
-**Phase 2 (and 4) cannot start without a real, sanitized `revisions/load` capture
-from a rich Google Doc.** Confirmed:
+> **This section describes the blocker as it stood before 2026-06-21.** It was
+> resolved by the live capture documented in [§0](#0-blocker-resolved-2026-06-21):
+> Phases 2–4 have shipped, the `sm`/`epm` key names are known, and
+> `lib/decoder/style-allowlist.ts` is wired and gate-green. The original analysis
+> and the capture workflow below are kept because the capture method remains the
+> reference procedure for obtaining any future rich-doc wire data.
 
-- The committed `lib/fixtures/captured-rich.ts` collapses every `sm`/`epm` map to
-  `{}` (sanitization), so there are **no real key shapes in-repo**.
+At the time of writing, **Phase 2 (and 4) could not start without a real, sanitized
+`revisions/load` capture from a rich Google Doc.** The situation then was:
+
+- The committed `lib/fixtures/captured-rich.ts` collapsed every `sm`/`epm` map to
+  `{}` (sanitization), so there were **no real key shapes in-repo**. (As §0 notes,
+  `lib/fixtures/captured.ts` did already carry real `sm` shapes, which is what
+  ultimately unblocked the decode.)
 - The upstream grammar this decoder was ported from
   (`harvard-vpal/gdocrevisions/operation.py`) models only the text ops
   (`is/ds/mlti/iss/dss/msfd/usfd`) — it drops styles/entities exactly like we do,
-  so it offers **no** `as`/`astss`/`ae`/`te`/`ue` field names.
+  so it offered **no** `as`/`astss`/`ae`/`te`/`ue` field names.
 - Google's internal `sm`/`epm` key names (what marks bold, heading level,
   alignment, list level, image width/height, table rows/cols) are **not publicly
-  documented**.
+  documented** — they had to be recovered from a live capture (now done; see §0).
 
-Building the allowlist against guessed key names would be a speculative placeholder
-that silently extracts nothing from real wire data — explicitly forbidden by the
-plan ("a new sanitized richer fixture with real `sm`/`epm` key shapes is REQUIRED
-and lands BEFORE Phase 2 decode wiring").
+At the time, building the allowlist against guessed key names would have been a
+speculative placeholder that silently extracts nothing from real wire data —
+explicitly forbidden by the plan ("a new sanitized richer fixture with real
+`sm`/`epm` key shapes is REQUIRED and lands BEFORE Phase 2 decode wiring"). The
+key shapes have since been obtained, so the allowlist is built against real names.
 
-### How to unblock (requires an authenticated browser session — only a human can)
+### How the blocker was unblocked (capture procedure — requires an authenticated browser session, only a human can)
+*(This is the reference procedure that was followed on 2026-06-21, retained for any future rich-doc capture.)*
 1. Open a throwaway rich Google Doc. Add: a heading (H1/H2), some bold + italic +
    underlined text, a centered and a right-aligned paragraph, a bulleted AND a
    numbered list, an image, and a 2x3 table. Make ~10 edits across a couple of
@@ -267,18 +278,21 @@ and lands BEFORE Phase 2 decode wiring").
      (as `captured-live.test.ts` does), then add the sanitized fixture + update
      `RICH_DOC_UNKNOWN_OPCODES` expectations.
 
-Until that fixture lands, the only Phase-2-adjacent thing that can be written is
-the allowlist module's **privacy mechanism shell** — but it is hollow without the
-key names, so it is intentionally NOT started.
+At the time, until that fixture landed, the only Phase-2-adjacent thing that could
+be written was the allowlist module's **privacy mechanism shell** — hollow without
+the key names. With the key names now recovered (§0), the full allowlist
+(`lib/decoder/style-allowlist.ts`) has shipped, not just the shell.
 
 ---
 
 ## 6. Remaining phases (from the approved plan)
 
 Order: 2 -> 3 chain after 1; 4 after 1 (independent of 2/3); 5 after 0
-(independent of 1–4). Phase 5 is the next thing that is NOT blocked.
+(independent of 1–4). **Phases 2–4 have SHIPPED (see §0)** — the per-phase decode
+specs below are retained as the as-built design record. **Phase 5 is the only
+remaining phase.**
 
-### Phase 5 — document-true appearance toggle (UNBLOCKED — do this next if you want progress without the capture)
+### Phase 5 — document-true appearance toggle (REMAINING — the only unshipped phase; do this next)
 - New persisted setting `docAppearance: "theme"|"paper"` in `lib/settings.ts`
   (default "theme").
 - Apply as a `data-doc-appearance` attribute on the `.dr-leaf` root in
@@ -292,7 +306,7 @@ Order: 2 -> 3 chain after 1; 4 after 1 (independent of 2/3); 5 after 0
 - Acceptance: paper + `.dark` -> white sheet/dark ink, chrome stays dark; default
   byte-identical to today; setting persists across reload. Depends only on Phase 0.
 
-### Phase 2 — paragraph-scope `as`/`astss` decode (BLOCKED on the fixture)
+### Phase 2 — paragraph-scope `as`/`astss` decode (SHIPPED — see §0; spec retained as as-built record)
 1. **First deliverable (independent):** NEW pure `lib/decoder/style-allowlist.ts`
    `extractParagraphMarks(sm: unknown): ParagraphMarks | null`, adversarially
    tested against malicious `sm` (verbatim-text keys must be dropped; output keys
@@ -319,7 +333,7 @@ Order: 2 -> 3 chain after 1; 4 after 1 (independent of 2/3); 5 after 0
    paragraph-mark `\n` or the first char? Confirm against the richer fixture wire
    shape before wiring (this gates the block-style resolution contract).
 
-### Phase 3 — char-scope marks (BLOCKED on the fixture; depends on Phase 2)
+### Phase 3 — char-scope marks (SHIPPED — see §0; spec retained as as-built record)
 - `model.ts`: add `marks?: TextMarks` to `TextChar` (+ `cloneElement` copy).
   `TextMarks = { bold?; italic?; underline?; strikethrough?: boolean; fontFamily?:
   <closed enum>; fontSizePt?: number }` — fontFamily closed enum (no open string).
@@ -332,7 +346,7 @@ Order: 2 -> 3 chain after 1; 4 after 1 (independent of 2/3); 5 after 0
 - `DocumentViewport` renders marks as inline style. NEW pure `fontStack(family)`
   mapping the closed family enum to a system stack (no network, testable).
 
-### Phase 4 — entity ops `ae`/`te`/`ue`(+`sue`) -> block embeds (BLOCKED on the fixture; depends on Phase 1)
+### Phase 4 — entity ops `ae`/`te`/`ue`(+`sue`) -> block embeds (SHIPPED — see §0; spec retained as as-built record)
 - `types.ts`: `AddEntity`/`PlaceEntity`/`UpdateEntity`; NEW
   `lib/decoder/entity-allowlist.ts` -> `EntityProps { widthPx?; heightPx?; rows?;
   cols?: number; structure: OpaqueStructure }` (no open string fields).
@@ -432,11 +446,13 @@ GUI/web surface it requires a transcript AND a non-uniform screenshot:
 ---
 
 ## 10. TL;DR for the next person
-1. Phase 0 + Phase 1 are done, verified, and pushed on `feat/replay-paragraph-blocks`.
-2. The replay now renders real paragraph blocks; all reconstruction invariants hold.
-3. To go further you NEED a sanitized rich-doc `revisions/load` capture (Section 5).
-   It is the gate for Phases 2 and 4.
-4. Phase 5 (paper-appearance toggle) is the only remaining phase that is NOT
-   blocked — a good standalone next step.
+1. Phases 0–4 are done, verified, and pushed on `feat/replay-paragraph-blocks`.
+2. The replay renders real paragraph blocks plus heading/alignment/char marks and
+   entity placeholders; all reconstruction invariants hold.
+3. The former blocker — a sanitized rich-doc `revisions/load` capture — is RESOLVED
+   (§0); the `sm`/`epm` key names are known and wired. Section 5 is kept only as the
+   historical capture procedure for any future wire data.
+4. Phase 5 (paper-appearance toggle) is the only remaining phase — a good
+   standalone next step.
 5. Honor the Section 3 invariants and the Section 8 gate contract; don't fabricate
    wire-key shapes.
