@@ -7,6 +7,7 @@ import PlaybackControls from "@/components/PlaybackControls";
 import SummaryInsights from "@/components/SummaryInsights";
 import Timeline, { clusterMarkers, type TimelineMarker } from "@/components/Timeline";
 import TimelineLegend from "@/components/TimelineLegend";
+import type { Block } from "@/lib/reconstruction/blocks";
 import type { Segment } from "@/lib/reconstruction/render";
 
 // jsdom ships no ResizeObserver, and the Timeline only stacks colliding seals
@@ -40,6 +41,15 @@ function revision(
     time,
     operations: [],
   };
+}
+
+// Wrap a flat run list (single-line, as these tests hand-build) into the single
+// paragraph block the viewport now consumes, assigning the global run `seq` —
+// mirrors blocksAt() for newline-free runs (the structure under test here).
+function blocksOf(segments: readonly Segment[]): Block[] {
+  return [
+    { kind: "paragraph", runs: segments.map((segment, index) => ({ ...segment, seq: index })) },
+  ];
 }
 
 describe("replay UI components", () => {
@@ -462,7 +472,7 @@ describe("replay UI components", () => {
       { kind: "accepted-text", text: "world", fromRevision: 2, toRevision: 2, revisions: [2] },
     ];
     const { container } = render(() => (
-      <DocumentViewport segments={segments} caret={{ revision: 2, color: "#ff0000" }} />
+      <DocumentViewport blocks={blocksOf(segments)} caret={{ revision: 2, color: "#ff0000" }} />
     ));
     const caret = container.querySelector<HTMLElement>(".doc-caret");
     expect(caret).toBeTruthy();
@@ -478,7 +488,7 @@ describe("replay UI components", () => {
       { kind: "accepted-text", text: "Hello", fromRevision: 1, toRevision: 5, revisions: [1, 5] },
     ];
     const { container } = render(() => (
-      <DocumentViewport segments={segments} caret={{ revision: 5, color: "#00ff00" }} />
+      <DocumentViewport blocks={blocksOf(segments)} caret={{ revision: 5, color: "#00ff00" }} />
     ));
     expect(container.querySelector(".doc-caret")).toBeTruthy();
   });
@@ -499,7 +509,7 @@ describe("replay UI components", () => {
       { kind: "accepted-text", text: "World", fromRevision: 0, toRevision: 0, revisions: [0] },
     ];
     const { container } = render(() => (
-      <DocumentViewport segments={segments} caret={{ revision: 1, color: "#00ff00" }} />
+      <DocumentViewport blocks={blocksOf(segments)} caret={{ revision: 1, color: "#00ff00" }} />
     ));
     const carets = container.querySelectorAll(".doc-caret");
     expect(carets).toHaveLength(1);
@@ -513,7 +523,7 @@ describe("replay UI components", () => {
     ];
     // A pure-deletion frame: the current revision (7) has no run of its own on screen.
     const { container } = render(() => (
-      <DocumentViewport segments={segments} caret={{ revision: 7, color: null }} />
+      <DocumentViewport blocks={blocksOf(segments)} caret={{ revision: 7, color: null }} />
     ));
     expect(container.querySelector(".doc-caret")).toBeNull();
   });
@@ -529,7 +539,7 @@ describe("replay UI components", () => {
     ]);
     render(() => (
       <DocumentViewport
-        segments={segments}
+        blocks={blocksOf(segments)}
         authorKeyByRevision={authorKeyByRevision}
         highlight={{ key: "ada", color: "#673AB7", label: "Author 1" }}
       />
@@ -563,7 +573,7 @@ describe("replay UI components", () => {
         revisions: [2],
       },
     ]);
-    const { container } = render(() => <DocumentViewport segments={segments()} />);
+    const { container } = render(() => <DocumentViewport blocks={blocksOf(segments())} />);
     const before = container.querySelector(".doc-suggest");
     expect(before).toBeTruthy();
     expect(before?.getAttribute("data-doc-tip")).toBeTruthy();
@@ -594,7 +604,7 @@ describe("replay UI components", () => {
     ];
     render(() => (
       <DocumentViewport
-        segments={segments}
+        blocks={blocksOf(segments)}
         authorKeyByRevision={new Map([[1, "ada"]])}
         highlight={null}
       />
@@ -637,7 +647,11 @@ describe("replay UI components", () => {
     // Caret far below the reading band (innerHeight≈768; band bottom ≈ 599) → must scroll.
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(domRect(900, 920));
     render(() => (
-      <DocumentViewport segments={caretSegments} caret={{ revision: 2, color: "#000000" }} follow />
+      <DocumentViewport
+        blocks={blocksOf(caretSegments)}
+        caret={{ revision: 2, color: "#000000" }}
+        follow
+      />
     ));
     expect(scrollTo).toHaveBeenCalled();
   });
@@ -657,7 +671,7 @@ describe("replay UI components", () => {
     const [follow, setFollow] = createSignal(true);
     render(() => (
       <DocumentViewport
-        segments={caretSegments}
+        blocks={blocksOf(caretSegments)}
         caret={{ revision: 2, color: "#000000" }}
         follow={follow()}
       />
@@ -676,7 +690,7 @@ describe("replay UI components", () => {
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(domRect(900, 920));
     render(() => (
       <DocumentViewport
-        segments={caretSegments}
+        blocks={blocksOf(caretSegments)}
         caret={{ revision: 2, color: "#000000" }}
         follow={false}
       />
@@ -691,7 +705,7 @@ describe("replay UI components", () => {
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(domRect(-50, -30));
     render(() => (
       <DocumentViewport
-        segments={caretSegments}
+        blocks={blocksOf(caretSegments)}
         caret={{ revision: 2, color: "#000000" }}
         follow={false}
       />
@@ -707,7 +721,7 @@ describe("replay UI components", () => {
     const onFollowOff = vi.fn();
     render(() => (
       <DocumentViewport
-        segments={caretSegments}
+        blocks={blocksOf(caretSegments)}
         caret={{ revision: 2, color: "#000000" }}
         follow
         onFollowOff={onFollowOff}
@@ -725,7 +739,7 @@ describe("replay UI components", () => {
     const onFollowOff = vi.fn();
     render(() => (
       <DocumentViewport
-        segments={caretSegments}
+        blocks={blocksOf(caretSegments)}
         caret={{ revision: 2, color: "#000000" }}
         follow
         onFollowOff={onFollowOff}
@@ -743,7 +757,7 @@ describe("replay UI components", () => {
     const onFollowOff = vi.fn();
     render(() => (
       <DocumentViewport
-        segments={caretSegments}
+        blocks={blocksOf(caretSegments)}
         caret={{ revision: 2, color: "#000000" }}
         follow
         onFollowOff={onFollowOff}
@@ -764,7 +778,7 @@ describe("replay UI components", () => {
     const onFollowOff = vi.fn();
     render(() => (
       <DocumentViewport
-        segments={caretSegments}
+        blocks={blocksOf(caretSegments)}
         caret={{ revision: 2, color: "#000000" }}
         follow
         onFollowOff={onFollowOff}
@@ -783,7 +797,7 @@ describe("replay UI components", () => {
     const onFollowOn = vi.fn();
     render(() => (
       <DocumentViewport
-        segments={caretSegments}
+        blocks={blocksOf(caretSegments)}
         caret={{ revision: 2, color: "#000000" }}
         follow={false}
         onFollowOn={onFollowOn}
@@ -830,7 +844,7 @@ describe("replay UI components", () => {
     const onFollowOff = vi.fn();
     render(() => (
       <DocumentViewport
-        segments={caretSegments}
+        blocks={blocksOf(caretSegments)}
         caret={{ revision: 2, color: "#000000" }}
         follow
         onFollowOff={onFollowOff}
@@ -908,7 +922,7 @@ describe("replay UI components", () => {
     const onFollowOff = vi.fn();
     render(() => (
       <DocumentViewport
-        segments={caretSegments}
+        blocks={blocksOf(caretSegments)}
         caret={{ revision: 2, color: "#000000" }}
         follow
         onFollowOff={onFollowOff}
@@ -972,7 +986,7 @@ describe("replay UI components", () => {
     const onFollowOff = vi.fn();
     render(() => (
       <DocumentViewport
-        segments={caretSegments}
+        blocks={blocksOf(caretSegments)}
         caret={{ revision: 2, color: "#000000" }}
         follow
         onFollowOff={onFollowOff}
@@ -1018,7 +1032,7 @@ describe("replay UI components", () => {
       const onFollowOff = vi.fn();
       render(() => (
         <DocumentViewport
-          segments={caretSegments}
+          blocks={blocksOf(caretSegments)}
           caret={{ revision: 2, color: "#000000" }}
           follow
           onFollowOff={onFollowOff}
@@ -1064,7 +1078,7 @@ describe("replay UI components", () => {
     const onFollowOff = vi.fn();
     render(() => (
       <DocumentViewport
-        segments={caretSegments}
+        blocks={blocksOf(caretSegments)}
         caret={{ revision: 2, color: "#000000" }}
         follow
         onFollowOff={onFollowOff}

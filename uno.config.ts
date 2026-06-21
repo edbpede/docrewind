@@ -339,14 +339,20 @@ const shortcuts = {
   // `getBoundingClientRect`/scroll geometry the follow-caret measures). Square
   // corners read as paper; `bg-surface` flips for dark via the token.
   "dr-leaf":
-    "relative mx-auto w-full max-w-[816px] bg-surface ring-1 ring-hairline " +
-    "shadow-[var(--dr-shadow-lg)] px-6 py-12 sm:px-12 sm:py-16 lg:px-[96px] lg:py-[96px]",
+    "relative mx-auto w-full max-w-[var(--dr-page-width)] bg-surface ring-1 ring-hairline " +
+    "shadow-[var(--dr-shadow-lg)] px-6 py-12 sm:px-12 sm:py-16 lg:px-[var(--dr-page-margin)] lg:py-[var(--dr-page-margin)]",
 
   // ── Document-rendering primitives (color ALWAYS + a non-color affordance) ──
   // The reading column fills the page's margin box (no extra width cap) so lines
   // wrap exactly where they do on the source page (PRD §9.6 spatial fidelity).
   "doc-column":
     "w-full whitespace-pre-wrap break-words font-serif text-[1.0625rem] leading-[1.8] text-ink",
+  // Paragraph block: one <p> per source paragraph. Resets the <p> margin and
+  // keeps an empty paragraph visible as a blank line (min-height = one line);
+  // white-space/wrap/font/leading inherit from .doc-column (plan Phase 1).
+  "doc-block": "m-0 min-h-[1.8em]",
+  // Embed block: a non-text structure (image/table/…) promoted to its own line.
+  "doc-block-embed": "my-1.5 block",
   "doc-accepted": "text-ink",
   // Suggested insert: color + dotted underline + label affordance.
   "doc-suggest":
@@ -545,6 +551,13 @@ export default defineConfig({
   --dr-seal-1: oklch(0.89 0.004 75);
   --dr-seal-2: oklch(0.94 0.003 75);
   --dr-dot-ring: oklch(0% 0 0 / 0.12);
+
+  /* Document page geometry — the manuscript leaf is a US-Letter sheet (816px /
+     8.5in @ 96dpi) with a full 1in (96px) desktop margin (DESIGN.md §Components).
+     Tokenized so the leaf (and a future page-break view / print-export) share
+     ONE source of truth for the page box. Not themed — geometry doesn't flip. */
+  --dr-page-width: 816px;
+  --dr-page-margin: 96px;
 
   /* Motion easing (no bounce/elastic). */
   --dr-ease-out: cubic-bezier(0.22, 1, 0.36, 1);

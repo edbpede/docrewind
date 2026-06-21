@@ -47,7 +47,7 @@ import {
 } from "@/lib/i18n/strings";
 import { deriveAuthors } from "@/lib/identity/authors";
 import { sendMessage } from "@/lib/messaging";
-import { segmentsAt } from "@/lib/reconstruction/render";
+import { blocksAt } from "@/lib/reconstruction/blocks";
 import { modelAtRevisionIndex } from "@/lib/reconstruction/snapshot";
 import {
   type DecodeOutcome,
@@ -517,16 +517,16 @@ const ReplaySurface: Component<{
     });
   }
 
-  // Derived playback views. `modelAtRevisionIndex` time-travels; `segmentsAt` is
-  // single-arg over that model (no second time-cut).
+  // Derived playback views. `modelAtRevisionIndex` time-travels; `blocksAt` (over
+  // `segmentsAt`) is single-arg over that model (no second time-cut).
   const maxIndex = createMemo(() => loaded()?.revisions.length ?? 0);
   const currentModel = createMemo(() => {
     const data = loaded();
     return data === undefined ? undefined : modelAtRevisionIndex(data.replayIndex, currentIndex());
   });
-  const currentSegments = createMemo(() => {
+  const currentBlocks = createMemo(() => {
     const model = currentModel();
-    return model === undefined ? [] : segmentsAt(model);
+    return model === undefined ? [] : blocksAt(model);
   });
 
   // ── Authorship attribution (§9.7) ───────────────────────────────────────────
@@ -939,7 +939,7 @@ const ReplaySurface: Component<{
                         the page they drive. The caret + highlight surface authorship:
                         who is writing now, and (on a colophon hover) who wrote what. */}
                     <DocumentViewport
-                      segments={currentSegments()}
+                      blocks={currentBlocks()}
                       caret={caret()}
                       highlight={highlight()}
                       authorKeyByRevision={authorKeyByRevision()}
