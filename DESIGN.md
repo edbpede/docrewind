@@ -76,6 +76,7 @@ than a few percent of any screen. Kept clearly out of the document-markup palett
 | `accent` (warm fill/highlight) | `oklch(0.80 0.13 80)` | `oklch(0.82 0.12 80)` |
 | `accent-strong` (warm text/icon, AA on light) | `oklch(0.56 0.12 70)` | `oklch(0.84 0.11 80)` |
 | `accent-soft` (warm tint bg) | `oklch(0.95 0.04 80)` | `oklch(0.32 0.06 70)` |
+| `on-accent` (ink on a solid honey fill; stable in both themes) | `oklch(0.30 0.035 70)` | `oklch(0.30 0.035 70)` |
 
 ### Functional document colors (PRESERVED — they carry meaning + an affordance)
 
