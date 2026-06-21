@@ -45,10 +45,15 @@ export interface DocumentSummary {
   /** Earliest / latest revision timestamp among timed revisions (epoch ms). */
   readonly startTime: number;
   readonly endTime: number;
-  /** Peak document length across the plotted (timed) history — the length-axis
-   *  upper bound. */
+  /** Peak document length across the WHOLE history (timed and untimed
+   *  revisions) — the length-axis upper bound. Untimed size-changing revisions
+   *  (e.g. a base-snapshot load) count here even though they are not plotted, so
+   *  the axis and the headline character counts stay consistent. */
   readonly maxLength: number;
-  /** Document length at the latest timestamp — the series' right endpoint. */
+  /** Document length after the WHOLE history (timed and untimed revisions, in
+   *  arrival order). When every revision is timed this equals the plotted
+   *  series' right endpoint; when untimed size-changing revisions exist it
+   *  reflects the true final document size and may exceed that endpoint. */
   readonly finalLength: number;
   /** Every revision (timed or not). */
   readonly totalRevisions: number;
@@ -197,12 +202,19 @@ export function deriveDocumentSummary(revisions: readonly DecodedRevision[]): Do
   let endTime = Number.NEGATIVE_INFINITY;
   let timedRevisions = 0;
 
+  // Whole-history document size, accumulated in arrival order over EVERY revision
+  // (timed or not). The length-axis bound (`maxLength`) and the final-size stat
+  // must reflect untimed size-changing revisions too — e.g. a base-snapshot load
+  // with a null stamp — or the axis would mis-scale against the headline counts.
+  let wholeLength = 0;
+  let maxLength = 0;
+
   const raw: RawPoint[] = [];
 
-  // First pass: order-independent aggregates + per-revision deltas. The
-  // cumulative length is summed later, in timestamp order, so each plotted
-  // length is paired with the moment it actually held (revision arrival order is
-  // usually chronological, but a non-monotonic stamp must not mis-pair lengths).
+  // First pass: order-independent aggregates + per-revision deltas. The plotted
+  // cumulative length is summed later, in timestamp order, so each plotted length
+  // is paired with the moment it actually held (revision arrival order is usually
+  // chronological, but a non-monotonic stamp must not mis-pair lengths).
   for (const revision of revisions) {
     const { inserted, deleted, position } = scanRevision(revision);
     charsInserted += inserted;
@@ -210,6 +222,9 @@ export function deriveDocumentSummary(revisions: readonly DecodedRevision[]): Do
     if (position !== null) {
       posDenominator = Math.max(posDenominator, position);
     }
+
+    wholeLength = Math.max(0, wholeLength + (inserted - deleted));
+    maxLength = Math.max(maxLength, wholeLength);
 
     const time = revision.time;
     // Guard against absent and out-of-range stamps: Date math beyond ±8.64e15ms
@@ -222,21 +237,20 @@ export function deriveDocumentSummary(revisions: readonly DecodedRevision[]): Do
     endTime = Math.max(endTime, time);
     raw.push({ t: time, delta: inserted - deleted, position });
   }
+  // Final document length after the whole history (arrival order). Equals the
+  // plotted series' right endpoint when every revision is timed.
+  const finalLength = wholeLength;
 
-  // Sort onto the time axis, then accumulate cumulative length chronologically.
-  // Stable on equal stamps, so same-instant revisions keep arrival order.
+  // Sort onto the time axis, then accumulate the plotted cumulative length
+  // chronologically. Stable on equal stamps, so same-instant revisions keep
+  // arrival order.
   const sorted = [...raw].sort((a, b) => a.t - b.t);
-  let length = 0;
-  let maxLength = 0;
+  let plottedLength = 0;
   const plotted: { t: number; length: number; position: number | null }[] = [];
   for (const point of sorted) {
-    length = Math.max(0, length + point.delta);
-    maxLength = Math.max(maxLength, length);
-    plotted.push({ t: point.t, length, position: point.position });
+    plottedLength = Math.max(0, plottedLength + point.delta);
+    plotted.push({ t: point.t, length: plottedLength, position: point.position });
   }
-  // `finalLength` is the length at the latest timestamp — the series endpoint,
-  // so the headline stat and the area curve's right edge always agree.
-  const finalLength = length;
 
   posDenominator = Math.max(posDenominator, maxLength, 1);
 

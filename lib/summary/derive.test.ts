@@ -150,6 +150,31 @@ describe("deriveDocumentSummary", () => {
     expect(summary.maxLength).toBe(6);
   });
 
+  it("counts untimed size-changing revisions in maxLength and finalLength", () => {
+    // A large base-snapshot load with no usable timestamp seeds the document
+    // before the timed edits. It is not plotted (the series stays timed-only and
+    // chronological), but its size MUST feed the whole-history scalars so the
+    // length axis and the headline character counts stay consistent.
+    const summary = deriveDocumentSummary([
+      rev(null, [insert("0123456789", 1)]), // untimed seed: +10, no plot point
+      rev(1_000, [insert("ab", 11)]), // timed: +2
+      rev(2_000, [insert("c", 13)]), // timed: +1
+    ]);
+    expect(summary.available).toBe(true);
+    expect(summary.totalRevisions).toBe(3);
+    expect(summary.timedRevisions).toBe(2);
+    expect(summary.charsInserted).toBe(13);
+    // Whole-history scalars include the untimed +10 seed: 10 → 12 → 13.
+    expect(summary.maxLength).toBe(13);
+    expect(summary.finalLength).toBe(13);
+    // The plotted series stays timed-only (the seed is not plotted) and still
+    // accumulates chronologically — but its endpoint (3) is now below the
+    // whole-history finalLength (13), which is expected and acceptable.
+    expect(summary.series.map((p) => p.t)).toEqual([1_000, 2_000]);
+    expect(summary.series.map((p) => p.length)).toEqual([2, 3]);
+    expect(summary.series[summary.series.length - 1]?.length).toBe(3);
+  });
+
   it("ignores out-of-range timestamps", () => {
     const summary = deriveDocumentSummary([
       rev(1_000, [insert("a", 1)]),
