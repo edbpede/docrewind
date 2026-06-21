@@ -42,8 +42,19 @@ export interface ClassroomLocation {
 
 // Classroom ids are URL-safe base64-ish tokens (e.g. `MjM0MzU5OTY5MTJa`).
 const ID = "[A-Za-z0-9_-]+";
-const GRADING_PATH = new RegExp(`^/g/tg/(${ID})/(${ID})`);
-const SUBMISSION_PATH = new RegExp(`^/c/(${ID})/a/(${ID})/submissions/[^?#]*?/student/(${ID})`);
+// Multi-account prefix: `classroom.google.com/u/{N}/…` selects the signed-in account
+// slot (the same multi-login mechanism Gmail uses as `/mail/u/{N}/`). It precedes the
+// `/c/` and `/g/tg/` grammar on every surface a secondary account sees, so both path
+// patterns must tolerate it — without it the regexes never match for `/u/1/…` and the
+// affordance silently never mounts. Non-capturing here; the slot is read separately.
+const USER_PREFIX = "(?:/u/\\d+)?";
+const GRADING_PATH = new RegExp(`^${USER_PREFIX}/g/tg/(${ID})/(${ID})`);
+const SUBMISSION_PATH = new RegExp(
+  `^${USER_PREFIX}/c/(${ID})/a/(${ID})/submissions/[^?#]*?/student/(${ID})`,
+);
+// The account slot carried by that `/u/{N}/` path prefix (multi-login). Preferred over
+// `?authuser` when present, since it is the account the educator is actively browsing as.
+const CLASSROOM_USER_PREFIX = /^\/u\/(\d+)\//;
 // The selected student rides the fragment as `#u={studentId}` (optionally `&t=f`).
 const HASH_STUDENT = new RegExp(`[#&]u=(${ID})`);
 
@@ -65,7 +76,11 @@ export function parseClassroomLocation(url: string): ClassroomLocation | null {
       return null;
     }
   }
-  const userIndex = detectUserIndex(url);
+  // The `/u/{N}/` path prefix is the active account slot on multi-login sessions; prefer
+  // it over `?authuser`/`/document/u/{N}/d/` (what `detectUserIndex` covers) when present.
+  const prefixSlot = CLASSROOM_USER_PREFIX.exec(parsed.pathname)?.[1];
+  const userIndex =
+    prefixSlot !== undefined ? Number.parseInt(prefixSlot, 10) : detectUserIndex(url);
 
   const grading = GRADING_PATH.exec(parsed.pathname);
   if (grading) {

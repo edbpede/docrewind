@@ -75,6 +75,44 @@ describe("parseClassroomLocation — submission-status view", () => {
   });
 });
 
+describe("parseClassroomLocation — multi-account /u/{N}/ prefix", () => {
+  test("parses a secondary-account submission URL (/u/1/c/…)", () => {
+    expect(
+      parseClassroomLocation(
+        `https://classroom.google.com/u/1/c/${CLASS}/a/${ASSIGN}/submissions/by-status/and-sort-first-name/student/${STUDENT}?pli=1`,
+      ),
+    ).toEqual({
+      view: "submission",
+      classId: CLASS,
+      assignmentId: ASSIGN,
+      studentId: STUDENT,
+      userIndex: 1,
+    });
+  });
+
+  test("parses a secondary-account grading URL (/u/2/g/tg/…)", () => {
+    expect(
+      parseClassroomLocation(
+        `https://classroom.google.com/u/2/g/tg/${CLASS}/${ASSIGN}#u=${STUDENT}`,
+      ),
+    ).toEqual({
+      view: "grading",
+      classId: CLASS,
+      assignmentId: ASSIGN,
+      studentId: STUDENT,
+      userIndex: 2,
+    });
+  });
+
+  test("the /u/{N}/ prefix slot wins over a conflicting ?authuser", () => {
+    expect(
+      parseClassroomLocation(
+        `https://classroom.google.com/u/1/g/tg/${CLASS}/${ASSIGN}?authuser=0#u=${STUDENT}`,
+      )?.userIndex,
+    ).toBe(1);
+  });
+});
+
 describe("parseClassroomLocation — rejects non-targets", () => {
   test("returns null for the Classroom home page", () => {
     expect(parseClassroomLocation("https://classroom.google.com/h")).toBeNull();
