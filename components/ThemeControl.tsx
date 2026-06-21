@@ -59,7 +59,7 @@ const ThemeControl: Component<{ readonly bare?: boolean }> = (props) => {
   const [themeValue, { mutate: mutateTheme }] = createResource(() => theme.getValue());
 
   function onTheme(next: Theme): void {
-    if ((themeValue() ?? "system") === next) return;
+    if (themeValue() === next) return;
     mutateTheme(next);
     void theme.setValue(next);
   }
