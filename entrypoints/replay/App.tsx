@@ -25,7 +25,7 @@ import {
 } from "solid-js";
 import BrandMark from "@/components/BrandMark";
 import DocumentViewport from "@/components/DocumentViewport";
-import { IconAlert, IconSettings } from "@/components/icons";
+import { IconAlert, IconChart, IconSettings } from "@/components/icons";
 import PlaybackControls from "@/components/PlaybackControls";
 import PrivacyBanner from "@/components/PrivacyBanner";
 import ProgressView, { type ProgressPhase } from "@/components/ProgressView";
@@ -958,7 +958,14 @@ const ReplaySurface: Component<{
                       identities={identities() ?? {}}
                       onActiveAuthorChange={setActiveAuthorKey}
                     />
-                    <footer class="flex pt-1">
+                    <footer class="flex flex-wrap items-center gap-x-5 gap-y-2 pt-1">
+                      <a
+                        class="dr-link inline-flex items-center gap-1.5"
+                        href={`summary.html?doc=${encodeURIComponent(props.docId)}`}
+                      >
+                        <IconChart size={16} />
+                        {strings.summary.title}
+                      </a>
                       <a
                         class="dr-link inline-flex items-center gap-1.5"
                         href={`options.html?doc=${encodeURIComponent(props.docId)}`}

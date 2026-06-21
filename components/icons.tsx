@@ -98,6 +98,16 @@ export const IconSettings: Component<IconProps> = (props) => (
   </Svg>
 );
 
+/** A bar chart — the "document summary / writing insights" mark. */
+export const IconChart: Component<IconProps> = (props) => (
+  <Svg {...props}>
+    <path d="M4 4v16h16" />
+    <path d="M8 16v-4" />
+    <path d="M13 16V8" />
+    <path d="M18 16v-7" />
+  </Svg>
+);
+
 export const IconInfo: Component<IconProps> = (props) => (
   <Svg {...props}>
     <circle cx="12" cy="12" r="9.25" />

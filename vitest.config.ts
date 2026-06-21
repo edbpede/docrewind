@@ -36,6 +36,7 @@ export default defineConfig({
       "lib/i18n/**",
       "lib/identity/**",
       "lib/classroom/**",
+      "lib/summary/**",
       "lib/theme.test.ts",
       // Playwright owns assembled-extension specs under e2e/.
       "e2e/**",
