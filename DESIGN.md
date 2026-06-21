@@ -158,7 +158,10 @@ xl 22 (popup shell) · pill 9999 (chips, segmented control, toggles)`
 
 Soft, layered, low-opacity shadows (Apple-like). **Never** pair a 1px border with a
 wide drop shadow on the same element (the "ghost-card" tell): a surface is defined
-by background contrast + soft shadow, or by a hairline — pick one.
+by background contrast + soft shadow, or by a hairline — pick one. The lone
+sanctioned exception is the document leaf — a literal weighted page (`bg-surface`
+fill + a full page margin), not a hollow card, so a hairline ring + `lg` shadow
+read as paper lifted off the canvas, never as a ghost card.
 
 - `sm`: `0 1px 2px oklch(0 0 0/0.05)` — buttons, inputs
 - `md`: `0 2px 8px -2px oklch(0 0 0/0.08), 0 6px 16px -8px oklch(0 0 0/0.06)` — cards
