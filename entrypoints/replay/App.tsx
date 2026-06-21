@@ -884,11 +884,16 @@ const ReplaySurface: Component<{
                 {(data) => (
                   <main class="mx-auto flex max-w-[58rem] flex-col gap-5 p-6 sm:p-8">
                     <header class="dr-masthead">
-                      <div class="flex items-center gap-3">
-                        <BrandMark size={40} />
-                        <div class="flex flex-col gap-1">
-                          <p class="dr-eyebrow">{strings.app.mastheadEyebrow}</p>
-                          <h1 class="dr-title">{strings.app.mastheadTitle}</h1>
+                      <div class="flex items-center justify-between gap-3">
+                        <div class="flex min-w-0 items-center gap-3">
+                          <BrandMark size={40} />
+                          <div class="flex min-w-0 flex-col gap-1">
+                            <p class="dr-eyebrow">{strings.app.mastheadEyebrow}</p>
+                            <h1 class="dr-title">{strings.app.mastheadTitle}</h1>
+                          </div>
+                        </div>
+                        <div class="shrink-0">
+                          <ThemeControl bare />
                         </div>
                       </div>
                       <PrivacyBanner approximationNote={strings.privacy.approximationNote} />
@@ -953,7 +958,7 @@ const ReplaySurface: Component<{
                       identities={identities() ?? {}}
                       onActiveAuthorChange={setActiveAuthorKey}
                     />
-                    <footer class="flex flex-wrap items-center justify-between gap-3 pt-1">
+                    <footer class="flex pt-1">
                       <a
                         class="dr-link inline-flex items-center gap-1.5"
                         href={`options.html?doc=${encodeURIComponent(props.docId)}`}
@@ -961,7 +966,6 @@ const ReplaySurface: Component<{
                         <IconSettings size={16} />
                         {strings.app.optionsLink}
                       </a>
-                      <ThemeControl bare />
                     </footer>
                   </main>
                 )}
