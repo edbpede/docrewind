@@ -134,6 +134,43 @@ describe("text marks (Phase 3)", () => {
     const run = segmentsAt(model).find((s) => s.kind === "accepted-text");
     expect(run?.kind === "accepted-text" ? run.marks : "present").toBeUndefined();
   });
+  test("unstyled inserts inherit the preceding character's marks (typed-under-active-style)", () => {
+    const model = build([
+      { ty: "is", s: "a", ibi: 1, revision_id: 1 },
+      { ty: "as", st: "text", si: 1, ei: 1, sm: { ts_bd: true, ts_bd_i: false }, revision_id: 2 },
+      // Continued typing carries NO style op — Google never restates the run style
+      // per keystroke; the new chars inherit the bold neighbor implicitly.
+      { ty: "is", s: "bcd", ibi: 2, revision_id: 3 },
+    ]);
+    expect(currentText(model)).toBe("abcd");
+    const runs = segmentsAt(model).filter((s) => s.kind === "accepted-text");
+    // One coalesced bold run. Without inheritance this fragmented to "a"(bold)+"bcd"(plain) —
+    // the styled-fragments regression where a sentence typed under active bold lost it.
+    expect(runs.map((r) => r.text)).toEqual(["abcd"]);
+    const run = runs[0];
+    expect(run?.kind === "accepted-text" ? run.marks?.bold : undefined).toBe(true);
+  });
+
+  test("inserts at the document start inherit nothing (no preceding character)", () => {
+    const model = build([{ ty: "is", s: "xy", ibi: 1, revision_id: 1 }]);
+    const run = segmentsAt(model).find((s) => s.kind === "accepted-text");
+    expect(run?.kind === "accepted-text" ? run.marks : "present").toBeUndefined();
+  });
+
+  test("a paragraph-start insert does NOT inherit a styled preceding '\\n'", () => {
+    const model = build([
+      { ty: "is", s: "Para1\n", ibi: 1, revision_id: 1 },
+      // A text-scope bold range straddling the paragraph boundary stamps the '\n'.
+      { ty: "as", st: "text", si: 1, ei: 6, sm: { ts_bd: true, ts_bd_i: false }, revision_id: 2 },
+      // Typing at the start of the new paragraph (live pos 7, after the '\n').
+      { ty: "is", s: "X", ibi: 7, revision_id: 3 },
+    ]);
+    expect(currentText(model)).toBe("Para1\nX");
+    // The new paragraph is its own formatting context — 'X' must be unstyled, not
+    // bold inherited across the boundary from the styled '\n'.
+    const xRun = segmentsAt(model).find((s) => s.kind === "accepted-text" && s.text === "X");
+    expect(xRun?.kind === "accepted-text" ? xRun.marks : "present").toBeUndefined();
+  });
 });
 
 describe("time-travel fidelity (clone + snapshot)", () => {
