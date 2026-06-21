@@ -1,0 +1,117 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+import { cleanup, render, screen } from "@solidjs/testing-library";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fakeBrowser } from "wxt/testing";
+import App from "@/entrypoints/summary/App";
+import { createMemoryStore } from "@/lib/db.memory";
+import type { Operation } from "@/lib/decoder/types";
+import { PARSER_VERSION } from "@/lib/decoder/version";
+import { asDocId, asRevisionId } from "@/lib/domain/ids";
+import type { DecodedRevision } from "@/lib/domain/model";
+import { errorTitle, strings } from "@/lib/i18n/strings";
+import type { ReplayPublication, RevisionStore } from "@/lib/store";
+
+const DOC = asDocId("docSummaryTest");
+
+function setSummaryUrl(doc = DOC): void {
+  window.history.replaceState(null, "", `/summary.html?doc=${doc}`);
+}
+
+function installMatchMedia(): void {
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    value: vi.fn(() => ({
+      matches: false,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })),
+  });
+}
+
+function rev(id: number, time: number | null, operations: readonly Operation[]): DecodedRevision {
+  return { revisionId: asRevisionId(id), userId: null, sessionId: null, time, operations };
+}
+
+function insert(s: string, ibi: number): Operation {
+  return { ty: "is", s, ibi };
+}
+
+function publication(revisions: readonly DecodedRevision[]): ReplayPublication {
+  return {
+    publicationId: "pub-1",
+    parserVersion: PARSER_VERSION,
+    revisions,
+    snapshots: [],
+    timeline: [],
+    publishedAt: 1000,
+  };
+}
+
+async function seed(store: RevisionStore, revisions: readonly DecodedRevision[]): Promise<void> {
+  await store.saveReplayPublication(DOC, publication(revisions));
+  await store.setActiveReplayPublication(DOC, "pub-1");
+}
+
+describe("Summary App", () => {
+  beforeEach(() => {
+    cleanup();
+    fakeBrowser.reset();
+    installMatchMedia();
+    setSummaryUrl();
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it("shows a missing-doc error when no ?doc is present", async () => {
+    window.history.replaceState(null, "", "/summary.html");
+    const store = createMemoryStore();
+    render(() => <App store={store} />);
+    expect(await screen.findByText(errorTitle("missing-doc-id"))).toBeTruthy();
+  });
+
+  it("points back to the replay when no publication exists yet", async () => {
+    const store = createMemoryStore();
+    render(() => <App store={store} />);
+    expect(await screen.findByText(strings.summary.missingTitle)).toBeTruthy();
+    const openReplay = screen.getByText(strings.summary.openReplay).closest("a");
+    expect(openReplay?.getAttribute("href")).toBe(`replay.html?doc=${DOC}`);
+  });
+
+  it("renders both charts and the stat row for a timed publication", async () => {
+    const store = createMemoryStore();
+    await seed(store, [
+      rev(1, 1_000, [insert("hello", 1)]),
+      rev(2, 60_000, [insert(" world", 6)]),
+      rev(3, 120_000, [insert("!", 12)]),
+    ]);
+    const { container } = render(() => <App store={store} />);
+
+    expect(await screen.findByText(strings.summary.activityHeading)).toBeTruthy();
+    expect(screen.getByText(strings.summary.positionHeading)).toBeTruthy();
+
+    // Both charts render as accessible images.
+    const charts = screen.getAllByRole("img");
+    expect(charts.length).toBeGreaterThanOrEqual(2);
+
+    // The scatter drew a circle per positioned edit.
+    expect(container.querySelectorAll("circle").length).toBeGreaterThan(0);
+
+    // The at-a-glance stats include the edit count and characters added.
+    expect(screen.getByText(strings.summary.statEdits)).toBeTruthy();
+    expect(screen.getByText(strings.summary.statAdded)).toBeTruthy();
+
+    // Back-to-replay navigation is present.
+    const back = screen.getByText(strings.summary.backToReplay).closest("a");
+    expect(back?.getAttribute("href")).toBe(`replay.html?doc=${DOC}`);
+  });
+
+  it("shows a friendly empty state when timing is insufficient", async () => {
+    const store = createMemoryStore();
+    await seed(store, [rev(1, null, [insert("hello", 1)])]);
+    render(() => <App store={store} />);
+    expect(await screen.findByText(strings.summary.unavailableTitle)).toBeTruthy();
+  });
+});

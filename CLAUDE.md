@@ -36,7 +36,7 @@ Tests are partitioned by directory; the two runners are mutually exclusive (`vit
 
 | Test subject | Runner | Lives in |
 |---|:---:|:---:|
-| Pure logic (no DOM, imports `bun:test`) | `bun test` | `lib/{decoder,reconstruction,timeline,domain,protocol,retrieval,worker,docs-url,replay,i18n,identity}`, `lib/theme.test.ts` |
+| Pure logic (no DOM, imports `bun:test`) | `bun test` | `lib/{decoder,reconstruction,timeline,domain,protocol,retrieval,worker,docs-url,replay,i18n,identity,classroom,summary}`, `lib/theme.test.ts` |
 | Solid components, storage, messaging (imports `vitest`) | Vitest | `test/**`, `lib/*.test.ts` (e.g. `lib/db.test.ts`) |
 | Assembled extension | Playwright | `e2e/**` |
 

@@ -123,6 +123,37 @@ export const strings = {
     authorEdits: "Revisions",
     authorActive: "Active",
   },
+  summary: {
+    // The "advanced view" linked from the replay page. Content-free, like the
+    // colophon: it visualizes timestamps, character counts and edit POSITIONS,
+    // never any document text.
+    title: "Document summary",
+    subtitle: "Get insights into writing patterns and time spent.",
+    backToReplay: "Back to replay",
+    loading: "Preparing the summary…",
+    // Shown when a document has no usable timing (can't place edits on a time axis).
+    unavailableTitle: "Not enough timing to chart",
+    unavailableHint:
+      "This document's revision history doesn't carry enough timestamps to show " +
+      "writing patterns over time.",
+    // Shown when the replay hasn't been built yet for this document.
+    missingTitle: "No summary yet",
+    missingHint:
+      "Open this document's replay first so DocRewind can rebuild its history, " +
+      "then come back for the summary.",
+    openReplay: "Open replay",
+    activityHeading: "Timeline of activity",
+    activityAria: "Document length and editing activity over time.",
+    positionHeading: "Where in the document were the changes?",
+    positionAria: "The position of each edit within the document over time.",
+    legendLength: "Document length",
+    legendActivity: "Activity",
+    legendPosition: "Position in document",
+    statEdits: "Edits",
+    statAdded: "Characters added",
+    statRemoved: "Characters removed",
+    statSpan: "Time span",
+  },
   options: {
     title: "DocRewind settings",
     privacyHeading: "Privacy",
@@ -302,4 +333,18 @@ export function authorActiveRange(firstMs: number, lastMs: number): string {
     ? new Date(lastMs).toLocaleString(undefined, { timeStyle: "short" })
     : formatStamp(lastMs);
   return `${first} – ${last}`; // U+2013 EN DASH
+}
+
+// ── Document-summary axis (content-free day labels) ──────────────────────────
+
+/** A day-boundary axis label, e.g. "Sat, Oct 18". Date only — no document text. */
+export function formatDayLabel(ms: number): string {
+  if (Math.abs(ms) > 8.64e15) {
+    return "";
+  }
+  return new Date(ms).toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
 }
