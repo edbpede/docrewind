@@ -173,6 +173,12 @@ const shortcuts = {
     "disabled:pointer-events-none disabled:opacity-45 " +
     "bg-surface text-ink ring-1 ring-hairline-strong hover:bg-hover",
   "btn-block": "w-full",
+  // The "Document summary" feature CTA: the single honey-accent note on this
+  // surface — a warm tinted pill that settles into a solid honey fill on hover.
+  // Deliberately NOT brand indigo (it would echo the privacy banner below) and
+  // NOT the loud solid primary (the play button keeps that one-per-surface role).
+  "dr-summary-cta":
+    "btn-base bg-accent-soft text-accent-strong shadow-[var(--dr-shadow-sm)] hover:bg-accent hover:text-accent-on",
 
   // ── Segmented control (theme / speed / diagnostics) ───────────────────────
   // A pill track holding 2–4 options; the active one is a raised surface pill —
@@ -466,6 +472,7 @@ export default defineConfig({
         DEFAULT: "var(--dr-accent)",
         strong: "var(--dr-accent-strong)",
         soft: "var(--dr-accent-soft)",
+        on: "var(--dr-on-accent)",
       },
       // Functional document-state colors (preserved; each pairs with an affordance).
       suggest: { DEFAULT: "var(--dr-suggest)", soft: "var(--dr-suggest-soft)" },
@@ -539,6 +546,10 @@ export default defineConfig({
   --dr-accent: oklch(0.80 0.13 80);
   --dr-accent-strong: oklch(0.53 0.12 65);
   --dr-accent-soft: oklch(0.95 0.04 80);
+  /* Text/icon on a solid honey fill. The honey is light in BOTH themes, so this
+     ink stays a fixed deep warm graphite (not the theme-flipping ink token) to
+     clear AA on the accent fill regardless of light/dark. */
+  --dr-on-accent: oklch(0.30 0.035 70);
 
   --dr-suggest: oklch(0.49 0.12 165);
   --dr-suggest-soft: oklch(0.95 0.03 165);
@@ -609,6 +620,7 @@ export default defineConfig({
   --dr-accent: oklch(0.82 0.12 80);
   --dr-accent-strong: oklch(0.84 0.11 80);
   --dr-accent-soft: oklch(0.32 0.06 70);
+  --dr-on-accent: oklch(0.30 0.035 70);
 
   --dr-suggest: oklch(0.88 0.08 165);
   --dr-suggest-soft: oklch(0.34 0.05 165);

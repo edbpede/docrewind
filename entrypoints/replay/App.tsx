@@ -884,7 +884,7 @@ const ReplaySurface: Component<{
                 {(data) => (
                   <main class="mx-auto flex max-w-[58rem] flex-col gap-5 p-6 sm:p-8">
                     <header class="dr-masthead">
-                      <div class="flex items-center justify-between gap-3">
+                      <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
                         <div class="flex min-w-0 items-center gap-3">
                           <BrandMark size={40} />
                           <div class="flex min-w-0 flex-col gap-1">
@@ -892,7 +892,17 @@ const ReplaySurface: Component<{
                             <h1 class="dr-title">{strings.app.mastheadTitle}</h1>
                           </div>
                         </div>
-                        <div class="shrink-0">
+                        {/* The summary CTA rides at the top, next to the appearance
+                            control, so the insights deep-dive is prevalent — not buried
+                            below the leaf. A brand-soft pill that fills in on hover. */}
+                        <div class="flex shrink-0 items-center gap-2.5">
+                          <a
+                            class="dr-summary-cta"
+                            href={`summary.html?doc=${encodeURIComponent(props.docId)}`}
+                          >
+                            <IconChart size={18} />
+                            <span>{strings.summary.title}</span>
+                          </a>
                           <ThemeControl bare />
                         </div>
                       </div>
@@ -958,20 +968,15 @@ const ReplaySurface: Component<{
                       identities={identities() ?? {}}
                       onActiveAuthorChange={setActiveAuthorKey}
                     />
-                    <footer class="flex flex-wrap items-center gap-x-5 gap-y-2 pt-1">
+                    {/* Settings is a quiet utility, parked in the bottom-right corner —
+                        present and reachable, never competing with the record above. */}
+                    <footer class="flex justify-end pt-2">
                       <a
-                        class="dr-link inline-flex items-center gap-1.5"
-                        href={`summary.html?doc=${encodeURIComponent(props.docId)}`}
-                      >
-                        <IconChart size={16} />
-                        {strings.summary.title}
-                      </a>
-                      <a
-                        class="dr-link inline-flex items-center gap-1.5"
+                        class="btn-ghost"
                         href={`options.html?doc=${encodeURIComponent(props.docId)}`}
                       >
-                        <IconSettings size={16} />
-                        {strings.app.optionsLink}
+                        <IconSettings size={18} />
+                        <span>{strings.app.optionsLink}</span>
                       </a>
                     </footer>
                   </main>
