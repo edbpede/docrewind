@@ -36,6 +36,31 @@ function physicalIndexOfLivePosition(chars: readonly CharElement[], livePos: num
   return chars.length;
 }
 
+/**
+ * The text marks a freshly-inserted character inherits: those of the live
+ * element IMMEDIATELY PRECEDING the insertion point. Google Docs never restates
+ * a run's style per keystroke — typed text implicitly carries the adjacent
+ * character's formatting, and only an explicit `as` op overrides it. Without
+ * this, only the handful of ranges that DID get an explicit `as` op render
+ * styled, so a sentence typed under active bold/italic surfaces as scattered
+ * fragments (the styled-fragments bug). Returns `undefined` at the document /
+ * paragraph start or when the preceding live element is a non-text slot
+ * (opaque / EndOfBody), so no style is invented across a structural boundary.
+ * The preceding char's marks object is already frozen (immutable-by-replacement
+ * in `setTextMarks`), so the reference is shared safely and compares `===` for
+ * run coalescing.
+ */
+function inheritedMarksAt(chars: readonly CharElement[], at: number): TextMarks | undefined {
+  for (let i = at - 1; i >= 0; i--) {
+    const el = chars[i];
+    if (el === undefined || el.deleteRevision !== null) {
+      continue;
+    }
+    return el.kind === "char" ? el.marks : undefined;
+  }
+  return undefined;
+}
+
 /** Splice freshly-inserted characters before the `ibi`-th live position. */
 function insertChars(
   model: DocumentModel,
@@ -45,6 +70,7 @@ function insertChars(
   suggestionState: SuggestionState,
 ): void {
   const at = physicalIndexOfLivePosition(model.chars, ibi);
+  const inheritedMarks = inheritedMarksAt(model.chars, at);
   // Spread iterates Unicode code points, so multi-byte glyphs stay intact.
   const inserted: TextChar[] = [...s].map((char) => ({
     kind: "char",
@@ -52,6 +78,7 @@ function insertChars(
     insertRevision: revisionId,
     deleteRevision: null,
     suggestionState,
+    ...(inheritedMarks !== undefined ? { marks: inheritedMarks } : {}),
   }));
   model.chars.splice(at, 0, ...inserted);
 }

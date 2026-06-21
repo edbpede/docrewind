@@ -134,6 +134,28 @@ describe("text marks (Phase 3)", () => {
     const run = segmentsAt(model).find((s) => s.kind === "accepted-text");
     expect(run?.kind === "accepted-text" ? run.marks : "present").toBeUndefined();
   });
+  test("unstyled inserts inherit the preceding character's marks (typed-under-active-style)", () => {
+    const model = build([
+      { ty: "is", s: "a", ibi: 1, revision_id: 1 },
+      { ty: "as", st: "text", si: 1, ei: 1, sm: { ts_bd: true, ts_bd_i: false }, revision_id: 2 },
+      // Continued typing carries NO style op — Google never restates the run style
+      // per keystroke; the new chars inherit the bold neighbor implicitly.
+      { ty: "is", s: "bcd", ibi: 2, revision_id: 3 },
+    ]);
+    expect(currentText(model)).toBe("abcd");
+    const runs = segmentsAt(model).filter((s) => s.kind === "accepted-text");
+    // One coalesced bold run. Without inheritance this fragmented to "a"(bold)+"bcd"(plain) —
+    // the styled-fragments regression where a sentence typed under active bold lost it.
+    expect(runs.map((r) => r.text)).toEqual(["abcd"]);
+    const run = runs[0];
+    expect(run?.kind === "accepted-text" ? run.marks?.bold : undefined).toBe(true);
+  });
+
+  test("inserts at the document start inherit nothing (no preceding character)", () => {
+    const model = build([{ ty: "is", s: "xy", ibi: 1, revision_id: 1 }]);
+    const run = segmentsAt(model).find((s) => s.kind === "accepted-text");
+    expect(run?.kind === "accepted-text" ? run.marks : "present").toBeUndefined();
+  });
 });
 
 describe("time-travel fidelity (clone + snapshot)", () => {
