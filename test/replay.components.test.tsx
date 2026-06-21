@@ -642,6 +642,33 @@ describe("replay UI components", () => {
     expect(scrollTo).toHaveBeenCalled();
   });
 
+  // ── Claim: follow suppresses viewport scroll anchoring (large up/down-jump fix) ──
+  // The reconstructed document re-renders every playback tick, so Chromium re-anchors
+  // the viewport — a scroll the component never issued (total scrollHeight unchanged) —
+  // and the onScroll guard, having already reached its follow target, misreads that
+  // browser re-anchoring as a user scroll and disengages follow mid-playback. The
+  // viewport defends against this by disabling scroll anchoring on the document scroller
+  // while follow is engaged, and restoring the default once the user takes over.
+  it("disables scroll anchoring on the viewport scroller while follow is engaged and restores it when follow turns off", () => {
+    vi.stubGlobal("scrollTo", vi.fn());
+    syncRaf();
+    // Caret comfortably in the band → no programmatic scroll; isolates the anchoring effect.
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(domRect(100, 120));
+    const [follow, setFollow] = createSignal(true);
+    render(() => (
+      <DocumentViewport
+        segments={caretSegments}
+        caret={{ revision: 2, color: "#000000" }}
+        follow={follow()}
+      />
+    ));
+    expect(document.documentElement.style.overflowAnchor).toBe("none");
+    setFollow(false);
+    expect(document.documentElement.style.overflowAnchor).toBe("");
+    setFollow(true);
+    expect(document.documentElement.style.overflowAnchor).toBe("none");
+  });
+
   it("shows a 'Jump to edit' pill instead of scrolling when follow is off and the caret is off-screen", () => {
     const scrollTo = vi.fn();
     vi.stubGlobal("scrollTo", scrollTo);
