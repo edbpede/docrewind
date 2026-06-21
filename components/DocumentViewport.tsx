@@ -52,10 +52,18 @@ import {
   IconList,
   IconTable,
 } from "@/components/icons";
+import type { TextMarks } from "@/lib/decoder/style-allowlist";
 import type { OpaqueStructure } from "@/lib/decoder/types";
 import { contributedBy, strings } from "@/lib/i18n/strings";
+import type { Block, BlockRun } from "@/lib/reconstruction/blocks";
 import type { Segment } from "@/lib/reconstruction/render";
 import { type CaretVisibility, caretVisibility, followScroll } from "@/lib/replay/follow";
+import {
+  blockMarkStyle,
+  listGlyphFor,
+  stripDisplayControlChars,
+  textMarkStyle,
+} from "@/lib/replay/style-css";
 
 /** A clear per-kind icon for an embedded non-text element (image, table, …) — far
  *  more legible than the old generic ▤ glyph. Called inside reactive JSX so it
@@ -95,7 +103,7 @@ export interface DocumentHighlight {
 }
 
 export interface DocumentViewportProps {
-  readonly segments: readonly Segment[];
+  readonly blocks: readonly Block[];
   /** Active writing caret (playback), or null/absent to paint none. */
   readonly caret?: DocumentCaret | null;
   /** Foregrounded author to highlight, or null/absent for no highlight. */
@@ -169,34 +177,136 @@ const DocumentViewport: Component<DocumentViewportProps> = (props) => {
     return keys;
   };
 
-  // The index of the run the caret trails: the LAST run the current revision touched —
-  // either one it OPENED (`fromRevision`) or one it EXTENDED/CLOSED at the tail
-  // (`toRevision`). `render.ts` breaks a run wherever an insertion threads into older
-  // (e.g. Revision 0 base/template) content, so even a mid-document edit closes a run
-  // at the insertion point whose `toRevision` names this frame's revision — the caret
-  // latches there instead of being swept to the tail of the surrounding base content.
-  // Recomputed per frame (segments + caret both change on a tick); O(segments), trivial
-  // beside the segment rebuild itself. -1 only when the current revision added no visible
-  // char this frame (a pure or suggested deletion), so no caret is painted that frame.
-  const caretIndex = createMemo(() => {
+  // `render.ts` breaks a run wherever an insertion threads into older (e.g.
+  // Revision-0 base/template) content, so even a mid-document edit closes a run at
+  // the insertion point whose `toRevision` names this frame's revision.
+  // The global run `seq` the writing caret trails: the LAST run (in document
+  // order) the current revision touched — one it OPENED (`fromRevision`) or
+  // EXTENDED/CLOSED at the tail (`toRevision`). Last-match-in-order keeps the nib
+  // on the freshest run when a revision contributed to several (mark-break or
+  // threaded-insert). -1 when this frame's revision added no visible run.
+  const caretSeq = createMemo(() => {
     const caret = props.caret;
     if (caret === undefined || caret === null) {
       return -1;
     }
     let found = -1;
-    props.segments.forEach((segment, index) => {
-      if (
-        "fromRevision" in segment &&
-        (Number(segment.fromRevision) === caret.revision ||
-          Number(segment.toRevision) === caret.revision)
-      ) {
-        found = index;
+    for (const block of props.blocks) {
+      for (const run of block.runs) {
+        if (
+          "fromRevision" in run &&
+          (Number(run.fromRevision) === caret.revision || Number(run.toRevision) === caret.revision)
+        ) {
+          found = run.seq;
+        }
       }
-    });
+    }
     return found;
   });
 
   const caretColor = (): string => props.caret?.color ?? ATTRIBUTION_FALLBACK;
+
+  // True when any block carries a renderable run, so the empty-state fallback
+  // shows only for a genuinely empty document (not a one-blank-paragraph doc).
+  const hasContent = createMemo(() => props.blocks.some((block) => block.runs.length > 0));
+
+  // Render one run (a `Segment` + global `seq`) inside a block, plus the writing
+  // caret nib when this run is the one the current revision trails. `run` and
+  // `isLast` are ACCESSORS so each read tracks the per-row signal and the body
+  // restyles in place across ticks (the `<Index>` position-keying contract).
+  const renderRun = (run: () => BlockRun, isLast: () => boolean): JSX.Element => {
+    const highlighted = (): boolean => {
+      const highlight = props.highlight;
+      return (
+        highlight !== undefined && highlight !== null && authorKeysOf(run()).has(highlight.key)
+      );
+    };
+    const attrStyle = (): JSX.CSSProperties | undefined =>
+      highlighted()
+        ? highlightStyle(props.highlight?.color ?? ATTRIBUTION_FALLBACK, run().kind)
+        : undefined;
+    const describedBy = (): string | undefined => (highlighted() ? ATTR_DESC_ID : undefined);
+    // Merge a run's character marks (bold/italic/font/size) with any author-
+    // highlight style. `includeDecoration` is false for suggested/marked runs so an
+    // inline underline/strike never clobbers their kind-based affordance class.
+    const runStyle = (
+      marks: TextMarks | undefined,
+      includeDecoration: boolean,
+    ): JSX.CSSProperties | undefined => {
+      const markStyle = textMarkStyle(marks, includeDecoration);
+      const attr = attrStyle();
+      if (Object.keys(markStyle).length === 0 && attr === undefined) {
+        return undefined;
+      }
+      return { ...markStyle, ...attr } as JSX.CSSProperties;
+    };
+    // Strip C0 control chars (table/structural delimiters that ride in the stream)
+    // for display, then drop the ONE trailing paragraph-mark '\n' on a block's last
+    // run — paragraph separation comes from the block box, not the mark.
+    const shown = (text: string): string => {
+      const clean = stripDisplayControlChars(text);
+      return isLast() ? clean.replace(/\n$/, "") : clean;
+    };
+    return (
+      <>
+        <Switch>
+          <Match when={asKind(run(), "accepted-text")}>
+            {(seg) => (
+              <span
+                class="doc-accepted"
+                style={runStyle(seg().marks, true)}
+                aria-describedby={describedBy()}
+              >
+                {shown(seg().text)}
+              </span>
+            )}
+          </Match>
+          <Match when={asKind(run(), "suggested-insert")}>
+            {(seg) => (
+              <span
+                class="doc-suggest"
+                data-doc-tip={strings.viewport.suggestedInsert}
+                style={runStyle(seg().marks, false)}
+                aria-describedby={describedBy()}
+              >
+                <span class="sr-only">{strings.viewport.suggestedInsert}: </span>
+                {shown(seg().text)}
+              </span>
+            )}
+          </Match>
+          <Match when={asKind(run(), "marked-for-deletion")}>
+            {(seg) => (
+              <span
+                class="doc-strike"
+                data-doc-tip={strings.viewport.markedForDeletion}
+                style={runStyle(seg().marks, false)}
+                aria-describedby={describedBy()}
+              >
+                <span class="sr-only">{strings.viewport.markedForDeletion}: </span>
+                {shown(seg().text)}
+              </span>
+            )}
+          </Match>
+          <Match when={asKind(run(), "opaque-placeholder")}>
+            {(seg) => (
+              <span class="doc-opaque">
+                <span aria-hidden="true" class="inline-flex text-ink-muted">
+                  {structureIcon(seg().structure)}
+                </span>
+                <span>{seg().label}</span>
+              </span>
+            )}
+          </Match>
+        </Switch>
+        {/* The writing caret (nib), painted after the run the current revision wrote
+            and tinted to that author's hue. Decorative — the dateline and colophon
+            carry the attribution semantics for assistive tech. */}
+        <Show when={caretSeq() === run().seq}>
+          <span class="doc-caret" aria-hidden="true" style={{ "background-color": caretColor() }} />
+        </Show>
+      </>
+    );
+  };
 
   // ── Follow-caret auto-scroll (legibility during NON-LINEAR playback) ─────────
   // When playback jumps between distant sections, keep the active edit in view. The
@@ -312,8 +422,8 @@ const DocumentViewport: Component<DocumentViewportProps> = (props) => {
   // toggle flipping. These are the tracked reads; the DOM measure runs off the
   // reactive path in `recompute`.
   createEffect(() => {
-    void caretIndex();
-    void props.segments.length;
+    void caretSeq();
+    void props.blocks.length;
     void props.follow;
     schedule();
   });
@@ -477,7 +587,7 @@ const DocumentViewport: Component<DocumentViewportProps> = (props) => {
       }}
     >
       <Show
-        when={props.segments.length > 0}
+        when={hasContent()}
         fallback={<p class="doc-column italic text-ink-muted">{strings.viewport.empty}</p>}
       >
         <article class="doc-column" dir="auto">
@@ -491,93 +601,38 @@ const DocumentViewport: Component<DocumentViewportProps> = (props) => {
               </span>
             )}
           </Show>
-          <Index each={props.segments}>
-            {(segment, index) => {
-              // Highlighted iff this run's author is the foregrounded one. The DOM stays
-              // put — `<Index>` is position-keyed, so the row's spans are reused across
-              // ticks (never torn down, so a hovered tooltip keeps its `:hover`); only
-              // these reactive style/aria accessors re-evaluate on a focus change, and
-              // only the matching spans actually write to the DOM. `segment` is a `()
-              // => Segment` accessor here, so each read inside these closures tracks the
-              // per-row signal and the body restyles in place when the run updates.
-              const highlighted = (): boolean => {
-                const highlight = props.highlight;
-                return (
-                  highlight !== undefined &&
-                  highlight !== null &&
-                  authorKeysOf(segment()).has(highlight.key)
-                );
-              };
-              const attrStyle = (): JSX.CSSProperties | undefined =>
-                highlighted()
-                  ? highlightStyle(props.highlight?.color ?? ATTRIBUTION_FALLBACK, segment().kind)
-                  : undefined;
-              const describedBy = (): string | undefined =>
-                highlighted() ? ATTR_DESC_ID : undefined;
-              return (
-                <>
-                  <Switch>
-                    <Match when={asKind(segment(), "accepted-text")}>
-                      {(seg) => (
-                        <span
-                          class="doc-accepted"
-                          style={attrStyle()}
-                          aria-describedby={describedBy()}
-                        >
-                          {seg().text}
+          {/* Paragraph / embed blocks (plan Phase 1). The OUTER `<Index>` keys blocks
+              by position and the INNER one keys runs by position, so the node at block
+              i / run j persists across playback ticks — a hovered tooltip keeps its
+              `:hover` and there is no per-tick teardown flicker (the same reason the
+              flat list used `<Index>`). Authorship + caret ride on the global run
+              `seq`, never on array position. */}
+          <Index each={props.blocks}>
+            {(block) => (
+              <Switch>
+                <Match when={block().kind === "embed"}>
+                  <div class="doc-block-embed">
+                    <Index each={block().runs}>
+                      {(run, index) => renderRun(run, () => index === block().runs.length - 1)}
+                    </Index>
+                  </div>
+                </Match>
+                <Match when={block().kind === "paragraph"}>
+                  <p class="doc-block" style={blockMarkStyle(block().marks)}>
+                    <Show when={block().list} keyed>
+                      {(list) => (
+                        <span class="doc-list-bullet" aria-hidden="true">
+                          {listGlyphFor(list)}&nbsp;
                         </span>
                       )}
-                    </Match>
-                    <Match when={asKind(segment(), "suggested-insert")}>
-                      {(seg) => (
-                        <span
-                          class="doc-suggest"
-                          data-doc-tip={strings.viewport.suggestedInsert}
-                          style={attrStyle()}
-                          aria-describedby={describedBy()}
-                        >
-                          <span class="sr-only">{strings.viewport.suggestedInsert}: </span>
-                          {seg().text}
-                        </span>
-                      )}
-                    </Match>
-                    <Match when={asKind(segment(), "marked-for-deletion")}>
-                      {(seg) => (
-                        <span
-                          class="doc-strike"
-                          data-doc-tip={strings.viewport.markedForDeletion}
-                          style={attrStyle()}
-                          aria-describedby={describedBy()}
-                        >
-                          <span class="sr-only">{strings.viewport.markedForDeletion}: </span>
-                          {seg().text}
-                        </span>
-                      )}
-                    </Match>
-                    <Match when={asKind(segment(), "opaque-placeholder")}>
-                      {(seg) => (
-                        <span class="doc-opaque">
-                          <span aria-hidden="true" class="inline-flex text-ink-muted">
-                            {structureIcon(seg().structure)}
-                          </span>
-                          <span>{seg().label}</span>
-                        </span>
-                      )}
-                    </Match>
-                  </Switch>
-                  {/* The writing caret (nib), painted after the run the current revision
-                      wrote and tinted to that author's hue. Decorative — the dateline and
-                      colophon carry the attribution semantics for assistive tech. */}
-                  <Show when={caretIndex() === index}>
-                    <span
-                      class="doc-caret"
-                      aria-hidden="true"
-                      style={{ "background-color": caretColor() }}
-                    />
-                  </Show>
-                </>
-              );
-            }}
+                    </Show>
+                    <Index each={block().runs}>
+                      {(run, index) => renderRun(run, () => index === block().runs.length - 1)}
+                    </Index>
+                  </p>
+                </Match>
+              </Switch>
+            )}
           </Index>
         </article>
       </Show>

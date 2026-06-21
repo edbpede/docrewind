@@ -14,6 +14,7 @@
 // final-state visibility rule below mirrors `text.ts`'s `liveAtT` +
 // `notSuggestedDelete` predicate exactly.
 
+import type { TextMarks } from "../decoder/style-allowlist";
 import type { OpaqueStructure } from "../decoder/types";
 import { opaqueLabel } from "../i18n/strings";
 import type { DocumentModel, SuggestionState } from "./model";
@@ -43,6 +44,7 @@ export type Segment =
       readonly fromRevision: number;
       readonly toRevision: number;
       readonly revisions: readonly number[];
+      readonly marks?: TextMarks;
     }
   | {
       readonly kind: "suggested-insert";
@@ -50,6 +52,7 @@ export type Segment =
       readonly fromRevision: number;
       readonly toRevision: number;
       readonly revisions: readonly number[];
+      readonly marks?: TextMarks;
     }
   | {
       readonly kind: "marked-for-deletion";
@@ -57,6 +60,7 @@ export type Segment =
       readonly fromRevision: number;
       readonly toRevision: number;
       readonly revisions: readonly number[];
+      readonly marks?: TextMarks;
     }
   | {
       readonly kind: "opaque-placeholder";
@@ -91,6 +95,31 @@ interface TextRun {
   // Every revision that wrote a char into this run, deduped. Endpoints alone
   // miss contributors whose edit coalesced into the middle of the run.
   revisions: Set<number>;
+  // Interned character marks (bold/italic/font…); a run breaks when these differ.
+  marks: TextMarks | undefined;
+}
+
+/**
+ * Structural equality for character marks. Marks are assigned as frozen objects
+ * shared across an `as` op's range (so consecutive same-op chars compare `===`),
+ * but distinct ops produce distinct objects, so a structural compare is needed to
+ * coalesce identically-styled adjacent runs. O(1) over the closed field set.
+ */
+function marksEqual(a: TextMarks | undefined, b: TextMarks | undefined): boolean {
+  if (a === b) {
+    return true;
+  }
+  if (a === undefined || b === undefined) {
+    return false;
+  }
+  return (
+    a.bold === b.bold &&
+    a.italic === b.italic &&
+    a.underline === b.underline &&
+    a.strikethrough === b.strikethrough &&
+    a.fontCategory === b.fontCategory &&
+    a.fontSizePt === b.fontSizePt
+  );
 }
 
 /**
@@ -127,6 +156,7 @@ export function segmentsAt(model: DocumentModel): readonly Segment[] {
         fromRevision: run.fromRevision,
         toRevision: run.toRevision,
         revisions: [...run.revisions],
+        ...(run.marks !== undefined ? { marks: run.marks } : {}),
       });
       run = null;
     }
@@ -167,7 +197,15 @@ export function segmentsAt(model: DocumentModel): readonly Segment[] {
         // insertion point. Without the break, the trailing base content overwrites
         // `toRevision` back to 0 and sweeps the writing caret (painted after a run) past
         // the real edit — the mis-aligned-nib bug on template-heavy docs.
-        if (run !== null && run.kind === kind && el.insertRevision >= run.toRevision) {
+        // A run also BREAKS when adjacent character marks differ, so each run is
+        // uniformly styled (bold, italic, font…) and the viewport renders it as one
+        // span. marksEqual is structural but O(1) over the closed mark fields.
+        if (
+          run !== null &&
+          run.kind === kind &&
+          el.insertRevision >= run.toRevision &&
+          marksEqual(el.marks, run.marks)
+        ) {
           run.text += el.char;
           run.toRevision = el.insertRevision;
           run.revisions.add(el.insertRevision);
@@ -179,6 +217,7 @@ export function segmentsAt(model: DocumentModel): readonly Segment[] {
             fromRevision: el.insertRevision,
             toRevision: el.insertRevision,
             revisions: new Set([el.insertRevision]),
+            marks: el.marks,
           };
         }
         break;

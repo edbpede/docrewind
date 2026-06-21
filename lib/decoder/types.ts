@@ -14,6 +14,7 @@
 // reconstruction engine depend on these shapes, so the types land first.
 
 import type { RevisionId } from "../domain/ids";
+import type { ListMark, ParagraphMarks, TextMarks } from "./style-allowlist";
 
 /** Non-text structures that ride outside the plain character stream (A.8). */
 export type OpaqueStructure =
@@ -101,6 +102,36 @@ export interface OpaquePlaceholder {
 }
 
 /**
+ * `as` / `astss` — ApplyStyle. Sets paragraph- or character-scope formatting over
+ * the inclusive 1-indexed live range `si..ei`. The opaque wire style map `sm` is
+ * NOT carried here: decode.ts runs it through the closed-output style allowlist
+ * (R5), so this variant holds ONLY the extracted, privacy-safe marks. Paragraph
+ * style sits on the paragraph-mark `\n` (si==ei); text style spans a run. `astss`
+ * is the suggestion form (`suggested: true`) and applies identically in replay.
+ */
+export interface ApplyStyle {
+  readonly ty: "as";
+  readonly scope: "paragraph" | "text" | "list";
+  readonly si: number;
+  readonly ei: number;
+  readonly suggested: boolean;
+  readonly paragraph?: ParagraphMarks;
+  readonly text?: TextMarks;
+  readonly list?: ListMark;
+}
+
+/**
+ * `te` — PlaceEntity. Inserts an embedded object (image / drawing / …) into the
+ * character stream at the 1-indexed live position `spi`. The defining `ae` op
+ * (entity property map) is not modeled structurally yet, so the slot renders as a
+ * labeled placeholder (the inline image default) — no pixels, per host-permission.
+ */
+export interface PlaceEntity {
+  readonly ty: "te";
+  readonly spi: number;
+}
+
+/**
  * An unrecognized wire operation. Privacy-safe by construction (R5, §13.7):
  * carries ONLY the unrecognized wire op-code and the byte length of the skipped
  * payload — never any verbatim text. Lets decoding continue past unknown ops.
@@ -127,4 +158,6 @@ export type Operation =
   | UnmarkStringForDeletion
   | ReplaceWithSnapshot
   | OpaquePlaceholder
+  | ApplyStyle
+  | PlaceEntity
   | UnknownOp;

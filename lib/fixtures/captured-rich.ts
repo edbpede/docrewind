@@ -159,5 +159,6 @@ export const CAPTURED_RICH_DOC: CapturedFixture = {
   expectedFinalText: "text plus suggestion",
 };
 
-/** The op codes this fixture proves are isolated via the open-world UnknownOp path. */
-export const RICH_DOC_UNKNOWN_OPCODES = ["ae", "te", "ue", "astss", "sue"] as const;
+/** The op codes this fixture proves are isolated via the open-world UnknownOp path.
+ *  (`astss` is now a recognized ApplyStyle; `te` a recognized PlaceEntity.) */
+export const RICH_DOC_UNKNOWN_OPCODES = ["ae", "ue", "sue"] as const;

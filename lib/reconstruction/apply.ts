@@ -13,7 +13,8 @@
 // inserts and suggestion-marked-for-deletion elements remain live (visible), so
 // they still occupy positions.
 
-import type { OpaqueStructure, Operation } from "../decoder/types";
+import type { ListMark, ParagraphMarks, TextMarks } from "../decoder/style-allowlist";
+import type { ApplyStyle, OpaqueStructure, Operation } from "../decoder/types";
 import type { RevisionId } from "../domain/ids";
 import type { DecodedRevision } from "../domain/model";
 import type { CharElement, DocumentModel, SuggestionState, TextChar } from "./model";
@@ -117,6 +118,106 @@ function markRange(
 }
 
 /**
+ * Replace block (paragraph) marks over the inclusive live range `si..ei`. The
+ * range targets a paragraph-mark `\n` — or, for the document's final paragraph,
+ * the EndOfBody sentinel — so unlike markRange this DOES include the EOB. Each
+ * `as` op fully restates its paragraph style, so empty marks CLEAR (revert to
+ * default). A fresh frozen object is assigned (immutable-by-replacement), so the
+ * shallow clone in model.ts is alias-safe.
+ */
+function setBlockMarks(
+  chars: readonly CharElement[],
+  si: number,
+  ei: number,
+  marks: ParagraphMarks,
+): void {
+  const frozen = Object.keys(marks).length > 0 ? Object.freeze({ ...marks }) : undefined;
+  let count = 0;
+  for (const el of chars) {
+    if (el.deleteRevision !== null) {
+      continue;
+    }
+    count++;
+    if (count > ei) {
+      break;
+    }
+    if (count >= si) {
+      if (frozen === undefined) {
+        delete el.block;
+      } else {
+        el.block = frozen;
+      }
+    }
+  }
+}
+
+/** Replace character marks over the inclusive live range `si..ei` (text chars
+ *  only). Empty marks clear. Fresh frozen object per call (immutable-by-replacement). */
+function setTextMarks(
+  chars: readonly CharElement[],
+  si: number,
+  ei: number,
+  marks: TextMarks,
+): void {
+  const frozen = Object.keys(marks).length > 0 ? Object.freeze({ ...marks }) : undefined;
+  let count = 0;
+  for (const el of chars) {
+    if (el.deleteRevision !== null) {
+      continue;
+    }
+    count++;
+    if (count > ei) {
+      break;
+    }
+    if (count >= si && el.kind === "char") {
+      if (frozen === undefined) {
+        delete el.marks;
+      } else {
+        el.marks = frozen;
+      }
+    }
+  }
+}
+
+/** Replace list membership over the inclusive live range `si..ei` (the paragraph
+ *  mark `\n` / EOB). `undefined` clears membership (removed from a list). */
+function setListMark(
+  chars: readonly CharElement[],
+  si: number,
+  ei: number,
+  list: ListMark | undefined,
+): void {
+  let count = 0;
+  for (const el of chars) {
+    if (el.deleteRevision !== null) {
+      continue;
+    }
+    count++;
+    if (count > ei) {
+      break;
+    }
+    if (count >= si) {
+      if (list === undefined) {
+        delete el.list;
+      } else {
+        el.list = list;
+      }
+    }
+  }
+}
+
+/** Apply an ApplyStyle op: paragraph/list marks ride the `\n`/EOB, text marks the run. */
+function applyStyle(model: DocumentModel, op: ApplyStyle): void {
+  if (op.scope === "paragraph") {
+    setBlockMarks(model.chars, op.si, op.ei, op.paragraph ?? {});
+  } else if (op.scope === "text") {
+    setTextMarks(model.chars, op.si, op.ei, op.text ?? {});
+  } else {
+    setListMark(model.chars, op.si, op.ei, op.list);
+  }
+}
+
+/**
  * Apply one operation to the model. Closed-world: the `never` default makes a
  * missing arm a compile error (R2). `mlti` recurses depth-first; `unknown` and
  * `opaque` never mutate text content.
@@ -172,6 +273,18 @@ export function applyOperation(model: DocumentModel, op: Operation, revisionId: 
     }
     case "opaque": {
       insertOpaque(model, op.position, op.structure, revisionId);
+      break;
+    }
+    case "as": {
+      // ApplyStyle (paragraph / text / list scope). Additive: never changes text,
+      // character counts, or live/physical indices (formatting is layered on).
+      applyStyle(model, op);
+      break;
+    }
+    case "te": {
+      // Place an embedded entity as an opaque slot (the inline-image default). The
+      // slot occupies one live position, exactly mirroring the wire's `spi` insert.
+      insertOpaque(model, op.spi, "image", revisionId);
       break;
     }
     case "unknown": {

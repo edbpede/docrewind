@@ -28,19 +28,27 @@ describe("captured rich/suggesting doc — §24 Q7 (2026-06-12)", () => {
       const op = r.operations[0];
       if (op !== undefined) opByRevision.set(Number(r.revisionId), op);
     }
-    // ae (rev 3), te (rev 4), ue (rev 5), astss (rev 7), sue (rev 8) → UnknownOp,
-    // each carrying ONLY its wire op-code (privacy-safe; no embedded payload text).
+    // ae (rev 3), ue (rev 5), sue (rev 8) → UnknownOp, each carrying ONLY its wire
+    // op-code (privacy-safe; no embedded payload text). te (rev 4) is now a
+    // recognized PlaceEntity and astss (rev 7) a paragraph-scope ApplyStyle.
     const unknownByRev: Record<number, string> = {
       3: "ae",
-      4: "te",
       5: "ue",
-      7: "astss",
       8: "sue",
     };
     for (const [rev, opCode] of Object.entries(unknownByRev)) {
       const op = opByRevision.get(Number(rev));
       expect(op?.ty).toBe("unknown");
       if (op?.ty === "unknown") expect(op.opCode).toBe(opCode);
+    }
+    // te (rev 4) decodes to a typed PlaceEntity (embedded-object placement).
+    expect(opByRevision.get(4)?.ty).toBe("te");
+    // astss (rev 7) decodes to a typed ApplyStyle (suggestion, paragraph scope).
+    const astss = opByRevision.get(7);
+    expect(astss?.ty).toBe("as");
+    if (astss?.ty === "as") {
+      expect(astss.scope).toBe("paragraph");
+      expect(astss.suggested).toBe(true);
     }
     // The set of unrecognized codes matches the fixture's documented inventory.
     const liveUnknown = decoded
