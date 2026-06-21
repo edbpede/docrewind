@@ -65,13 +65,17 @@ function buildDayTicks(start: number, end: number): readonly number[] {
   const ticks: number[] = [];
   const cursor = new Date(start);
   cursor.setHours(0, 0, 0, 0);
-  // Guard against pathological spans (the loop is also bounded by `end`).
-  const maxIterations = Math.min(800, Math.ceil((end - start) / ONE_DAY_MS) + 4);
-  for (let i = 0; i <= maxIterations; i++) {
+  // Stride by whole days, but step in multi-day strides for pathological spans so
+  // the axis still reaches `end` within a bounded tick count (spaceTicks thins the
+  // result for display anyway). For spans under ~800 days the stride is 1 (every
+  // day); beyond that it widens just enough to keep the iteration count capped.
+  const totalDays = Math.ceil((end - cursor.getTime()) / ONE_DAY_MS) + 1;
+  const stepDays = Math.max(1, Math.ceil(totalDays / 800));
+  for (let i = 0; i < totalDays; i += stepDays) {
     const ms = cursor.getTime();
     if (ms > end) break;
     ticks.push(ms);
-    cursor.setDate(cursor.getDate() + 1);
+    cursor.setDate(cursor.getDate() + stepDays);
     cursor.setHours(0, 0, 0, 0);
   }
   return ticks;
@@ -227,9 +231,13 @@ const DocumentSummary: Component<DocumentSummaryProps> = (props) => {
           <dl class="flex flex-wrap gap-x-10 gap-y-5">
             <For each={stats()}>
               {(stat) => (
-                <div class="dr-stat">
-                  <dd class="dr-stat-value">{stat.value}</dd>
+                // <dt> before <dd> for valid definition-list semantics; the
+                // flex-col-reverse keeps the big value visually on top (matching
+                // SummaryInsights). Avoids the shared `dr-stat` shortcut, which is
+                // plain flex-col and would render value-below.
+                <div class="flex flex-col-reverse gap-0.5">
                   <dt class="dr-stat-label">{stat.label}</dt>
+                  <dd class="dr-stat-value">{stat.value}</dd>
                 </div>
               )}
             </For>

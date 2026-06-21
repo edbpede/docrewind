@@ -45,9 +45,10 @@ export interface DocumentSummary {
   /** Earliest / latest revision timestamp among timed revisions (epoch ms). */
   readonly startTime: number;
   readonly endTime: number;
-  /** Peak document length over the whole history — the length-axis upper bound. */
+  /** Peak document length across the plotted (timed) history — the length-axis
+   *  upper bound. */
   readonly maxLength: number;
-  /** Final document length (length after the last revision). */
+  /** Document length at the latest timestamp — the series' right endpoint. */
   readonly finalLength: number;
   /** Every revision (timed or not). */
   readonly totalRevisions: number;
@@ -151,10 +152,13 @@ function scanRevision(revision: DecodedRevision): OpScan {
   return { inserted, deleted, position };
 }
 
-/** A raw plot point before normalization / down-sampling. */
+/** A raw plot point before chronological accumulation / normalization /
+ *  down-sampling. `delta` is this revision's net character change (inserted −
+ *  deleted, pre-clamp); cumulative length is summed in timestamp order below so
+ *  the area curve never mis-pairs a length with the wrong moment. */
 interface RawPoint {
   readonly t: number;
-  readonly length: number;
+  readonly delta: number;
   readonly position: number | null;
 }
 
@@ -186,9 +190,6 @@ function downsample<T>(points: readonly T[], cap: number): T[] {
  * deterministic: no clocks, no randomness, no DOM.
  */
 export function deriveDocumentSummary(revisions: readonly DecodedRevision[]): DocumentSummary {
-  let length = 0;
-  let maxLength = 0;
-  let finalLength = 0;
   let charsInserted = 0;
   let charsDeleted = 0;
   let posDenominator = 1;
@@ -198,13 +199,14 @@ export function deriveDocumentSummary(revisions: readonly DecodedRevision[]): Do
 
   const raw: RawPoint[] = [];
 
+  // First pass: order-independent aggregates + per-revision deltas. The
+  // cumulative length is summed later, in timestamp order, so each plotted
+  // length is paired with the moment it actually held (revision arrival order is
+  // usually chronological, but a non-monotonic stamp must not mis-pair lengths).
   for (const revision of revisions) {
     const { inserted, deleted, position } = scanRevision(revision);
     charsInserted += inserted;
     charsDeleted += deleted;
-    length = Math.max(0, length + inserted - deleted);
-    maxLength = Math.max(maxLength, length);
-    finalLength = length;
     if (position !== null) {
       posDenominator = Math.max(posDenominator, position);
     }
@@ -218,8 +220,23 @@ export function deriveDocumentSummary(revisions: readonly DecodedRevision[]): Do
     timedRevisions += 1;
     startTime = Math.min(startTime, time);
     endTime = Math.max(endTime, time);
-    raw.push({ t: time, length, position });
+    raw.push({ t: time, delta: inserted - deleted, position });
   }
+
+  // Sort onto the time axis, then accumulate cumulative length chronologically.
+  // Stable on equal stamps, so same-instant revisions keep arrival order.
+  const sorted = [...raw].sort((a, b) => a.t - b.t);
+  let length = 0;
+  let maxLength = 0;
+  const plotted: { t: number; length: number; position: number | null }[] = [];
+  for (const point of sorted) {
+    length = Math.max(0, length + point.delta);
+    maxLength = Math.max(maxLength, length);
+    plotted.push({ t: point.t, length, position: point.position });
+  }
+  // `finalLength` is the length at the latest timestamp — the series endpoint,
+  // so the headline stat and the area curve's right edge always agree.
+  const finalLength = length;
 
   posDenominator = Math.max(posDenominator, maxLength, 1);
 
@@ -240,10 +257,7 @@ export function deriveDocumentSummary(revisions: readonly DecodedRevision[]): Do
     };
   }
 
-  // Sort onto the time axis (revision order is usually chronological, but a
-  // non-monotonic stamp must not zigzag the area path). Stable on equal stamps.
-  const sorted = [...raw].sort((a, b) => a.t - b.t);
-  const series: SummaryPoint[] = downsample(sorted, MAX_SERIES_POINTS).map((point) => ({
+  const series: SummaryPoint[] = downsample(plotted, MAX_SERIES_POINTS).map((point) => ({
     t: point.t,
     length: point.length,
     pos: point.position === null ? -1 : Math.min(1, Math.max(0, point.position / posDenominator)),

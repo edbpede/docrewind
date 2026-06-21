@@ -127,6 +127,27 @@ describe("deriveDocumentSummary", () => {
       rev(2_000, [insert("b", 1)]),
     ]);
     expect(summary.series.map((p) => p.t)).toEqual([1_000, 2_000, 3_000]);
+    // The cumulative length must accumulate in chronological order, so each
+    // plotted length is paired with the moment it actually held — not the order
+    // the revisions happened to arrive in.
+    expect(summary.series.map((p) => p.length)).toEqual([1, 2, 3]);
+  });
+
+  it("pairs cumulative length with the right moment when deltas vary and stamps are out of order", () => {
+    // Arrival order ≠ timestamp order, with differing per-revision deltas, so an
+    // arrival-order accumulator would mis-pair lengths against timestamps.
+    const summary = deriveDocumentSummary([
+      rev(3_000, [insert("xyz", 1)]), // arrives first, but is chronologically last
+      rev(1_000, [insert("a", 1)]), // chronologically first
+      rev(2_000, [insert("bb", 1)]), // chronologically middle
+    ]);
+    expect(summary.series.map((p) => p.t)).toEqual([1_000, 2_000, 3_000]);
+    // Chronological cumulative: 1 → 1+2=3 → 3+3=6.
+    expect(summary.series.map((p) => p.length)).toEqual([1, 3, 6]);
+    // finalLength is the length at the latest timestamp (the series endpoint).
+    expect(summary.finalLength).toBe(6);
+    expect(summary.series[summary.series.length - 1]?.length).toBe(6);
+    expect(summary.maxLength).toBe(6);
   });
 
   it("ignores out-of-range timestamps", () => {
