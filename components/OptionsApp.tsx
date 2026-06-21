@@ -12,12 +12,13 @@
 // the theme is a segmented control; storage caps are unit-suffixed number fields.
 
 import type { Component, JSX } from "solid-js";
-import { createResource, createSignal, For, onMount, Show } from "solid-js";
+import { createResource, createSignal, onMount, Show } from "solid-js";
 import BrandMark from "@/components/BrandMark";
 import CacheControls from "@/components/CacheControls";
 import DiagnosticsPreferences from "@/components/DiagnosticsPreferences";
 import { IconAlert, IconInfo } from "@/components/icons";
 import PrivacySummary from "@/components/PrivacySummary";
+import ThemeControl from "@/components/ThemeControl";
 import { useThemeSync } from "@/components/theme-sync";
 import { createIdbStore } from "@/lib/db";
 import { asDocId } from "@/lib/domain/ids";
@@ -36,19 +37,11 @@ import {
   resolvedIdentities,
   type StorageBudget,
   storageBudget,
-  type Theme,
-  theme,
   upsertPendingDestructiveStorageClear,
   upsertPendingStorageMaintenance,
 } from "@/lib/settings";
 
 const MIB = 1024 * 1024;
-
-const THEME_OPTIONS: ReadonlyArray<{ value: Theme; label: string }> = [
-  { value: "system", label: strings.options.themeSystem },
-  { value: "light", label: strings.options.themeLight },
-  { value: "dark", label: strings.options.themeDark },
-];
 
 function parseDocId(search: string): DocId | null {
   const raw = new URLSearchParams(search).get("doc");
@@ -144,7 +137,6 @@ const OptionsApp: Component = () => {
   const store = createIdbStore();
   const docId = parseDocId(window.location.search);
 
-  const [themeValue, { mutate: mutateTheme }] = createResource(() => theme.getValue());
   const [keepRaw, { mutate: mutateKeepRaw }] = createResource(() => keepRawData.getValue());
   const [showIdentities, { mutate: mutateIdentities }] = createResource(() =>
     realIdentities.getValue(),
@@ -155,12 +147,6 @@ const OptionsApp: Component = () => {
   onMount(() => {
     void refreshPendingStatus();
   });
-
-  function onTheme(next: Theme): void {
-    if ((themeValue() ?? "system") === next) return;
-    mutateTheme(next);
-    void theme.setValue(next);
-  }
 
   function onKeepRaw(next: boolean): void {
     mutateKeepRaw(next);
@@ -284,28 +270,7 @@ const OptionsApp: Component = () => {
             {strings.options.settingsHeading}
           </h2>
           <div class="dr-rows">
-            <div class="dr-row">
-              <span class="dr-row-label">{strings.options.themeLabel}</span>
-              <fieldset class="seg m-0 border-0">
-                <legend class="sr-only">{strings.options.themeLabel}</legend>
-                <For each={THEME_OPTIONS}>
-                  {(option) => (
-                    <button
-                      type="button"
-                      class={
-                        (themeValue() ?? "system") === option.value
-                          ? "seg-item seg-item-active"
-                          : "seg-item"
-                      }
-                      aria-pressed={(themeValue() ?? "system") === option.value}
-                      onClick={() => onTheme(option.value)}
-                    >
-                      {option.label}
-                    </button>
-                  )}
-                </For>
-              </fieldset>
-            </div>
+            <ThemeControl />
           </div>
         </section>
 

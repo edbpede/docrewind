@@ -30,6 +30,7 @@ import PlaybackControls from "@/components/PlaybackControls";
 import PrivacyBanner from "@/components/PrivacyBanner";
 import ProgressView, { type ProgressPhase } from "@/components/ProgressView";
 import SummaryInsights from "@/components/SummaryInsights";
+import ThemeControl from "@/components/ThemeControl";
 import Timeline, { type TimelineMarker } from "@/components/Timeline";
 import TimelineLegend from "@/components/TimelineLegend";
 import { useThemeSync } from "@/components/theme-sync";
@@ -883,11 +884,16 @@ const ReplaySurface: Component<{
                 {(data) => (
                   <main class="mx-auto flex max-w-[58rem] flex-col gap-5 p-6 sm:p-8">
                     <header class="dr-masthead">
-                      <div class="flex items-center gap-3">
-                        <BrandMark size={40} />
-                        <div class="flex flex-col gap-1">
-                          <p class="dr-eyebrow">{strings.app.mastheadEyebrow}</p>
-                          <h1 class="dr-title">{strings.app.mastheadTitle}</h1>
+                      <div class="flex items-center justify-between gap-3">
+                        <div class="flex min-w-0 items-center gap-3">
+                          <BrandMark size={40} />
+                          <div class="flex min-w-0 flex-col gap-1">
+                            <p class="dr-eyebrow">{strings.app.mastheadEyebrow}</p>
+                            <h1 class="dr-title">{strings.app.mastheadTitle}</h1>
+                          </div>
+                        </div>
+                        <div class="shrink-0">
+                          <ThemeControl bare />
                         </div>
                       </div>
                       <PrivacyBanner approximationNote={strings.privacy.approximationNote} />

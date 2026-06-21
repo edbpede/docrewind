@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fakeBrowser } from "wxt/testing";
 import PopupApp from "@/components/PopupApp";
 import { strings } from "@/lib/i18n/strings";
+import { theme } from "@/lib/settings";
 
 // useThemeSync reads window.matchMedia on mount; jsdom omits it.
 function installMatchMedia(): void {
@@ -21,6 +22,7 @@ afterEach(cleanup);
 
 describe("PopupApp", () => {
   beforeEach(() => {
+    fakeBrowser.reset();
     installMatchMedia();
     // Deterministic manifest + an observable options-page opener.
     fakeBrowser.runtime.getManifest = (() => ({ version: "1.2.3" })) as never;
@@ -65,5 +67,32 @@ describe("PopupApp", () => {
     fireEvent.click(screen.getByRole("button", { name: strings.popup.aboutButton }));
     fireEvent.click(screen.getByRole("button", { name: strings.popup.backHint }));
     expect(screen.getByText(strings.popup.description)).toBeTruthy();
+  });
+
+  it("renders the theme selector with the system option selected by default", async () => {
+    await theme.setValue("system");
+    render(() => <PopupApp />);
+
+    const system = await screen.findByRole("button", { name: strings.options.themeSystem });
+    const light = screen.getByRole("button", { name: strings.options.themeLight });
+    const dark = screen.getByRole("button", { name: strings.options.themeDark });
+
+    expect(system.className).toContain("seg-item-active");
+    expect(system.getAttribute("aria-pressed")).toBe("true");
+    expect(light.className).not.toContain("seg-item-active");
+    expect(dark.className).not.toContain("seg-item-active");
+  });
+
+  it("persists a theme change to the theme setting and reflects it live", async () => {
+    render(() => <PopupApp />);
+
+    const dark = await screen.findByRole("button", { name: strings.options.themeDark });
+    fireEvent.click(dark);
+
+    expect(dark.className).toContain("seg-item-active");
+    expect(dark.getAttribute("aria-pressed")).toBe("true");
+    await vi.waitFor(async () => {
+      expect(await theme.getValue()).toBe("dark");
+    });
   });
 });

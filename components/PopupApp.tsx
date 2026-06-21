@@ -26,6 +26,7 @@ import {
   IconSettings,
   IconShield,
 } from "@/components/icons";
+import ThemeControl from "@/components/ThemeControl";
 import { useThemeSync } from "@/components/theme-sync";
 import { strings } from "@/lib/i18n/strings";
 
@@ -97,6 +98,15 @@ const PopupApp: Component = () => {
                 <span class="banner-title">{popup.privacyNote}</span>
               </div>
             </div>
+
+            <section class="dr-group" aria-labelledby="dr-popup-appearance">
+              <h2 id="dr-popup-appearance" class="dr-group-label">
+                {strings.options.settingsHeading}
+              </h2>
+              <div class="dr-rows">
+                <ThemeControl />
+              </div>
+            </section>
 
             <div class="flex flex-col gap-2.5">
               <button type="button" class="btn-primary btn-block btn-lg" onClick={openOptions}>
