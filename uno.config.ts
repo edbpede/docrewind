@@ -296,8 +296,8 @@ const shortcuts = {
   "dr-sum-tip":
     "pointer-events-none absolute top-2 z-[80] flex w-max max-w-[14rem] flex-col gap-1 " +
     "rounded-xl bg-surface px-3 py-2 ring-1 ring-hairline shadow-[var(--dr-shadow-lg)]",
-  "dr-sum-tip-title": "text-[13px] font-semibold text-ink",
-  "dr-sum-tip-detail": "font-mono text-[11px] tabular-nums text-ink-muted",
+  "dr-sum-tip-title": "tl-tip-title",
+  "dr-sum-tip-detail": "tl-tip-detail",
   // A quiet absolutely-positioned axis caption (length ceiling, doc-position
   // bounds) matching the DayAxis aesthetic. `pointer-events-none` so it never
   // intercepts a scrub.
