@@ -390,3 +390,24 @@ export function summaryEditPosition(fraction: number): string {
   const pct = Math.round(Math.min(1, Math.max(0, fraction)) * 100);
   return `At ${pct}% of document`;
 }
+
+/** A compact axis-tick count for the summary length axis, e.g. "0", "850",
+ *  "1.2k", "12k", "1.4M". Count only — never any document text. The bare numeric
+ *  scale (no "chars" suffix) keeps the gridline labels narrow; the legend and the
+ *  hover tooltip carry the unit. */
+export function formatCompactCount(n: number): string {
+  const v = Math.max(0, Math.round(n));
+  if (v < 1000) return v.toLocaleString();
+  if (v < 1_000_000) {
+    const k = v / 1000;
+    return `${k < 10 ? k.toFixed(1).replace(/\.0$/, "") : Math.round(k).toString()}k`;
+  }
+  const m = v / 1_000_000;
+  return `${m < 10 ? m.toFixed(1).replace(/\.0$/, "") : Math.round(m).toString()}M`;
+}
+
+/** A bare percentage axis label for the position scatter's Y axis, e.g. "25%",
+ *  "50%" (fraction in [0, 1]). Position only — never any document text. */
+export function summaryAxisPercent(fraction: number): string {
+  return `${Math.round(Math.min(1, Math.max(0, fraction)) * 100)}%`;
+}
