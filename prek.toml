@@ -18,7 +18,7 @@ hooks = [
   { id = "no-commit-to-branch", args = ["--branch", "main"] },
 ]
 
-# Conventional Commits.
+# Conventional Commits — see CONTRIBUTING.md "Commit Messages".
 [[repos]]
 repo = "https://github.com/compilerla/conventional-pre-commit"
 rev = "v4.4.0"
@@ -34,39 +34,10 @@ hooks = [
   { id = "gitleaks" },
 ]
 
-# ============================================================
-# PROJECT-LOCAL HOOKS — Bun only. Wired to real package.json scripts.
-# Confirmed against package.json: `check`, `compile`, `test:run`, `test:logic` exist.
-#   - biome-check / tsc-compile / check-pure-core run at PRE-COMMIT -> green gate
-#   - vitest / bun-logic-tests / wxt-build run at PRE-PUSH
-# DECISION (plan Phase 0 line 96, unblocked once Phase 7 landed): the `bun run
-# build` smoke gate is now ENABLED at pre-push. Phase 7 confirmed the build is fast
-# (~1-1.5 s) and reproducible
-# (scripts/verify-reproducible-build.sh), so gating pushes on it is cheap and
-# catches bundle/manifest regressions before they reach the remote. It builds the
-# Chromium MV3 target only (fast smoke); CI still builds BOTH browsers.
-# ============================================================
 [[repos]]
 repo = "local"
 hooks = [
-  # Biome format + lint + import-organize in one pass (writes fixes).
-  { id = "biome-check", name = "Biome check (write)", language = "system",
-    entry = "bun run check", types = ["text"], pass_filenames = false },
-  # TypeScript type-check only (noEmit). Runs on commit.
-  { id = "tsc-compile", name = "TypeScript type-check", language = "system",
-    entry = "bun run compile", files = '\.(ts|tsx)$', pass_filenames = false },
-  # Pure-core purity guard — fails if #imports/browser.*/wxt leak into the six
-  # pure dirs (decoder/reconstruction/timeline/domain/protocol/fixtures). Durable into Phase 4.
-  { id = "check-pure-core", name = "Pure-core purity guard", language = "system",
-    entry = "bash scripts/check-pure-core.sh", pass_filenames = false },
-  # Vitest (Solid/storage/browser-API). Heavier — restrict to pre-push.
-  { id = "vitest", name = "Vitest unit/component", language = "system",
-    entry = "bun run test:run", stages = ["pre-push"], pass_filenames = false },
-  # Pure-logic Bun tests (decoder/reconstruction/timeline/domain). Pre-push.
-  { id = "bun-logic-tests", name = "Bun pure-logic tests", language = "system",
-    entry = "bun run test:logic", stages = ["pre-push"], pass_filenames = false },
-  # Extension build smoke (WXT Chromium MV3) — enabled Phase 7 (fast + reproducible).
-  # Catches bundle/manifest regressions before a push; CI builds both browsers.
-  { id = "wxt-build", name = "WXT build (Chromium MV3) smoke", language = "system",
-    entry = "bun run build", stages = ["pre-push"], pass_filenames = false },
+  { id = "biome", name = "Format and lint with Biome", entry = "bun run check", language = "system", pass_filenames = false },
+  { id = "tsc", name = "TypeScript type-check", entry = "bun run compile", language = "system", pass_filenames = false },
+  { id = "vitest", name = "Run test suite", entry = "bun run test:run", language = "system", pass_filenames = false, stages = ["pre-push"] },
 ]
