@@ -11,7 +11,7 @@ import DocumentSummary from "@/components/DocumentSummary";
 import type { Operation } from "@/lib/decoder/types";
 import { asRevisionId } from "@/lib/domain/ids";
 import type { DecodedRevision } from "@/lib/domain/model";
-import { formatHourLabel, strings, summaryCharCount } from "@/lib/i18n/strings";
+import { formatHourLabel, strings } from "@/lib/i18n/strings";
 import { buildHourTicks } from "@/lib/summary/axis";
 
 const HOUR = 3_600_000;
@@ -45,7 +45,7 @@ function stubRect(el: HTMLElement, width = 1000): void {
 describe("DocumentSummary", () => {
   afterEach(() => cleanup());
 
-  it("labels the length ceiling and the document-position bounds", () => {
+  it("renders a quantitative length scale and document-position bounds", () => {
     const t0 = Date.UTC(2026, 5, 21, 12, 0, 0);
     const { container } = render(() => (
       <DocumentSummary
@@ -57,11 +57,18 @@ describe("DocumentSummary", () => {
       />
     ));
 
-    // Activity chart: a caption announcing the peak document length (12 chars).
-    expect(screen.getByText(summaryCharCount(12))).toBeTruthy();
-    // Position chart: top/bottom orientation captions.
-    expect(screen.getByText(strings.summary.axisDocStart)).toBeTruthy();
-    expect(screen.getByText(strings.summary.axisDocEnd)).toBeTruthy();
+    // Both charts now carry a labelled Y axis (a gutter of ticks each), not a lone
+    // ceiling caption: a length scale on the activity chart, position bounds on the
+    // scatter. Read them from the dedicated tick column.
+    const yTicks = [...container.querySelectorAll("[data-yaxis-tick]")].map((el) => el.textContent);
+    // Activity length scale: a 0 baseline up to a tidy ceiling above the 12-char peak.
+    expect(yTicks).toContain("0");
+    expect(yTicks).toContain("15");
+    // Position scale: plain-language ends plus an interior percentage gridline.
+    expect(yTicks).toContain(strings.summary.axisDocStart);
+    expect(yTicks).toContain(strings.summary.axisDocEnd);
+    expect(yTicks).toContain("50%");
+
     // Both charts render, with a scatter point per positioned edit.
     expect(screen.getAllByRole("img").length).toBeGreaterThanOrEqual(2);
     expect(container.querySelectorAll("circle").length).toBeGreaterThan(0);

@@ -28,11 +28,13 @@ import { createMemo, createSignal, For, Show } from "solid-js";
 import { IconChart } from "@/components/icons";
 import type { DecodedRevision } from "@/lib/domain/model";
 import {
+  formatCompactCount,
   formatDayLabel,
   formatDuration,
   formatHourLabel,
   formatSummaryStamp,
   strings,
+  summaryAxisPercent,
   summaryCharCount,
   summaryEditPosition,
 } from "@/lib/i18n/strings";
@@ -40,6 +42,7 @@ import {
   buildDayTicks,
   buildHourTicks,
   isShortSpan,
+  linearTicks,
   nearestPoint,
   startOfDay,
 } from "@/lib/summary/axis";
@@ -57,12 +60,22 @@ const PAD_BOTTOM = 16;
 const ACTIVITY_VB_H = 200;
 const POSITION_VB_H = 360;
 const MIN_LABEL_GAP_PCT = 7;
+// Width of the Y-axis label gutter to the LEFT of each plot. Fixed (not a viewBox
+// fraction) so it stays legible at any container width and so both charts' plot
+// areas line up; sized to fit the longest label ("Start of doc"/"End of doc").
+const Y_AXIS_W = "4.75rem";
+// Normalized edit-position gridlines for the scatter's Y axis (top = doc start).
+const POSITION_TICKS = [0, 0.25, 0.5, 0.75, 1] as const;
+// Length of an X-axis tick mark below the baseline (logical viewBox units).
+const X_TICK_LEN = 4;
 
 const LENGTH_FILL = "var(--dr-brand-soft)";
 const LENGTH_LINE = "var(--dr-brand)";
 const ACTIVITY_FILL = "var(--dr-accent-strong)";
 const POSITION_FILL = "var(--dr-ink-muted)";
 const GRID_STROKE = "var(--dr-hairline)";
+// The baseline + tick marks read as a real axis, a shade stronger than the grid.
+const AXIS_STROKE = "var(--dr-hairline-strong)";
 // Hover-scrub feedback: a crisp neutral playline mirrored across both charts, and
 // the lifted ring color for the emphasized data point under the cursor.
 const SCRUB_STROKE = "var(--dr-ink)";
@@ -74,6 +87,14 @@ interface DayTick {
   /** Left offset as a percent of the container width (matches the SVG x mapping). */
   readonly pct: number;
   /** The precomputed axis label (a day or, for short spans, a clock time). */
+  readonly label: string;
+}
+
+interface YTick {
+  /** Vertical offset as a percent of the chart height (matches the SVG y mapping,
+   *  so the gutter label lines up exactly with its in-SVG gridline). */
+  readonly pct: number;
+  /** The precomputed axis label (a char-count scale value, or a position percent). */
   readonly label: string;
 }
 
@@ -186,10 +207,20 @@ const DocumentSummary: Component<DocumentSummaryProps> = (props) => {
   const activityBaseY = ACTIVITY_VB_H - PAD_BOTTOM;
   const activityInnerH = ACTIVITY_VB_H - PAD_TOP - PAD_BOTTOM;
   const activityDotY = activityBaseY - 6;
+  // Length axis: a tidy rounded ceiling (≥ peak length, with a little headroom) and
+  // the gridline values from 0 up to it — so the chart shows a readable SCALE, not
+  // only its peak. `lengthY` scales against that ceiling.
+  const lengthAxis = createMemo(() => linearTicks(summary().maxLength, 4));
   const lengthY = (length: number): number => {
-    const denom = Math.max(summary().maxLength, 1);
+    const denom = Math.max(lengthAxis().axisMax, 1);
     return activityBaseY - (length / denom) * activityInnerH;
   };
+  const activityYTicks = createMemo<readonly YTick[]>(() =>
+    lengthAxis().ticks.map((v) => ({
+      pct: (lengthY(v) / ACTIVITY_VB_H) * 100,
+      label: formatCompactCount(v),
+    })),
+  );
 
   const areaPath = createMemo(() => {
     const series = summary().series;
@@ -220,6 +251,19 @@ const DocumentSummary: Component<DocumentSummaryProps> = (props) => {
   const positionY = (pos: number): number => PAD_TOP + pos * positionInnerH;
   const scatter = createMemo<readonly SummaryPoint[]>(() =>
     summary().series.filter((p) => p.pos >= 0),
+  );
+  // Position axis: a 0–100% scale read top→bottom (doc start → doc end). The two
+  // ends keep their plain-language captions; the interior quartiles read as percent.
+  const positionYTicks = createMemo<readonly YTick[]>(() =>
+    POSITION_TICKS.map((p) => ({
+      pct: (positionY(p) / POSITION_VB_H) * 100,
+      label:
+        p === 0
+          ? strings.summary.axisDocStart
+          : p === 1
+            ? strings.summary.axisDocEnd
+            : summaryAxisPercent(p),
+    })),
   );
 
   // ── Shared hover scrub (cross-chart correlation) ────────────────────────────
@@ -292,9 +336,10 @@ const DocumentSummary: Component<DocumentSummaryProps> = (props) => {
               <LegendSwatch color={ACTIVITY_FILL} label={strings.summary.legendActivity} />
             </div>
           </div>
-          <div class="relative">
+          <div class="flex">
+            <YAxis ticks={activityYTicks()} />
             <div
-              class="relative"
+              class="relative min-w-0 flex-1"
               data-chart="activity"
               onPointerMove={(e) =>
                 moveHover("activity", e.clientX, e.currentTarget.getBoundingClientRect())
@@ -307,6 +352,23 @@ const DocumentSummary: Component<DocumentSummaryProps> = (props) => {
                 viewBox={`0 0 ${VB_W} ${ACTIVITY_VB_H}`}
                 style={{ width: "100%", height: "auto", display: "block" }}
               >
+                {/* Horizontal length gridlines — the Y scale. */}
+                <For each={lengthAxis().ticks}>
+                  {(v) => (
+                    <line
+                      x1={PAD_X}
+                      y1={lengthY(v)}
+                      x2={VB_W - PAD_X}
+                      y2={lengthY(v)}
+                      style={{
+                        stroke: GRID_STROKE,
+                        "stroke-width": "1",
+                        "stroke-dasharray": "2 5",
+                      }}
+                    />
+                  )}
+                </For>
+                {/* Vertical time gridlines. */}
                 <For each={dayTicks()}>
                   {(tick) => (
                     <Show when={tick.pct > 0.5 && tick.pct < 99.5}>
@@ -345,6 +407,27 @@ const DocumentSummary: Component<DocumentSummaryProps> = (props) => {
                     />
                   )}
                 </For>
+                {/* X-axis baseline + tick marks. */}
+                <line
+                  x1={PAD_X}
+                  y1={activityBaseY}
+                  x2={VB_W - PAD_X}
+                  y2={activityBaseY}
+                  style={{ stroke: AXIS_STROKE, "stroke-width": "1" }}
+                />
+                <For each={dayTicks()}>
+                  {(tick) => (
+                    <Show when={tick.pct > 0.5 && tick.pct < 99.5}>
+                      <line
+                        x1={xLogical(tick.t)}
+                        y1={activityBaseY}
+                        x2={xLogical(tick.t)}
+                        y2={activityBaseY + X_TICK_LEN}
+                        style={{ stroke: AXIS_STROKE, "stroke-width": "1" }}
+                      />
+                    </Show>
+                  )}
+                </For>
                 <Show when={hover()}>
                   {(point) => (
                     <>
@@ -370,10 +453,6 @@ const DocumentSummary: Component<DocumentSummaryProps> = (props) => {
                   )}
                 </Show>
               </svg>
-              {/* Y-axis ceiling: the document's peak length, anchored to the top. */}
-              <span class="dr-sum-axis" style={{ top: "0.25rem", left: "0.5rem" }}>
-                {summaryCharCount(summary().maxLength)}
-              </span>
               <Show when={hoverChart() === "activity" && hover()}>
                 {(point) => (
                   <div
@@ -389,8 +468,8 @@ const DocumentSummary: Component<DocumentSummaryProps> = (props) => {
                 )}
               </Show>
             </div>
-            <DayAxis ticks={dayTicks()} />
           </div>
+          <XAxis ticks={dayTicks()} />
         </section>
 
         {/* Where in the document were the changes: edit-position scatter. */}
@@ -401,9 +480,10 @@ const DocumentSummary: Component<DocumentSummaryProps> = (props) => {
               <LegendSwatch color={POSITION_FILL} label={strings.summary.legendPosition} />
             </div>
           </div>
-          <div class="relative">
+          <div class="flex">
+            <YAxis ticks={positionYTicks()} />
             <div
-              class="relative"
+              class="relative min-w-0 flex-1"
               data-chart="position"
               onPointerMove={(e) =>
                 moveHover("position", e.clientX, e.currentTarget.getBoundingClientRect())
@@ -416,6 +496,23 @@ const DocumentSummary: Component<DocumentSummaryProps> = (props) => {
                 viewBox={`0 0 ${VB_W} ${POSITION_VB_H}`}
                 style={{ width: "100%", height: "auto", display: "block" }}
               >
+                {/* Horizontal position gridlines — the Y scale (start → end). */}
+                <For each={POSITION_TICKS}>
+                  {(p) => (
+                    <line
+                      x1={PAD_X}
+                      y1={positionY(p)}
+                      x2={VB_W - PAD_X}
+                      y2={positionY(p)}
+                      style={{
+                        stroke: GRID_STROKE,
+                        "stroke-width": "1",
+                        "stroke-dasharray": "2 5",
+                      }}
+                    />
+                  )}
+                </For>
+                {/* Vertical time gridlines. */}
                 <For each={dayTicks()}>
                   {(tick) => (
                     <Show when={tick.pct > 0.5 && tick.pct < 99.5}>
@@ -441,6 +538,27 @@ const DocumentSummary: Component<DocumentSummaryProps> = (props) => {
                       r="2.8"
                       style={{ fill: POSITION_FILL, "fill-opacity": "0.5" }}
                     />
+                  )}
+                </For>
+                {/* X-axis baseline + tick marks. */}
+                <line
+                  x1={PAD_X}
+                  y1={POSITION_VB_H - PAD_BOTTOM}
+                  x2={VB_W - PAD_X}
+                  y2={POSITION_VB_H - PAD_BOTTOM}
+                  style={{ stroke: AXIS_STROKE, "stroke-width": "1" }}
+                />
+                <For each={dayTicks()}>
+                  {(tick) => (
+                    <Show when={tick.pct > 0.5 && tick.pct < 99.5}>
+                      <line
+                        x1={xLogical(tick.t)}
+                        y1={POSITION_VB_H - PAD_BOTTOM}
+                        x2={xLogical(tick.t)}
+                        y2={POSITION_VB_H - PAD_BOTTOM + X_TICK_LEN}
+                        style={{ stroke: AXIS_STROKE, "stroke-width": "1" }}
+                      />
+                    </Show>
                   )}
                 </For>
                 <Show when={hover()}>
@@ -470,13 +588,6 @@ const DocumentSummary: Component<DocumentSummaryProps> = (props) => {
                   )}
                 </Show>
               </svg>
-              {/* Y-axis orientation: top = document start, bottom = document end. */}
-              <span class="dr-sum-axis" style={{ top: "0.25rem", left: "0.5rem" }}>
-                {strings.summary.axisDocStart}
-              </span>
-              <span class="dr-sum-axis" style={{ bottom: "0.25rem", left: "0.5rem" }}>
-                {strings.summary.axisDocEnd}
-              </span>
               <Show when={hoverChart() === "position" && hover()}>
                 {(point) => (
                   <div
@@ -492,8 +603,8 @@ const DocumentSummary: Component<DocumentSummaryProps> = (props) => {
                 )}
               </Show>
             </div>
-            <DayAxis ticks={dayTicks()} />
           </div>
+          <XAxis ticks={dayTicks()} />
         </section>
       </div>
     </Show>
@@ -521,6 +632,41 @@ const DayAxis: Component<{ readonly ticks: readonly DayTick[] }> = (props) => (
         </span>
       )}
     </For>
+  </div>
+);
+
+/** The Y-axis label column to the LEFT of a chart. Each label is positioned by
+ *  percent of the chart height so it lines up exactly with its in-SVG gridline; the
+ *  fixed column width keeps both charts' plot areas aligned. */
+const YAxis: Component<{ readonly ticks: readonly YTick[] }> = (props) => (
+  <div class="relative shrink-0" style={{ width: Y_AXIS_W }}>
+    <For each={props.ticks}>
+      {(tick) => (
+        <span
+          data-yaxis-tick
+          class="dr-sum-axis"
+          style={{
+            top: `${Math.min(100, Math.max(0, tick.pct))}%`,
+            right: "0.5rem",
+            transform: "translateY(-50%)",
+            "font-variant-numeric": "tabular-nums",
+          }}
+        >
+          {tick.label}
+        </span>
+      )}
+    </For>
+  </div>
+);
+
+/** The X-axis label row, indented by the Y-axis gutter so its day/time labels sit
+ *  under the plot (not under the Y labels) and stay aligned with the gridlines. */
+const XAxis: Component<{ readonly ticks: readonly DayTick[] }> = (props) => (
+  <div class="flex">
+    <div class="shrink-0" style={{ width: Y_AXIS_W }} aria-hidden="true" />
+    <div class="relative min-w-0 flex-1">
+      <DayAxis ticks={props.ticks} />
+    </div>
   </div>
 );
 

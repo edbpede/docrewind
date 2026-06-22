@@ -12,7 +12,9 @@ import {
   buildHourTicks,
   hourStepHours,
   isShortSpan,
+  linearTicks,
   nearestPoint,
+  niceStep,
   ONE_HOUR_MS,
   SHORT_SPAN_MS,
 } from "./axis";
@@ -131,5 +133,56 @@ describe("nearestPoint", () => {
 
   it("returns the only point for a single-element series", () => {
     expect(nearestPoint([point(42)], 1000)?.t).toBe(42);
+  });
+});
+
+describe("niceStep", () => {
+  it("snaps a raw step up to 1 / 2 / 5 × a power of ten", () => {
+    expect(niceStep(1)).toBe(1);
+    expect(niceStep(1.5)).toBe(2);
+    expect(niceStep(2)).toBe(2);
+    expect(niceStep(2.1)).toBe(5);
+    expect(niceStep(3)).toBe(5);
+    expect(niceStep(6)).toBe(10);
+    expect(niceStep(30)).toBe(50);
+    expect(niceStep(3000)).toBe(5000);
+  });
+
+  it("guards non-positive and non-finite input", () => {
+    expect(niceStep(0)).toBe(1);
+    expect(niceStep(-3)).toBe(1);
+    expect(niceStep(Number.NaN)).toBe(1);
+    expect(niceStep(Number.POSITIVE_INFINITY)).toBe(1);
+  });
+});
+
+describe("linearTicks", () => {
+  it("emits 0…nice-ceiling ascending with a tidy step", () => {
+    const axis = linearTicks(12, 4);
+    expect(axis.axisMax).toBe(15);
+    expect(axis.ticks).toEqual([0, 5, 10, 15]);
+  });
+
+  it("covers the max with a little headroom and always starts at 0", () => {
+    const axis = linearTicks(12_000, 4);
+    expect(axis.ticks[0]).toBe(0);
+    expect(axis.axisMax).toBeGreaterThanOrEqual(12_000);
+    expect(axis.ticks[axis.ticks.length - 1]).toBe(axis.axisMax);
+    // The step is uniform across the whole axis.
+    const step = (axis.ticks[1] ?? 0) - (axis.ticks[0] ?? 0);
+    for (let i = 1; i < axis.ticks.length; i++) {
+      expect((axis.ticks[i] ?? 0) - (axis.ticks[i - 1] ?? 0)).toBe(step);
+    }
+  });
+
+  it("never repeats an integer-rounded tick", () => {
+    const axis = linearTicks(2, 4);
+    expect(new Set(axis.ticks).size).toBe(axis.ticks.length);
+  });
+
+  it("degrades to a safe [0, 1] axis for empty / non-finite input", () => {
+    expect(linearTicks(0).ticks).toEqual([0, 1]);
+    expect(linearTicks(-5).axisMax).toBe(1);
+    expect(linearTicks(Number.POSITIVE_INFINITY).axisMax).toBe(1);
   });
 });

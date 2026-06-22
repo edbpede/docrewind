@@ -113,3 +113,41 @@ export function nearestPoint(
   if (before === undefined) return at;
   return Math.abs(before.t - targetT) <= Math.abs(at.t - targetT) ? before : at;
 }
+
+/** A "nice" axis step ≥ `rawStep`, snapped to 1 / 2 / 5 × a power of ten — the
+ *  canonical gridline rounding so a quantitative axis reads as tidy round numbers
+ *  (…, 50, 100, 200, 500, …) instead of arbitrary fractions. */
+export function niceStep(rawStep: number): number {
+  if (!(rawStep > 0) || !Number.isFinite(rawStep)) return 1;
+  const magnitude = 10 ** Math.floor(Math.log10(rawStep));
+  const residual = rawStep / magnitude;
+  const factor = residual <= 1 ? 1 : residual <= 2 ? 2 : residual <= 5 ? 5 : 10;
+  return factor * magnitude;
+}
+
+/** Quantitative Y-axis ticks for a `[0, max]` range: a tidy rounded ceiling
+ *  (`axisMax`, ≥ `max`) plus the ascending gridline values from 0 up to it (about
+ *  `maxCount` + 1 ticks). Lets the activity chart show a readable length SCALE
+ *  rather than only its peak. Pure — no DOM, no clock; integer-rounded so character
+ *  counts never label a fractional gridline. */
+export function linearTicks(
+  max: number,
+  maxCount = 4,
+): { readonly axisMax: number; readonly ticks: readonly number[] } {
+  if (!(max > 0) || !Number.isFinite(max) || !(maxCount >= 1)) {
+    return { axisMax: 1, ticks: [0, 1] };
+  }
+  const step = niceStep(max / maxCount);
+  const axisMax = Math.ceil(max / step) * step;
+  const ticks: number[] = [];
+  let prev = Number.NaN;
+  // The tiny epsilon lets the ceiling tick survive float accumulation error.
+  for (let v = 0; v <= axisMax + step * 1e-9; v += step) {
+    const rounded = Math.round(v);
+    if (rounded !== prev) {
+      ticks.push(rounded);
+      prev = rounded;
+    }
+  }
+  return { axisMax, ticks };
+}

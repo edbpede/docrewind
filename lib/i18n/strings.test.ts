@@ -11,6 +11,7 @@ import {
   authorActiveRange,
   authorLabel,
   errorTitle,
+  formatCompactCount,
   formatDayLabel,
   formatHourLabel,
   formatSummaryStamp,
@@ -19,6 +20,7 @@ import {
   revisionOf,
   speedLabel,
   strings,
+  summaryAxisPercent,
   summaryCharCount,
   summaryEditPosition,
 } from "./strings";
@@ -107,6 +109,25 @@ describe("strings catalog", () => {
     expect(summaryEditPosition(1)).toBe("At 100% of document");
     expect(summaryEditPosition(1.5)).toBe("At 100% of document");
     expect(summaryEditPosition(-0.2)).toBe("At 0% of document");
+  });
+
+  it("formats a compact axis count and clamps to zero", () => {
+    expect(formatCompactCount(0)).toBe("0");
+    expect(formatCompactCount(-5)).toBe("0");
+    expect(formatCompactCount(850)).toBe("850");
+    expect(formatCompactCount(1000)).toBe("1k");
+    expect(formatCompactCount(1200)).toBe("1.2k");
+    expect(formatCompactCount(12_000)).toBe("12k");
+    expect(formatCompactCount(1_400_000)).toBe("1.4M");
+  });
+
+  it("formats a bare axis percentage, clamped to [0, 100]%", () => {
+    expect(summaryAxisPercent(0)).toBe("0%");
+    expect(summaryAxisPercent(0.25)).toBe("25%");
+    expect(summaryAxisPercent(0.5)).toBe("50%");
+    expect(summaryAxisPercent(1)).toBe("100%");
+    expect(summaryAxisPercent(1.5)).toBe("100%");
+    expect(summaryAxisPercent(-0.2)).toBe("0%");
   });
 
   it("formats an hour-axis label, prefixing the day only when asked", () => {
