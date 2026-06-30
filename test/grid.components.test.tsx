@@ -76,6 +76,45 @@ describe("GridViewport", () => {
   });
 });
 
+describe("GridViewport — merges + placeholders", () => {
+  function mergedSheet(): SheetGrid {
+    const sheet = createSheet("Merged");
+    withCell(sheet, 0, 0, { value: "title" });
+    withCell(sheet, 0, 1, { value: "leak" }); // a value typed into B1 BEFORE the merge
+    sheet.merges.push({ gid: asGid("0"), rowStart: 0, rowEnd: 1, colStart: 0, colEnd: 3 }); // A1:C1
+    return sheet;
+  }
+
+  it("renders a merged anchor as one colSpan cell and blanks the absorbed cells (§0)", () => {
+    const { getByText, queryByText } = render(() => (
+      <GridViewport sheet={mergedSheet()} showFidelityNotice={false} />
+    ));
+    const anchor = getByText("title");
+    expect(anchor.tagName).toBe("TD");
+    expect(anchor.getAttribute("colspan")).toBe("3");
+    // The merge set is the SOLE blank authority — the pre-merge B1 value must not leak.
+    expect(queryByText("leak")).toBeNull();
+  });
+
+  it("renders a chart placeholder chip at its anchor cell", () => {
+    const sheet = createSheet("Chart");
+    sheet.placeholders.push({ kind: "chart", row: 0, col: 0 });
+    sheet.rowCount = 1;
+    sheet.colCount = 1;
+    const { getByText } = render(() => <GridViewport sheet={sheet} showFidelityNotice={false} />);
+    expect(getByText("Chart")).toBeTruthy();
+  });
+
+  it("renders an image placeholder chip at its anchor cell", () => {
+    const sheet = createSheet("Image");
+    sheet.placeholders.push({ kind: "image", row: 0, col: 0 });
+    sheet.rowCount = 1;
+    sheet.colCount = 1;
+    const { getByText } = render(() => <GridViewport sheet={sheet} showFidelityNotice={false} />);
+    expect(getByText("Image")).toBeTruthy();
+  });
+});
+
 function twoSheetModel(): GridModel {
   const model = createModel();
   const a = asGid("0");

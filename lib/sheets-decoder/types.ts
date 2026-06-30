@@ -36,8 +36,11 @@ export function unsafeAsGid(value: string): Gid {
 /**
  * The recognized Ritz opcodes (live capture 2026-06-30). Snapshot/metadata
  * markers (`25104121`, `149980211`) are recognized-but-inert so a normal sheet
- * never spuriously trips the fidelity notice; merges / conditional formatting /
- * charts / images are NOT captured yet and degrade to {@link SheetsUnknownOp}.
+ * never spuriously trips the fidelity notice. Merges (`27911206`), chart/image
+ * objects (`27809640`), the chart data-source companion (`34070425`),
+ * conditional formatting (`45416218`) and sheet reorder (`31997291`) are
+ * confirmed from the 2026-06-30 capture and modeled below; any opcode still
+ * unrecognized degrades to {@link SheetsUnknownOp}.
  */
 export const SHEETS_OPCODE = {
   TXN: 4444216,
@@ -50,6 +53,11 @@ export const SHEETS_OPCODE = {
   SETTINGS: 28950036,
   MARKER_SNAPSHOT: 25104121,
   MARKER_METADATA: 149980211,
+  MERGE: 27911206,
+  OPAQUE_OBJECT: 27809640,
+  CHART_DATASOURCE: 34070425,
+  COND_FORMAT: 45416218,
+  REORDER_SHEET: 31997291,
 } as const;
 
 /** Constant sub-tag for "set cell content" inside a CellMutation payload. */
@@ -166,6 +174,52 @@ export interface SheetsMarker {
   readonly op: "marker";
 }
 
+/** `27911206` — merge a cell range into one block (value at the anchor; covered cells blank). */
+export interface SheetsMerge {
+  readonly op: "merge";
+  readonly range: SheetsRange;
+}
+
+/**
+ * `27809640` — an embedded chart or image object. Modeled as a POINT (its
+ * top-left anchor cell), not a range: the wire anchor carries a cell + pixel
+ * geometry, and the object is rendered as a labeled placeholder box at that cell
+ * (no image bytes, no fetch — §4). `kind` is discriminated from the inner spec
+ * shape at decode time (object → chart, array → image).
+ */
+export interface SheetsOpaque {
+  readonly op: "opaque";
+  readonly kind: "chart" | "image";
+  readonly gid: Gid;
+  readonly row: number;
+  readonly col: number;
+}
+
+/**
+ * `45416218` — conditional formatting. Recognized but its fills are a v1
+ * non-goal; apply raises a soft `conditional-format-dropped` notice (matching
+ * the `number-format-fallback` honesty precedent) rather than silently dropping.
+ */
+export interface SheetsCondFormat {
+  readonly op: "cond-format";
+}
+
+/**
+ * `34070425` — the chart data-source companion emitted alongside a chart object.
+ * Recognized-inert as its OWN variant (not folded into `marker`) so the op
+ * census stays honest about what the wire carried.
+ */
+export interface SheetsChartDatasource {
+  readonly op: "chart-datasource";
+}
+
+/** `31997291` — reorder a sheet by moving its gid within `model.order` (`[from, to]`). */
+export interface SheetsReorderSheet {
+  readonly op: "reorder-sheet";
+  readonly from: number;
+  readonly to: number;
+}
+
 /**
  * An unrecognized wire opcode. Privacy-safe by construction (mirrors the Docs
  * `UnknownOp`): carries ONLY the opcode and the byte length of the skipped
@@ -195,6 +249,11 @@ export type SheetsOperation =
   | SheetsCellStyleAdjust
   | SheetsSettings
   | SheetsMarker
+  | SheetsMerge
+  | SheetsOpaque
+  | SheetsCondFormat
+  | SheetsChartDatasource
+  | SheetsReorderSheet
   | SheetsUnknownOp;
 
 /**

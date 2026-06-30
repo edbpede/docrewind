@@ -39,6 +39,11 @@ coveragePathIgnorePatterns = [
   "**/lib/i18n/**",
   "**/lib/protocol/**",
   "**/lib/timeline/**",
+  # lib/summary is the shared summary core (the sibling of lib/timeline): both are
+  # transitively imported by the gated reconstruction tiers via */derive.ts but are
+  # NOT in the gated paths — they carry their own per-file floor under `test:logic`
+  # (`./lib/summary`, `./lib/timeline`). Ignored here for the same reason as timeline.
+  "**/lib/summary/**",
   "**/lib/worker/**",
   "**/lib/fixtures/**",
 ]

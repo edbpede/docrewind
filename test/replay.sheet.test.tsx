@@ -60,26 +60,66 @@ afterEach(() => {
   cleanup();
 });
 
+async function renderSeeded(store: ReturnType<typeof createMemoryStore>, model: GridModel) {
+  await store.saveReplayPublication(DOC, {
+    kind: "sheet",
+    publicationId: "pub-sheet",
+    sheetsParserVersion: SHEETS_PARSER_VERSION,
+    revisions: [],
+    snapshots: [{ appliedCount: 0, model }],
+    timeline: [],
+    publishedAt: 1,
+  });
+  await store.setActiveReplayPublication(DOC, "pub-sheet", "sheet");
+  render(() => <App store={store} useWorker={false} />);
+}
+
 describe("replay App — sheets path", () => {
   it("renders the grid + tab from a pre-seeded active sheet publication", async () => {
     sendMessageMock.mockResolvedValue({ ok: true });
-    const store = createMemoryStore();
-    await store.saveReplayPublication(DOC, {
-      kind: "sheet",
-      publicationId: "pub-sheet",
-      sheetsParserVersion: SHEETS_PARSER_VERSION,
-      revisions: [],
-      snapshots: [{ appliedCount: 0, model: seededGrid() }],
-      timeline: [],
-      publishedAt: 1,
-    });
-    await store.setActiveReplayPublication(DOC, "pub-sheet", "sheet");
-
-    render(() => <App store={store} useWorker={false} />);
+    await renderSeeded(createMemoryStore(), seededGrid());
 
     // The grid cell value and the sheet tab both render through the grid surface.
     await vi.waitFor(() => expect(screen.getByText("hi")).toBeTruthy());
     expect(screen.getByRole("tab", { name: "Data" })).toBeTruthy();
     expect(screen.getByRole("table")).toBeTruthy();
+  });
+
+  it("surfaces the soft fidelity notice for a conditional-format drop", async () => {
+    sendMessageMock.mockResolvedValue({ ok: true });
+    const model = seededGrid();
+    model.fidelityNotices.push({ kind: "conditional-format-dropped", detail: "" });
+    await renderSeeded(createMemoryStore(), model);
+
+    await vi.waitFor(() => expect(screen.getByRole("table")).toBeTruthy());
+    expect(screen.getByRole("status").textContent).toContain("couldn't be fully reconstructed");
+  });
+
+  it("shows NO fidelity notice for a merge/opaque-only sheet", async () => {
+    sendMessageMock.mockResolvedValue({ ok: true });
+    const model = seededGrid();
+    const sheet = model.sheets.get(asGid("0"));
+    if (sheet === undefined) throw new Error("no sheet");
+    sheet.merges.push({ gid: asGid("0"), rowStart: 0, rowEnd: 1, colStart: 0, colEnd: 2 });
+    sheet.placeholders.push({ kind: "chart", row: 2, col: 2 });
+    await renderSeeded(createMemoryStore(), model);
+
+    await vi.waitFor(() => expect(screen.getByRole("table")).toBeTruthy());
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("renders the tabs in the model's reordered order", async () => {
+    sendMessageMock.mockResolvedValue({ ok: true });
+    const model = seededGrid();
+    const data = asGid("0");
+    const summary = asGid("849076485");
+    model.sheets.set(summary, createSheet("Summary"));
+    // The post-reorder order moves gid "0" (Data) to the back.
+    model.order = [summary, data];
+    await renderSeeded(createMemoryStore(), model);
+
+    await vi.waitFor(() => expect(screen.getByRole("table")).toBeTruthy());
+    const tabs = screen.getAllByRole("tab");
+    expect(tabs.map((tab) => tab.textContent)).toEqual(["Summary", "Data"]);
   });
 });

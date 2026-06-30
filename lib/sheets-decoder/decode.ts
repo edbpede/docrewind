@@ -29,6 +29,7 @@ import {
   CLEAR_FORMAT_SENTINEL,
   CLEAR_VALUE_SENTINEL,
   type Dimension,
+  type Gid,
   SHEETS_OPCODE,
   type SheetsDecodedRevision,
   type SheetsOperation,
@@ -232,6 +233,68 @@ function decodeDim(
   return { op: kind, gid: unsafeAsGid(gidRaw), index, count, dim };
 }
 
+/** Decode a merge op: the merged range lives at `args["1"]` (decodeRange layout). */
+function decodeMerge(args: unknown, raw: unknown, revisionId: RevisionId): SheetsOperation {
+  if (!isRecord(args)) return unknownOp(raw, String(SHEETS_OPCODE.MERGE), revisionId);
+  const range = decodeRange(args["1"]);
+  if (range === null) return unknownOp(raw, String(SHEETS_OPCODE.MERGE), revisionId);
+  return { op: "merge", range };
+}
+
+/**
+ * Parse an opaque-object anchor `[null, _, gid, [null, row, col], …]` into a
+ * point. The gid is at index 2 and the cell address is the nested array at index
+ * 3 (row at `cell[1]`, col at `cell[2]`).
+ */
+function decodeAnchor(raw: unknown): { gid: Gid; row: number; col: number } | null {
+  if (!Array.isArray(raw)) return null;
+  const gidRaw = raw[2];
+  const cell = raw[3];
+  if (typeof gidRaw !== "string" || gidRaw.length === 0 || !Array.isArray(cell)) {
+    return null;
+  }
+  const row = asNonNegInt(cell[1]);
+  const col = asNonNegInt(cell[2]);
+  if (row === undefined || col === undefined) return null;
+  return { gid: unsafeAsGid(gidRaw), row, col };
+}
+
+/**
+ * Decode a chart/image object. The inner spec at `inner[2]` discriminates the
+ * KIND by SHAPE (per findings): an object with `"1" === 3` is a chart, an array
+ * with `[1] === 2` is an image. Anything else (or a bad anchor) → unknownOp; the
+ * decoder never guesses.
+ */
+function decodeOpaque(args: unknown, raw: unknown, revisionId: RevisionId): SheetsOperation {
+  const opcode = String(SHEETS_OPCODE.OPAQUE_OBJECT);
+  if (!isRecord(args)) return unknownOp(raw, opcode, revisionId);
+  const inner = args["1"];
+  if (!Array.isArray(inner)) return unknownOp(raw, opcode, revisionId);
+  const spec = inner[2];
+  let kind: "chart" | "image";
+  if (isRecord(spec) && spec["1"] === 3) {
+    kind = "chart";
+  } else if (Array.isArray(spec) && spec[1] === 2) {
+    kind = "image";
+  } else {
+    return unknownOp(raw, opcode, revisionId);
+  }
+  const anchor = decodeAnchor(inner[3]);
+  if (anchor === null) return unknownOp(raw, opcode, revisionId);
+  return { op: "opaque", kind, gid: anchor.gid, row: anchor.row, col: anchor.col };
+}
+
+/** Decode a sheet reorder op: `[null, from, to]` → two non-negative indices. */
+function decodeReorder(args: unknown, raw: unknown, revisionId: RevisionId): SheetsOperation {
+  if (!Array.isArray(args)) return unknownOp(raw, String(SHEETS_OPCODE.REORDER_SHEET), revisionId);
+  const from = asNonNegInt(args[1]);
+  const to = asNonNegInt(args[2]);
+  if (from === undefined || to === undefined) {
+    return unknownOp(raw, String(SHEETS_OPCODE.REORDER_SHEET), revisionId);
+  }
+  return { op: "reorder-sheet", from, to };
+}
+
 /** Decode one Sheets op array `[opcode, args]` into a typed {@link SheetsOperation}. */
 function decodeOp(raw: unknown, revisionId: RevisionId): SheetsOperation {
   if (!Array.isArray(raw)) return unknownOp(raw, "(non-array)", revisionId);
@@ -260,6 +323,16 @@ function decodeOp(raw: unknown, revisionId: RevisionId): SheetsOperation {
     case SHEETS_OPCODE.MARKER_SNAPSHOT:
     case SHEETS_OPCODE.MARKER_METADATA:
       return { op: "marker" };
+    case SHEETS_OPCODE.MERGE:
+      return decodeMerge(args, raw, revisionId);
+    case SHEETS_OPCODE.OPAQUE_OBJECT:
+      return decodeOpaque(args, raw, revisionId);
+    case SHEETS_OPCODE.COND_FORMAT:
+      return { op: "cond-format" };
+    case SHEETS_OPCODE.CHART_DATASOURCE:
+      return { op: "chart-datasource" };
+    case SHEETS_OPCODE.REORDER_SHEET:
+      return decodeReorder(args, raw, revisionId);
     default:
       return unknownOp(raw, String(opcode), revisionId);
   }

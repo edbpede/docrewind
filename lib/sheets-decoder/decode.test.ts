@@ -5,7 +5,13 @@
 import { describe, expect, test } from "bun:test";
 import { asRevisionId } from "../domain/ids";
 import { decodeSheetsOperations, decodeSheetsSnapshot } from "./decode";
-import type { SheetsCellMutation, SheetsOperation } from "./types";
+import type {
+  SheetsCellMutation,
+  SheetsMerge,
+  SheetsOpaque,
+  SheetsOperation,
+  SheetsReorderSheet,
+} from "./types";
 
 // Wrap one op array into a live changelog tuple [op, time, userId, revId, sessionId, seq].
 function changelog(ops: unknown[]): { changelog: unknown[] } {
@@ -153,6 +159,103 @@ describe("decodeSheetsOperations — structure ops", () => {
     expect(firstOp(changelog([[28950036, [null]]])).op).toBe("settings");
     expect(firstOp(changelog([[25104121, []]])).op).toBe("marker");
     expect(firstOp(changelog([[149980211, []]])).op).toBe("marker");
+  });
+});
+
+// The real captured op arrays for the five Phase-5 families (content-free shapes
+// from .omc/captures/op-{merge,chart,image,condfmt,reorder}.txt, 2026-06-30).
+const MERGE_A1_B1 = [27911206, { "1": [null, "0", 0, 1, 0, 2] }];
+const CHART_OBJECT = [
+  27809640,
+  {
+    "1": [
+      null,
+      "974979131",
+      {
+        "1": 3,
+        "3": [null, null, ["1430258216"], 0, -1, 0, null, null, 0, null, { "3": 5, "4": [] }],
+      },
+      [null, 0, "0", [null, 1, 0], 57, 33, 600, 371, 1.0],
+      null,
+      "Diagram",
+    ],
+  },
+];
+const IMAGE_OBJECT = [
+  27809640,
+  {
+    "1": [
+      null,
+      "501988802",
+      [null, 2, [null, 2, "s-blob-v1-IMAGE-41ePOTpd_xM", null, 2048, 2048]],
+      [null, 0, "0", [null, 14, 5], 16, 16, 402, 402, 2.0],
+      null,
+      "Billede",
+    ],
+  },
+];
+const CHART_DATASOURCE = [
+  34070425,
+  [null, "1430258216", [null, "0", 2, 3, 0, 2], 3, { "2": 1, "3": "974979131" }],
+];
+const COND_FORMAT = [
+  45416218,
+  [null, "0", 0, [null, [[null, "0", 2, 5, 0, 1]], [null, [null, { "1": 26 }]]]],
+];
+const REORDER = [31997291, [null, 0, 2]];
+
+describe("decodeSheetsOperations — Phase-5 op families (live capture)", () => {
+  test("decodes a merge range from args['1'] (the half-open block)", () => {
+    const op = firstOp(changelog([MERGE_A1_B1])) as SheetsMerge;
+    expect(op.op).toBe("merge");
+    expect(op.range).toEqual({
+      gid: "0" as never,
+      rowStart: 0,
+      rowEnd: 1,
+      colStart: 0,
+      colEnd: 2,
+    });
+  });
+
+  test("discriminates a chart object by its record spec shape (spec['1']===3)", () => {
+    const op = firstOp(changelog([CHART_OBJECT])) as SheetsOpaque;
+    expect(op.op).toBe("opaque");
+    expect(op).toEqual({ op: "opaque", kind: "chart", gid: "0" as never, row: 1, col: 0 });
+  });
+
+  test("discriminates an image object by its array spec shape (spec[1]===2)", () => {
+    const op = firstOp(changelog([IMAGE_OBJECT])) as SheetsOpaque;
+    expect(op).toEqual({ op: "opaque", kind: "image", gid: "0" as never, row: 14, col: 5 });
+  });
+
+  test("recognizes the chart data-source companion as its own inert variant", () => {
+    expect(firstOp(changelog([CHART_DATASOURCE])).op).toBe("chart-datasource");
+  });
+
+  test("recognizes conditional formatting", () => {
+    expect(firstOp(changelog([COND_FORMAT])).op).toBe("cond-format");
+  });
+
+  test("decodes a sheet reorder as [from, to]", () => {
+    const op = firstOp(changelog([REORDER])) as SheetsReorderSheet;
+    expect(op).toEqual({ op: "reorder-sheet", from: 0, to: 2 });
+  });
+
+  test("malformed payloads degrade to unknown (never throw, never guess)", () => {
+    // Merge with a truncated range (missing colEnd).
+    expect(firstOp(changelog([[27911206, { "1": [null, "0", 0, 1, 0] }]])).op).toBe("unknown");
+    // Opaque whose spec is neither a chart record nor an image array.
+    expect(
+      firstOp(
+        changelog([[27809640, { "1": [null, "x", { "1": 99 }, [null, 0, "0", [null, 1, 0]]] }]]),
+      ).op,
+    ).toBe("unknown");
+    // Opaque with a chart spec but a malformed anchor (cell not an array).
+    expect(
+      firstOp(changelog([[27809640, { "1": [null, "x", { "1": 3 }, [null, 0, "0", "nope"]] }]])).op,
+    ).toBe("unknown");
+    // Reorder with a non-integer index.
+    expect(firstOp(changelog([[31997291, [null, "a", 2]]])).op).toBe("unknown");
   });
 });
 

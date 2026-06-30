@@ -10,7 +10,7 @@
 // This is the mutable working model — fields are intentionally NOT readonly.
 // PURE: no browser / fetch / Worker.
 
-import type { CellFormat, Gid } from "../sheets-decoder/types";
+import type { CellFormat, Gid, SheetsRange } from "../sheets-decoder/types";
 
 /**
  * A `row:col` cell address (0-indexed), branded so a raw string can't be passed
@@ -51,6 +51,17 @@ export interface Cell {
   style: CellStyle;
 }
 
+/**
+ * A non-cell object anchored at a single top-left cell (a chart or image). Only
+ * the anchor POINT + `kind` are modeled — never image bytes — so the grid renders
+ * a labeled placeholder box (§4) and stays content-free + network-free.
+ */
+export interface Placeholder {
+  kind: "chart" | "image";
+  row: number;
+  col: number;
+}
+
 /** One sheet (tab): its display name + a sparse cell map + extent bounds. */
 export interface SheetGrid {
   name: string;
@@ -58,6 +69,10 @@ export interface SheetGrid {
   /** Largest 0-indexed row/col touched + 1 — the rendered extent bound. */
   rowCount: number;
   colCount: number;
+  /** Merged cell ranges (Option B: value at the anchor, covered cells blank). */
+  merges: SheetsRange[];
+  /** Embedded chart/image objects, each anchored at one cell. */
+  placeholders: Placeholder[];
 }
 
 /**
@@ -67,7 +82,11 @@ export interface SheetGrid {
  * code (an opcode, a version pair, or "") — never cell content.
  */
 export interface FidelityNotice {
-  readonly kind: "unknown-op" | "model-version-mismatch" | "number-format-fallback";
+  readonly kind:
+    | "unknown-op"
+    | "model-version-mismatch"
+    | "number-format-fallback"
+    | "conditional-format-dropped";
   readonly detail: string;
 }
 
@@ -90,7 +109,33 @@ export function createCell(): Cell {
 
 /** Create a fresh empty sheet with the given display name. */
 export function createSheet(name: string): SheetGrid {
-  return { name, cells: new Map(), rowCount: 0, colCount: 0 };
+  return { name, cells: new Map(), rowCount: 0, colCount: 0, merges: [], placeholders: [] };
+}
+
+/**
+ * Re-fold a sheet's extent (`rowCount`/`colCount`) over its cells AND merges AND
+ * placeholders. Called after any extent-affecting mutation (a merge/placeholder
+ * push, or a structure shift) so a merge/placeholder reaching beyond the cell
+ * bounds is still rendered — `remapCells` resets the extent from cells only.
+ */
+export function recomputeExtent(sheet: SheetGrid): void {
+  let maxRow = 0;
+  let maxCol = 0;
+  for (const key of sheet.cells.keys()) {
+    const { row, col } = parseCellKey(key);
+    maxRow = Math.max(maxRow, row + 1);
+    maxCol = Math.max(maxCol, col + 1);
+  }
+  for (const range of sheet.merges) {
+    maxRow = Math.max(maxRow, range.rowEnd);
+    maxCol = Math.max(maxCol, range.colEnd);
+  }
+  for (const placeholder of sheet.placeholders) {
+    maxRow = Math.max(maxRow, placeholder.row + 1);
+    maxCol = Math.max(maxCol, placeholder.col + 1);
+  }
+  sheet.rowCount = maxRow;
+  sheet.colCount = maxCol;
 }
 
 function cloneCell(cell: Cell): Cell {
@@ -107,7 +152,14 @@ function cloneSheet(sheet: SheetGrid): SheetGrid {
   for (const [key, cell] of sheet.cells) {
     cells.set(key, cloneCell(cell));
   }
-  return { name: sheet.name, cells, rowCount: sheet.rowCount, colCount: sheet.colCount };
+  return {
+    name: sheet.name,
+    cells,
+    rowCount: sheet.rowCount,
+    colCount: sheet.colCount,
+    merges: sheet.merges.map((r) => ({ ...r })),
+    placeholders: sheet.placeholders.map((p) => ({ ...p })),
+  };
 }
 
 /** Deep-clone the model (used by snapshotting — the spine never mutates a snapshot). */

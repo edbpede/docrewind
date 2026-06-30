@@ -21,7 +21,12 @@ import type { Component } from "solid-js";
 import { createMemo, createSignal, For, Show } from "solid-js";
 import { strings } from "@/lib/i18n/strings";
 import type { SheetGrid } from "@/lib/sheets-reconstruction/model";
-import { columnLabel, renderCellAt } from "@/lib/sheets-reconstruction/render";
+import {
+  columnLabel,
+  placeholderAt,
+  renderCellAt,
+  rowSegments,
+} from "@/lib/sheets-reconstruction/render";
 
 export interface GridViewportProps {
   readonly sheet: SheetGrid;
@@ -149,11 +154,30 @@ const GridViewport: Component<GridViewportProps> = (props) => {
                   >
                     {r + 1}
                   </th>
-                  <For each={cols()}>
-                    {(c) => {
-                      const cell = createMemo(() => renderCellAt(props.sheet, r, c));
+                  <For each={rowSegments(props.sheet, r, totalCols())}>
+                    {(seg) => {
+                      // A cross-row covered cell renders blank (load-bearing §0):
+                      // the merge set is the SOLE authority that blanks an absorbed
+                      // cell, so a value typed before the merge must not leak.
+                      if ("covered" in seg) {
+                        return (
+                          <td
+                            aria-hidden="true"
+                            style={{
+                              width: `${COL_W}px`,
+                              "max-width": `${COL_W}px`,
+                              "border-right": GRIDLINE,
+                              "border-bottom": GRIDLINE,
+                            }}
+                          />
+                        );
+                      }
+                      const cell = createMemo(() => renderCellAt(props.sheet, r, seg.col));
+                      const placeholder = createMemo(() => placeholderAt(props.sheet, r, seg.col));
+                      const spanW = seg.colSpan * COL_W;
                       return (
                         <td
+                          colSpan={seg.colSpan}
                           class="overflow-hidden text-ellipsis whitespace-nowrap px-1.5 text-[0.8125rem] text-ink"
                           classList={{
                             "font-bold": cell()?.bold === true,
@@ -163,13 +187,21 @@ const GridViewport: Component<GridViewportProps> = (props) => {
                           }}
                           title={cell()?.formula === true ? strings.sheet.formulaLabel : undefined}
                           style={{
-                            width: `${COL_W}px`,
-                            "max-width": `${COL_W}px`,
+                            width: `${spanW}px`,
+                            "max-width": `${spanW}px`,
                             "border-right": GRIDLINE,
                             "border-bottom": GRIDLINE,
                           }}
                         >
-                          {cell()?.text ?? ""}
+                          <Show when={placeholder()} fallback={cell()?.text ?? ""}>
+                            {(ph) => (
+                              <span class="inline-flex items-center rounded bg-sunken px-1 text-[0.6875rem] font-medium text-ink-muted ring-1 ring-hairline">
+                                {ph().kind === "chart"
+                                  ? strings.sheet.chartPlaceholder
+                                  : strings.sheet.imagePlaceholder}
+                              </span>
+                            )}
+                          </Show>
                         </td>
                       );
                     }}

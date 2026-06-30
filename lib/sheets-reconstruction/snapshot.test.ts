@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { describe, expect, test } from "bun:test";
 import { decodeSheetsOperations } from "../sheets-decoder/decode";
+import { asGid } from "../sheets-decoder/types";
 import { applySheetsOperation, applySheetsRevision } from "./apply";
-import { createModel, type GridModel } from "./model";
+import { cloneModel, createModel, type GridModel } from "./model";
 import { buildSheetsReplayIndex, gridAtRevisionIndex, SHEETS_SNAPSHOT_CADENCE } from "./snapshot";
 
 function setNum(row: number, col: number, value: number): unknown {
@@ -65,6 +66,34 @@ describe("sheets snapshot — scrub equivalence (R8, shared spine)", () => {
     expect(SHEETS_SNAPSHOT_CADENCE).toBeGreaterThan(0);
     const index = buildSheetsReplayIndex(REVS);
     expect(serialize(gridAtRevisionIndex(index, REVS.length))).toBe(linearAfter(REVS.length));
+  });
+
+  test("rebuilds merges + placeholders per revision; cloneModel deep-copies them", () => {
+    const ops: unknown[] = [
+      setNum(0, 0, 1),
+      [27911206, { "1": [null, "0", 0, 1, 0, 2] }], // merge A1:B1
+      [27809640, { "1": [null, "obj", { "1": 3 }, [null, 0, "0", [null, 5, 3]]] }], // chart at (5,3)
+    ];
+    const revs = decodeSheetsOperations({
+      changelog: ops.map((op, i) => [op, 1000 + i, "u", i + 1, "s", i]),
+    });
+    const index = buildSheetsReplayIndex(revs, 2); // force snapshotting (which clones)
+    const grid = gridAtRevisionIndex(index, revs.length);
+    const sheet = grid.sheets.get(asGid("0"));
+    if (sheet === undefined) throw new Error("no sheet");
+    expect(sheet.merges).toHaveLength(1);
+    expect(sheet.placeholders).toEqual([{ kind: "chart", row: 5, col: 3 }]);
+    // Before the merge revision there is no merge yet (per-revision rebuild).
+    expect(gridAtRevisionIndex(index, 1).sheets.get(asGid("0"))?.merges ?? []).toHaveLength(0);
+
+    // cloneModel must deep-copy both arrays: mutating the clone leaves the source intact.
+    const clone = cloneModel(grid);
+    const clonedSheet = clone.sheets.get(asGid("0"));
+    if (clonedSheet === undefined) throw new Error("no cloned sheet");
+    clonedSheet.merges.push({ gid: asGid("0"), rowStart: 9, rowEnd: 10, colStart: 0, colEnd: 1 });
+    clonedSheet.placeholders.push({ kind: "image", row: 1, col: 1 });
+    expect(sheet.merges).toHaveLength(1);
+    expect(sheet.placeholders).toHaveLength(1);
   });
 
   test("base seed (chunkedSnapshot) is present at snapshot(0)", () => {

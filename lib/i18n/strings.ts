@@ -111,6 +111,10 @@ export const strings = {
     formulaLabel: "Formula (shown as text, not evaluated)",
     placeholderTitle: "Spreadsheet replay isn't ready yet",
     placeholderHint: "DocRewind recognized this spreadsheet but hasn't rebuilt its history.",
+    // Label-only chips for embedded objects rendered at their anchor cell — never
+    // image bytes or a network fetch (local-first; §4). Content-free.
+    chartPlaceholder: "Chart",
+    imagePlaceholder: "Image",
   },
   progress: {
     discovering: "Discovering revisions…",

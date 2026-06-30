@@ -4,6 +4,7 @@ import { decodeSheetsOperations } from "../sheets-decoder/decode";
 import { asGid } from "../sheets-decoder/types";
 import { applySheetsRevision } from "./apply";
 import { cellKey, createModel, type GridModel } from "./model";
+import { rowSegments } from "./render";
 
 const GID0 = asGid("0");
 
@@ -155,6 +156,122 @@ describe("apply — sheets (tabs)", () => {
     expect(model.order).toEqual([GID0, asGid("849076485")]);
     expect(model.sheets.get(asGid("849076485"))?.name).toBe("Ark2");
     expect(model.sheets.get(GID0)?.name).toBe("Renamed");
+  });
+});
+
+const CHART_OBJECT = [
+  27809640,
+  { "1": [null, "974979131", { "1": 3 }, [null, 0, "0", [null, 1, 0]], null, "Diagram"] },
+];
+const IMAGE_OBJECT = [
+  27809640,
+  {
+    "1": [
+      null,
+      "501988802",
+      [null, 2, [null, 2, "s-blob-v1-IMAGE-x", null, 2048, 2048]],
+      [null, 0, "0", [null, 14, 5]],
+      null,
+      "Billede",
+    ],
+  },
+];
+const COND_FORMAT = [45416218, [null, "0", 0, [null, [[null, "0", 2, 5, 0, 1]]]]];
+const CHART_DATASOURCE = [
+  34070425,
+  [null, "1430258216", [null, "0", 2, 3, 0, 2], 3, { "2": 1, "3": "974979131" }],
+];
+
+describe("apply — Phase-5 op families", () => {
+  test("merge populates merges; an absorbed cell that held a value renders blank (§0)", () => {
+    // Write B1 (row 0, col 1), THEN merge A1:B1 (row 0, cols 0-2).
+    const merge = [27911206, { "1": [null, "0", 0, 1, 0, 2] }];
+    const model = gridFrom(changelog([setNum(0, 1, 777), merge]));
+    const sheet = model.sheets.get(GID0);
+    if (sheet === undefined) throw new Error("no sheet");
+    expect(sheet.merges).toHaveLength(1);
+    // The merge's companion clear decodes to {none}, so B1's value is NOT cleared
+    // in the cell map — the merges set is the SOLE authority that blanks it.
+    expect(cellOf(model, 0, 1)?.value).toBe(777);
+    // rowSegments collapses A1:B1 into a single 2-wide segment → B1 is never
+    // emitted as its own cell, so it renders blank.
+    const segs = rowSegments(sheet, 0, 4);
+    expect(segs[0]).toEqual({ col: 0, colSpan: 2 });
+    expect(segs.some((s) => s.col === 1)).toBe(false);
+  });
+
+  test("opaque populates placeholders with the decoded kind + anchor", () => {
+    const model = gridFrom(changelog([CHART_OBJECT, IMAGE_OBJECT]));
+    const sheet = model.sheets.get(GID0);
+    if (sheet === undefined) throw new Error("no sheet");
+    expect(sheet.placeholders).toEqual([
+      { kind: "chart", row: 1, col: 0 },
+      { kind: "image", row: 14, col: 5 },
+    ]);
+    // The extent re-grew to cover the image anchor (row 14, col 5).
+    expect(sheet.rowCount).toBe(15);
+    expect(sheet.colCount).toBe(6);
+  });
+
+  test("cond-format raises exactly one conditional-format-dropped notice (de-duped)", () => {
+    const model = gridFrom(changelog([COND_FORMAT, COND_FORMAT]));
+    expect(model.fidelityNotices).toEqual([{ kind: "conditional-format-dropped", detail: "" }]);
+  });
+
+  test("chart-datasource is inert and raises no notice", () => {
+    const model = gridFrom(changelog([CHART_DATASOURCE]));
+    expect(model.fidelityNotices).toHaveLength(0);
+  });
+
+  test("reorder moves a gid within order; gids unchanged", () => {
+    const add = [21350203, [null, 1, 0, "849076485", { "1": [[null, 0, 0, "Ark2"]] }]];
+    const reorder = [31997291, [null, 0, 2]]; // from 0, to clamps into [0, len)
+    const model = gridFrom(changelog([setNum(0, 0, 1), add, reorder]));
+    expect(model.order).toEqual([asGid("849076485"), GID0]);
+  });
+
+  test("reorder is a no-op (never throws) when from === to or out of range", () => {
+    const reorder = [31997291, [null, 5, 9]]; // both clamp to the single sheet's index 0
+    const model = gridFrom(changelog([setNum(0, 0, 1), reorder]));
+    expect(model.order).toEqual([GID0]);
+  });
+
+  test("structure-shift on a WIDE merge + TALL placeholder shifts AND re-grows extent", () => {
+    const merge = [27911206, { "1": [null, "0", 0, 1, 15, 17] }]; // cols beyond MIN_COLS
+    const chart = [27809640, { "1": [null, "obj", { "1": 3 }, [null, 0, "0", [null, 30, 0]]] }];
+    const insertCol = [24502104, [null, "0", 0, 1, 1, 0]]; // insert 1 col at index 0
+    const insertRow = [24502104, [null, "0", 0, 1, 0, 0]]; // insert 1 row at index 0
+    const model = gridFrom(changelog([merge, chart, insertCol, insertRow]));
+    const sheet = model.sheets.get(GID0);
+    if (sheet === undefined) throw new Error("no sheet");
+    // Merge cols shifted right (15-17 -> 16-18); colCount re-grew to 18.
+    expect(sheet.merges[0]).toMatchObject({ colStart: 16, colEnd: 18 });
+    expect(sheet.colCount).toBe(18);
+    // Placeholder row shifted down (30 -> 31), col right (0 -> 1); rowCount re-grew.
+    expect(sheet.placeholders[0]).toEqual({ kind: "chart", row: 31, col: 1 });
+    expect(sheet.rowCount).toBe(32);
+  });
+
+  test("a merge/placeholder inside a deleted band is dropped", () => {
+    const merge = [27911206, { "1": [null, "0", 0, 1, 15, 17] }];
+    const chart = [27809640, { "1": [null, "obj", { "1": 3 }, [null, 0, "0", [null, 30, 0]]] }];
+    const delCols = [25037233, [null, "0", 15, 3, 1]]; // delete cols 15-17 (the whole merge)
+    const delRows = [25037233, [null, "0", 30, 1, 0]]; // delete row 30 (the placeholder)
+    const model = gridFrom(changelog([merge, chart, delCols, delRows]));
+    const sheet = model.sheets.get(GID0);
+    if (sheet === undefined) throw new Error("no sheet");
+    expect(sheet.merges).toHaveLength(0);
+    expect(sheet.placeholders).toHaveLength(0);
+  });
+
+  test("a straddling merge is clamped (not dropped) on a partial delete", () => {
+    const merge = [27911206, { "1": [null, "0", 0, 1, 13, 18] }]; // cols 13-17
+    const delCols = [25037233, [null, "0", 15, 2, 1]]; // delete cols 15-16
+    const model = gridFrom(changelog([merge, delCols]));
+    const sheet = model.sheets.get(GID0);
+    if (sheet === undefined) throw new Error("no sheet");
+    // 13-18 minus the 2 deleted interior cols -> 13-16.
+    expect(sheet.merges[0]).toMatchObject({ colStart: 13, colEnd: 16 });
   });
 });
 

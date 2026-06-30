@@ -22,6 +22,7 @@ import type {
   SheetsDeleteDim,
   SheetsInsertDim,
   SheetsOperation,
+  SheetsRange,
 } from "../sheets-decoder/types";
 import {
   type Cell,
@@ -32,6 +33,7 @@ import {
   type FidelityNotice,
   type GridModel,
   parseCellKey,
+  recomputeExtent,
   type SheetGrid,
 } from "./model";
 import { isSupportedNumberFormat } from "./number-format";
@@ -175,6 +177,86 @@ function remapCells(
   sheet.colCount = maxCol;
 }
 
+/** Map a coordinate after inserting `count` units at `index` (shifts at/after index). */
+function shiftInsert(coord: number, index: number, count: number): number {
+  return coord >= index ? coord + count : coord;
+}
+
+/** Map a half-open END after an insert: grows only when the end is past the insert point. */
+function shiftInsertEnd(end: number, index: number, count: number): number {
+  return end > index ? end + count : end;
+}
+
+/** Map a coordinate after deleting `count` units at `index`: in-band collapses to `index`. */
+function shiftDelete(coord: number, index: number, count: number): number {
+  const end = index + count;
+  if (coord < index) return coord;
+  if (coord < end) return index;
+  return coord - count;
+}
+
+/**
+ * Shift `sheet.merges` + `sheet.placeholders` on a row/col INSERT, mirroring the
+ * cell rule (a range straddling the insert grows). The extent is re-folded by the
+ * caller via {@link recomputeExtent}.
+ */
+function shiftObjectsInsert(sheet: SheetGrid, op: SheetsInsertDim): void {
+  const onRow = op.dim === "row";
+  sheet.merges = sheet.merges.map((range) =>
+    onRow
+      ? {
+          ...range,
+          rowStart: shiftInsert(range.rowStart, op.index, op.count),
+          rowEnd: shiftInsertEnd(range.rowEnd, op.index, op.count),
+        }
+      : {
+          ...range,
+          colStart: shiftInsert(range.colStart, op.index, op.count),
+          colEnd: shiftInsertEnd(range.colEnd, op.index, op.count),
+        },
+  );
+  sheet.placeholders = sheet.placeholders.map((p) =>
+    onRow
+      ? { ...p, row: shiftInsert(p.row, op.index, op.count) }
+      : { ...p, col: shiftInsert(p.col, op.index, op.count) },
+  );
+}
+
+/**
+ * Shift `sheet.merges` + `sheet.placeholders` on a row/col DELETE: a range that
+ * collapses entirely into the deleted band is dropped, a straddling range is
+ * clamped, and a placeholder inside the band is dropped.
+ */
+function shiftObjectsDelete(sheet: SheetGrid, op: SheetsDeleteDim): void {
+  const onRow = op.dim === "row";
+  const end = op.index + op.count;
+  const keptMerges: SheetsRange[] = [];
+  for (const range of sheet.merges) {
+    if (onRow) {
+      const rowStart = shiftDelete(range.rowStart, op.index, op.count);
+      const rowEnd = shiftDelete(range.rowEnd, op.index, op.count);
+      if (rowEnd <= rowStart) continue;
+      keptMerges.push({ ...range, rowStart, rowEnd });
+    } else {
+      const colStart = shiftDelete(range.colStart, op.index, op.count);
+      const colEnd = shiftDelete(range.colEnd, op.index, op.count);
+      if (colEnd <= colStart) continue;
+      keptMerges.push({ ...range, colStart, colEnd });
+    }
+  }
+  sheet.merges = keptMerges;
+  sheet.placeholders = sheet.placeholders
+    .filter((p) => {
+      const coord = onRow ? p.row : p.col;
+      return !(coord >= op.index && coord < end);
+    })
+    .map((p) =>
+      onRow
+        ? { ...p, row: shiftDelete(p.row, op.index, op.count) }
+        : { ...p, col: shiftDelete(p.col, op.index, op.count) },
+    );
+}
+
 function applyInsertDim(model: GridModel, op: SheetsInsertDim): void {
   const sheet = ensureSheet(model, op.gid);
   if (op.dim === "row") {
@@ -182,6 +264,8 @@ function applyInsertDim(model: GridModel, op: SheetsInsertDim): void {
   } else {
     remapCells(sheet, (row, col) => ({ row, col: col >= op.index ? col + op.count : col }));
   }
+  shiftObjectsInsert(sheet, op);
+  recomputeExtent(sheet);
 }
 
 function applyDeleteDim(model: GridModel, op: SheetsDeleteDim): void {
@@ -198,6 +282,8 @@ function applyDeleteDim(model: GridModel, op: SheetsDeleteDim): void {
       return { row, col: col >= end ? col - op.count : col };
     });
   }
+  shiftObjectsDelete(sheet, op);
+  recomputeExtent(sheet);
 }
 
 /**
@@ -241,9 +327,39 @@ export function applySheetsOperation(
     case "delete-dim":
       applyDeleteDim(model, op);
       return;
+    case "merge": {
+      const sheet = ensureSheet(model, op.range.gid);
+      // Push a copy (no aliasing of the decoded op) at the END so render's
+      // last-wins overlap resolution is deterministic.
+      sheet.merges.push({ ...op.range });
+      recomputeExtent(sheet);
+      return;
+    }
+    case "opaque": {
+      const sheet = ensureSheet(model, op.gid);
+      sheet.placeholders.push({ kind: op.kind, row: op.row, col: op.col });
+      recomputeExtent(sheet);
+      return;
+    }
+    case "cond-format":
+      // The fills are a v1 non-goal, but the drop is a real user-visible effect —
+      // surface it honestly (mirrors number-format-fallback), never silently.
+      pushNotice(model, { kind: "conditional-format-dropped", detail: "" });
+      return;
+    case "reorder-sheet": {
+      const len = model.order.length;
+      if (len === 0) return;
+      const from = Math.min(Math.max(0, op.from), len - 1);
+      const to = Math.min(Math.max(0, op.to), len - 1);
+      if (from === to) return;
+      const [gid] = model.order.splice(from, 1);
+      if (gid !== undefined) model.order.splice(to, 0, gid);
+      return;
+    }
     case "cell-style-adjust":
     case "settings":
     case "marker":
+    case "chart-datasource":
       // Recognized but inert in v1 — no value change, no notice.
       return;
     case "unknown":
