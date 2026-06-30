@@ -12,6 +12,14 @@
 // edit POSITIONS) — never any document text — so it stays inside the privacy
 // model (R5, §13.7), exactly like lib/timeline and the diagnostics shapes.
 //
+// Kind-agnostic core (plan §1 Chosen-option): the TIME-axis machinery reads only
+// `RevisionMeta.time`, and the op-accounting (length delta + edit position) is an
+// INJECTED `SummaryExtractor`. Docs binds `docsSummaryExtractor`
+// (`operationDelta`/`operationPosition`, switching on the Docs `Operation.ty`
+// union); Sheets binds its own cell-edit extractor. `deriveDocumentSummary`
+// stays the Docs-bound public entry so the existing tests pin byte-identical
+// Docs output.
+//
 // Scale-safety / cost: this is O(total ops), a single forward scan. The emitted
 // `series` is capped to `MAX_SERIES_POINTS` by even down-sampling (endpoints
 // preserved) so a multi-thousand-revision document still renders a bounded,
@@ -21,6 +29,7 @@
 
 import type { Operation } from "../decoder/types";
 import type { DecodedRevision } from "../domain/model";
+import type { RevisionMeta } from "../replay-core/meta";
 
 /** One plotted moment: a timed revision's resulting length + where it edited. */
 export interface SummaryPoint {
@@ -66,15 +75,19 @@ export interface DocumentSummary {
   readonly series: readonly SummaryPoint[];
 }
 
+/**
+ * Kind-specific op-accounting injected into the summary core. `delta` is the
+ * revision's net inserted/deleted unit count (characters for Docs, cells for
+ * Sheets); `position` is the 1-indexed primary edit position, or null when the
+ * revision has no meaningful content position.
+ */
+export interface SummaryExtractor<R> {
+  delta(revision: R): { inserted: number; deleted: number };
+  position(revision: R): number | null;
+}
+
 /** Render/cost ceiling: the summary never plots more than this many points. */
 export const MAX_SERIES_POINTS = 1600;
-
-interface OpScan {
-  readonly inserted: number;
-  readonly deleted: number;
-  /** First content-edit position (1-indexed) in the revision, or null. */
-  readonly position: number | null;
-}
 
 /** Inserted/deleted character counts for one operation (recurses `mlti`/`rplc`).
  *  Mirrors lib/timeline's delta accounting so the length curve and the timeline
@@ -141,21 +154,31 @@ function operationPosition(op: Operation): number | null {
   }
 }
 
-/** One revision's net character delta plus its primary edit position. */
-function scanRevision(revision: DecodedRevision): OpScan {
-  let inserted = 0;
-  let deleted = 0;
-  let position: number | null = null;
-  for (const op of revision.operations) {
-    const delta = operationDelta(op);
-    inserted += delta.inserted;
-    deleted += delta.deleted;
-    if (position === null) {
-      position = operationPosition(op);
+/**
+ * The Docs op-accounting extractor: net character delta (summed over the
+ * revision's ops) plus the first content-edit position. This is the existing
+ * behaviour, lifted verbatim into an extractor so the Docs summary output is
+ * unchanged.
+ */
+export const docsSummaryExtractor: SummaryExtractor<DecodedRevision> = {
+  delta(revision) {
+    let inserted = 0;
+    let deleted = 0;
+    for (const op of revision.operations) {
+      const d = operationDelta(op);
+      inserted += d.inserted;
+      deleted += d.deleted;
     }
-  }
-  return { inserted, deleted, position };
-}
+    return { inserted, deleted };
+  },
+  position(revision) {
+    for (const op of revision.operations) {
+      const position = operationPosition(op);
+      if (position !== null) return position;
+    }
+    return null;
+  },
+};
 
 /** A raw plot point before chronological accumulation / normalization /
  *  down-sampling. `delta` is this revision's net character change (inserted −
@@ -191,10 +214,15 @@ function downsample<T>(points: readonly T[], cap: number): T[] {
 }
 
 /**
- * Derive the bounded document-summary signal from decoded revisions. Pure and
+ * Derive the bounded document-summary signal from decoded revisions, generic
+ * over the revision kind: the time axis reads `RevisionMeta.time`, and the
+ * length/position accounting is supplied by the injected `extractor`. Pure and
  * deterministic: no clocks, no randomness, no DOM.
  */
-export function deriveDocumentSummary(revisions: readonly DecodedRevision[]): DocumentSummary {
+export function deriveSummaryWith<R extends RevisionMeta>(
+  revisions: readonly R[],
+  extractor: SummaryExtractor<R>,
+): DocumentSummary {
   let charsInserted = 0;
   let charsDeleted = 0;
   let posDenominator = 1;
@@ -216,7 +244,8 @@ export function deriveDocumentSummary(revisions: readonly DecodedRevision[]): Do
   // is paired with the moment it actually held (revision arrival order is usually
   // chronological, but a non-monotonic stamp must not mis-pair lengths).
   for (const revision of revisions) {
-    const { inserted, deleted, position } = scanRevision(revision);
+    const { inserted, deleted } = extractor.delta(revision);
+    const position = extractor.position(revision);
     charsInserted += inserted;
     charsDeleted += deleted;
     if (position !== null) {
@@ -289,4 +318,14 @@ export function deriveDocumentSummary(revisions: readonly DecodedRevision[]): Do
     charsDeleted,
     series,
   };
+}
+
+/**
+ * Derive the bounded document-summary signal for a Docs document. Thin
+ * Docs-bound wrapper over {@link deriveSummaryWith} binding the Docs
+ * op-accounting extractor — its output is unchanged (pinned by the summary
+ * tests).
+ */
+export function deriveDocumentSummary(revisions: readonly DecodedRevision[]): DocumentSummary {
+  return deriveSummaryWith(revisions, docsSummaryExtractor);
 }

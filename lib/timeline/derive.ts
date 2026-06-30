@@ -5,6 +5,15 @@
 // deletions and pauses. Every inferred grouping carries a `confidence` (0..1)
 // and a `provenance` string so the UI can mark derived data as inferred, not
 // literal. Pure and deterministic — no clocks, no randomness.
+//
+// Kind-agnostic core (plan §1 Chosen-option): session grouping
+// (`sameSession`/span) and pause detection (`derivePauses`) read ONLY
+// `RevisionMeta` (sessionId / time / revisionId). The op-accounting (the char
+// delta feeding `makeSessionEvent` totals + `deriveLargeEdits`) is an INJECTED
+// `TimelineExtractor`. Docs binds `docsTimelineExtractor` (switching on the Docs
+// `Operation.ty` union); Sheets binds its own cell-edit extractor.
+// `deriveTimeline` stays the Docs-bound public entry so the existing tests pin
+// byte-identical Docs output.
 
 import type { Operation } from "../decoder/types";
 import type {
@@ -14,6 +23,7 @@ import type {
   SessionEvent,
   TimelineEvent,
 } from "../domain/model";
+import type { RevisionMeta } from "../replay-core/meta";
 
 /** A revision inserting/deleting at least this many chars is a large edit. */
 export const DEFAULT_LARGE_EDIT_THRESHOLD = 50;
@@ -31,6 +41,15 @@ export interface DeriveOptions {
 interface CharDelta {
   readonly inserted: number;
   readonly deleted: number;
+}
+
+/**
+ * Kind-specific op-accounting injected into the timeline core. `delta` is the
+ * revision's net inserted/deleted unit count (characters for Docs, cells for
+ * Sheets), feeding the session totals and large-edit detection.
+ */
+export interface TimelineExtractor<R> {
+  delta(revision: R): CharDelta;
 }
 
 /** Count inserted/deleted characters for one operation (recursing mlti). */
@@ -69,19 +88,25 @@ function operationDelta(op: Operation): CharDelta {
   }
 }
 
-/** Sum the character delta across a revision's operations. */
-function revisionDelta(revision: DecodedRevision): CharDelta {
-  let inserted = 0;
-  let deleted = 0;
-  for (const op of revision.operations) {
-    const delta = operationDelta(op);
-    inserted += delta.inserted;
-    deleted += delta.deleted;
-  }
-  return { inserted, deleted };
-}
+/**
+ * The Docs op-accounting extractor: net character delta summed over the
+ * revision's ops. Lifted verbatim from the previous `revisionDelta` so the Docs
+ * timeline output is unchanged.
+ */
+export const docsTimelineExtractor: TimelineExtractor<DecodedRevision> = {
+  delta(revision) {
+    let inserted = 0;
+    let deleted = 0;
+    for (const op of revision.operations) {
+      const delta = operationDelta(op);
+      inserted += delta.inserted;
+      deleted += delta.deleted;
+    }
+    return { inserted, deleted };
+  },
+};
 
-function sameSession(prev: DecodedRevision, next: DecodedRevision, idleMs: number): boolean {
+function sameSession(prev: RevisionMeta, next: RevisionMeta, idleMs: number): boolean {
   // Explicit session ids that differ always split.
   if (prev.sessionId !== null && next.sessionId !== null && prev.sessionId !== next.sessionId) {
     return false;
@@ -93,7 +118,10 @@ function sameSession(prev: DecodedRevision, next: DecodedRevision, idleMs: numbe
   return true;
 }
 
-function makeSessionEvent(group: readonly DecodedRevision[]): SessionEvent | null {
+function makeSessionEvent<R extends RevisionMeta>(
+  group: readonly R[],
+  extractor: TimelineExtractor<R>,
+): SessionEvent | null {
   const first = group[0];
   const last = group[group.length - 1];
   if (first === undefined || last === undefined) {
@@ -102,7 +130,7 @@ function makeSessionEvent(group: readonly DecodedRevision[]): SessionEvent | nul
   let charsInserted = 0;
   let charsDeleted = 0;
   for (const revision of group) {
-    const delta = revisionDelta(revision);
+    const delta = extractor.delta(revision);
     charsInserted += delta.inserted;
     charsDeleted += delta.deleted;
   }
@@ -121,31 +149,36 @@ function makeSessionEvent(group: readonly DecodedRevision[]): SessionEvent | nul
   };
 }
 
-function deriveSessions(revisions: readonly DecodedRevision[], idleMs: number): SessionEvent[] {
+function deriveSessions<R extends RevisionMeta>(
+  revisions: readonly R[],
+  idleMs: number,
+  extractor: TimelineExtractor<R>,
+): SessionEvent[] {
   const sessions: SessionEvent[] = [];
-  let group: DecodedRevision[] = [];
+  let group: R[] = [];
   for (const revision of revisions) {
     const prev = group[group.length - 1];
     if (prev === undefined || sameSession(prev, revision, idleMs)) {
       group.push(revision);
     } else {
-      const event = makeSessionEvent(group);
+      const event = makeSessionEvent(group, extractor);
       if (event !== null) sessions.push(event);
       group = [revision];
     }
   }
-  const last = makeSessionEvent(group);
+  const last = makeSessionEvent(group, extractor);
   if (last !== null) sessions.push(last);
   return sessions;
 }
 
-function deriveLargeEdits(
-  revisions: readonly DecodedRevision[],
+function deriveLargeEdits<R extends RevisionMeta>(
+  revisions: readonly R[],
   threshold: number,
+  extractor: TimelineExtractor<R>,
 ): LargeEditEvent[] {
   const events: LargeEditEvent[] = [];
   for (const revision of revisions) {
-    const { inserted, deleted } = revisionDelta(revision);
+    const { inserted, deleted } = extractor.delta(revision);
     if (inserted >= threshold) {
       events.push({
         kind: "large-insertion",
@@ -168,7 +201,7 @@ function deriveLargeEdits(
   return events;
 }
 
-function derivePauses(revisions: readonly DecodedRevision[], pauseMs: number): PauseEvent[] {
+function derivePauses(revisions: readonly RevisionMeta[], pauseMs: number): PauseEvent[] {
   const events: PauseEvent[] = [];
   for (let i = 1; i < revisions.length; i++) {
     const prev = revisions[i - 1];
@@ -204,8 +237,10 @@ function eventRevisionKey(event: TimelineEvent): number {
 }
 
 /**
- * Derive timeline events from decoded revisions: session groupings, large
- * insertions/deletions, and pauses. Deterministic given the same input.
+ * Derive timeline events from decoded revisions, generic over the revision kind:
+ * session grouping + pauses read `RevisionMeta`, and the char delta feeding
+ * session totals + large-edit detection is supplied by the injected `extractor`.
+ * Deterministic given the same input.
  *
  * Events are returned in chronological (revision) order. Input revisions are
  * monotonically increasing, so ordering by anchor revision == chronological
@@ -213,8 +248,9 @@ function eventRevisionKey(event: TimelineEvent): number {
  * (session < large-edit < pause) deterministically breaks ties at a revision
  * that anchors more than one event kind.
  */
-export function deriveTimeline(
-  revisions: readonly DecodedRevision[],
+export function deriveTimelineWith<R extends RevisionMeta>(
+  revisions: readonly R[],
+  extractor: TimelineExtractor<R>,
   options: DeriveOptions = {},
 ): TimelineEvent[] {
   const largeEditThreshold = options.largeEditThreshold ?? DEFAULT_LARGE_EDIT_THRESHOLD;
@@ -222,8 +258,20 @@ export function deriveTimeline(
   const sessionIdleMs = options.sessionIdleMs ?? DEFAULT_SESSION_IDLE_MS;
 
   return [
-    ...deriveSessions(revisions, sessionIdleMs),
-    ...deriveLargeEdits(revisions, largeEditThreshold),
+    ...deriveSessions(revisions, sessionIdleMs, extractor),
+    ...deriveLargeEdits(revisions, largeEditThreshold, extractor),
     ...derivePauses(revisions, pauseMs),
   ].sort((a, b) => eventRevisionKey(a) - eventRevisionKey(b));
+}
+
+/**
+ * Derive timeline events for a Docs document. Thin Docs-bound wrapper over
+ * {@link deriveTimelineWith} binding the Docs op-accounting extractor — its
+ * output is unchanged (pinned by the timeline tests).
+ */
+export function deriveTimeline(
+  revisions: readonly DecodedRevision[],
+  options: DeriveOptions = {},
+): TimelineEvent[] {
+  return deriveTimelineWith(revisions, docsTimelineExtractor, options);
 }

@@ -33,6 +33,10 @@ export default defineConfig({
       "lib/docs-url/**",
       // Phase 5 pure modules (replay/i18n/identity/theme) are Bun-only (`test:logic`).
       "lib/replay/**",
+      // Sheets cores + the shared replay-core spine are Bun-only pure tiers.
+      "lib/replay-core/**",
+      "lib/sheets-decoder/**",
+      "lib/sheets-reconstruction/**",
       "lib/i18n/**",
       "lib/identity/**",
       "lib/classroom/**",
