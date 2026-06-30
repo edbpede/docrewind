@@ -109,8 +109,16 @@ export const strings = {
     // scary banner, never blocking the replay (PRODUCT.md Principle 6).
     fidelityNotice: "Some content couldn't be fully reconstructed.",
     formulaLabel: "Formula (shown as text, not evaluated)",
-    placeholderTitle: "Spreadsheet replay isn't ready yet",
-    placeholderHint: "DocRewind recognized this spreadsheet but hasn't rebuilt its history.",
+    // Shown only on a frame whose reconstructed grid holds no sheets yet — the
+    // pre-history base state at revision 0, before the first sheet is added (the
+    // Sheets analogue of an empty Docs page at revision 0). The replay IS built;
+    // this frame is simply empty, so the copy must NOT read as "not ready" (the
+    // earlier wording — "isn't ready yet … hasn't rebuilt its history" — did, and
+    // misled: the grid appears the moment you step forward). Calm, oriented, and
+    // actionable (PRODUCT.md Principle 6).
+    emptyFrameTitle: "No sheets to show at this point",
+    emptyFrameHint:
+      "The spreadsheet had no sheets at this moment in its history. Press Play or step forward to watch it take shape.",
     // Label-only chips for embedded objects rendered at their anchor cell — never
     // image bytes or a network fetch (local-first; §4). Content-free.
     chartPlaceholder: "Chart",

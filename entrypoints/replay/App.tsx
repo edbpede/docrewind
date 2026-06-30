@@ -1049,12 +1049,18 @@ const ReplaySurface: Component<{
                     <Show
                       when={data().kind === "doc"}
                       fallback={
+                        /* The grid is reconstructed and ready, but THIS frame may
+                           hold no sheets — the empty pre-history base at revision 0,
+                           before the first sheet is added (the analogue of an empty
+                           Docs page at revision 0). Show a calm "empty here" note,
+                           never a "not ready" message: stepping forward reveals the
+                           grid the instant the first sheet op applies. */
                         <Show
                           when={currentSheet()}
                           fallback={
                             <div class="dr-card text-center">
-                              <p class="dr-subheading">{strings.sheet.placeholderTitle}</p>
-                              <p class="dr-muted mt-1">{strings.sheet.placeholderHint}</p>
+                              <p class="dr-subheading">{strings.sheet.emptyFrameTitle}</p>
+                              <p class="dr-muted mt-1">{strings.sheet.emptyFrameHint}</p>
                             </div>
                           }
                         >
