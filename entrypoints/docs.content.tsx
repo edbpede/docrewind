@@ -82,7 +82,7 @@ async function harvestSelfIdentity(): Promise<void> {
 }
 
 export default defineContentScript({
-  matches: ["*://docs.google.com/document/*"],
+  matches: ["*://docs.google.com/document/*", "*://docs.google.com/spreadsheets/*"],
   cssInjectionMode: "ui",
   async main(ctx) {
     const info = parseDocsUrl(location.href);
@@ -119,6 +119,7 @@ export default defineContentScript({
                 void sendMessage("activateReplay", {
                   docId: info.docId,
                   userIndex: info.userIndex,
+                  kind: info.kind,
                 }).catch(() => {
                   // Best-effort: the background SW may be restarting or the page
                   // navigating away (MV3 idle termination). Swallow the rejection
