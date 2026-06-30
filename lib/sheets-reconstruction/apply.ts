@@ -141,8 +141,18 @@ function applyCellMutation(model: GridModel, mutation: SheetsCellMutation): void
     return;
   }
   // Oversized range (e.g. format an entire column): touch only existing cells in
-  // range so the sparse map never explodes. (A giant value-set is not a real
-  // editing shape; this stays bounded + safe.)
+  // range so the sparse map never explodes (R7). A FORMAT-only op is lossless
+  // this way, but a VALUE-bearing op (number/text/formula) would need to
+  // materialize every new cell in range — which R7 forbids — so those new-cell
+  // values are dropped. Surface that honestly rather than dropping it silently.
+  // (A `clear`/format-only op loses nothing: absent cells are already empty.)
+  if (
+    mutation.content.kind === "number" ||
+    mutation.content.kind === "text" ||
+    mutation.content.kind === "formula"
+  ) {
+    pushNotice(model, { kind: "oversized-mutation-dropped", detail: "" });
+  }
   for (const [key, cell] of sheet.cells) {
     const { row, col } = parseCellKey(key);
     if (row >= rowStart && row < rowEnd && col >= colStart && col < colEnd) {
@@ -305,15 +315,20 @@ export function applySheetsOperation(
       applyCellMutation(model, op);
       return;
     case "add-sheet": {
-      let sheet = model.sheets.get(op.gid);
-      if (sheet === undefined) {
-        sheet = createSheet(op.name.length > 0 ? op.name : `Sheet ${model.order.length + 1}`);
+      const existing = model.sheets.get(op.gid);
+      if (existing === undefined) {
+        const sheet = createSheet(op.name.length > 0 ? op.name : `Sheet ${model.order.length + 1}`);
         model.sheets.set(op.gid, sheet);
-        const at = Math.min(Math.max(0, op.index), model.order.length);
-        model.order.splice(at, 0, op.gid);
       } else if (op.name.length > 0) {
-        sheet.name = op.name;
+        existing.name = op.name;
       }
+      // Honor `op.index` whether the gid is fresh OR was lazily materialized by an
+      // earlier cell/structure op (ensureSheet appends to the END). Remove any
+      // existing occurrence first so a lazy sheet is REPOSITIONED, not duplicated.
+      const current = model.order.indexOf(op.gid);
+      if (current !== -1) model.order.splice(current, 1);
+      const at = Math.min(Math.max(0, op.index), model.order.length);
+      model.order.splice(at, 0, op.gid);
       return;
     }
     case "rename-sheet": {
@@ -348,11 +363,14 @@ export function applySheetsOperation(
       return;
     case "reorder-sheet": {
       const len = model.order.length;
-      if (len === 0) return;
-      const from = Math.min(Math.max(0, op.from), len - 1);
+      // `from` is the SOLE identity of which sheet to move (the op carries no
+      // gid), so an out-of-range `from` is unaddressable — ignore it rather than
+      // clamp and silently move the WRONG sheet. `to` is only a destination, so
+      // clamping it into bounds is safe.
+      if (op.from < 0 || op.from >= len) return;
       const to = Math.min(Math.max(0, op.to), len - 1);
-      if (from === to) return;
-      const [gid] = model.order.splice(from, 1);
+      if (op.from === to) return;
+      const [gid] = model.order.splice(op.from, 1);
       if (gid !== undefined) model.order.splice(to, 0, gid);
       return;
     }

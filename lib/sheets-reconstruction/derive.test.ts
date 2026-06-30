@@ -48,6 +48,7 @@ describe("sheets derive — extractors", () => {
     const f = revs([fmt])[0];
     if (f === undefined) throw new Error("no revision");
     expect(sheetsSummaryExtractor.delta(f)).toEqual({ inserted: 0, deleted: 0 });
+    expect(sheetsSummaryExtractor.position(f)).toBeNull(); // format-only → no edit position
   });
 
   test("a structural / unknown op contributes no delta and a null position", () => {

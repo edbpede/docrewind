@@ -91,22 +91,34 @@ function decodeRange(raw: unknown): SheetsRange | null {
     rowStart === undefined ||
     rowEnd === undefined ||
     colStart === undefined ||
-    colEnd === undefined
+    colEnd === undefined ||
+    // Half-open ranges are end >= start; a reversed range is a malformed payload.
+    // Degrading it here (→ unknownOp at both call sites) keeps the open-world
+    // funnel honest and avoids feeding a reversed extent into `recomputeExtent`.
+    rowEnd < rowStart ||
+    colEnd < colStart
   ) {
     return null;
   }
   return { gid: unsafeAsGid(gidRaw), rowStart, rowEnd, colStart, colEnd };
 }
 
-/** Decode a concrete value object/array (the inner CONTENT of a value-set payload). */
-function decodeValue(content: unknown): CellContent {
+/**
+ * Decode a concrete value object/array (the inner CONTENT of a value-set
+ * payload). Called only once `CELL_CONTENT_TAG` has confirmed "this op sets the
+ * cell's value", so an unrecognized CONTENT shape is a malformed value payload,
+ * not a format-only no-op: returns `null` to signal "unparseable" so the caller
+ * degrades the whole op to `SheetsUnknownOp` (the fidelity UI then reports it)
+ * rather than silently dropping the edit as `{ kind: "none" }`.
+ */
+function decodeValue(content: unknown): CellContent | null {
   if (Array.isArray(content)) {
     // [null, typeTag, text] — string/formula.
     const text = content[2];
     if (typeof text === "string") {
       return text.startsWith("=") ? { kind: "formula", formula: text } : { kind: "text", text };
     }
-    return { kind: "none" };
+    return null;
   }
   if (isRecord(content)) {
     const value = content["3"]; // the value field
@@ -117,11 +129,16 @@ function decodeValue(content: unknown): CellContent {
         : { kind: "text", text: value };
     }
   }
-  return { kind: "none" };
+  return null;
 }
 
-/** Decode the CellMutation PAYLOAD (args[2]) into the cell content change. */
-function decodeContent(payload: unknown): CellContent {
+/**
+ * Decode the CellMutation PAYLOAD (args[2]) into the cell content change.
+ * Returns `null` ONLY for the confirmed-value-set-but-unparseable-CONTENT case
+ * (so the caller can degrade to `SheetsUnknownOp`); every legitimate format-only
+ * payload still resolves to `{ kind: "none" }`.
+ */
+function decodeContent(payload: unknown): CellContent | null {
   if (Array.isArray(payload)) {
     // Value-set wrapper: [null, CELL_CONTENT_TAG, n, CONTENT, ...].
     if (payload[1] !== CELL_CONTENT_TAG) return { kind: "none" };
@@ -180,10 +197,14 @@ function decodeCell(args: unknown, raw: unknown, revisionId: RevisionId): Sheets
   if (!Array.isArray(args)) return unknownOp(raw, String(SHEETS_OPCODE.CELL_MUTATION), revisionId);
   const range = decodeRange(args[1]);
   if (range === null) return unknownOp(raw, String(SHEETS_OPCODE.CELL_MUTATION), revisionId);
+  const content = decodeContent(args[2]);
+  // A confirmed value-set with an unrecognized CONTENT shape is a malformed known
+  // op → degrade so the fidelity UI reports it (never a silent drop).
+  if (content === null) return unknownOp(raw, String(SHEETS_OPCODE.CELL_MUTATION), revisionId);
   return {
     op: "cell",
     range,
-    content: decodeContent(args[2]),
+    content,
     format: decodeFormat(args[2], args[3]),
   };
 }

@@ -30,7 +30,7 @@ import { IconAlert, IconChart, IconSettings } from "@/components/icons";
 import PlaybackControls from "@/components/PlaybackControls";
 import PrivacyBanner from "@/components/PrivacyBanner";
 import ProgressView, { type ProgressPhase } from "@/components/ProgressView";
-import SheetTabs from "@/components/SheetTabs";
+import SheetTabs, { SHEET_GRID_PANEL_ID, sheetTabId } from "@/components/SheetTabs";
 import SummaryInsights from "@/components/SummaryInsights";
 import ThemeControl from "@/components/ThemeControl";
 import Timeline, { type TimelineMarker } from "@/components/Timeline";
@@ -41,6 +41,7 @@ import { asDocId } from "@/lib/domain/ids";
 import type { DocumentKind } from "@/lib/domain/kind";
 import type { DocId, TimelineEvent } from "@/lib/domain/model";
 import {
+  type EditUnit,
   errorTitle,
   largeEditDetail,
   pauseDetail,
@@ -191,10 +192,13 @@ function isWorkerDecodeMessage(value: unknown): value is WorkerDecodeMessage {
   );
 }
 
-/** Project timeline events onto the applied-count axis for the Timeline markers. */
+/** Project timeline events onto the applied-count axis for the Timeline markers.
+ *  `unit` is the document's large-edit counting unit (characters for Docs, cells
+ *  for Sheets) — the shared TimelineEvent carries a unit-agnostic delta. */
 function buildMarkers(
   events: readonly TimelineEvent[],
   revisions: readonly RevisionMeta[],
+  unit: EditUnit,
 ): TimelineMarker[] {
   const indexByRevision = new Map<number, number>();
   for (let i = 0; i < revisions.length; i++) {
@@ -222,13 +226,13 @@ function buildMarkers(
         anchor = Number(event.atRevision);
         kind = "large-insertion";
         label = strings.timeline.markerLargeInsertion;
-        detail = largeEditDetail(event.charDelta);
+        detail = largeEditDetail(event.charDelta, unit);
         break;
       case "large-deletion":
         anchor = Number(event.atRevision);
         kind = "large-deletion";
         label = strings.timeline.markerLargeDeletion;
-        detail = largeEditDetail(event.charDelta);
+        detail = largeEditDetail(event.charDelta, unit);
         break;
       case "pause":
         anchor = Number(event.afterRevision);
@@ -602,6 +606,12 @@ const ReplaySurface: Component<{
     const grid = currentGrid();
     return grid !== undefined && hasFidelityNotice(grid);
   });
+  // Reverse link for the grid tabpanel: name it by the active tab when one exists
+  // (the tabs only render when there is at least one sheet).
+  const sheetPanelLabelledBy = createMemo(() => {
+    const gid = activeGid();
+    return gid === null ? undefined : sheetTabId(gid);
+  });
 
   // ── Authorship attribution (§9.7) ───────────────────────────────────────────
   // ONE shared author derivation feeds BOTH the colophon and the caret/highlight, so
@@ -671,7 +681,13 @@ const ReplaySurface: Component<{
 
   const markers = createMemo(() => {
     const data = loaded();
-    return data === undefined ? [] : buildMarkers(data.data.timeline, data.data.revisions);
+    if (data === undefined) {
+      return [];
+    }
+    // Sheets large-edit deltas count cells; Docs count characters. The marker
+    // detail must name the right unit (CID 3501810461).
+    const unit: EditUnit = data.kind === "sheet" ? "cells" : "characters";
+    return buildMarkers(data.data.timeline, data.data.revisions, unit);
   });
   // The dateline of the frame in view. `currentIndex` is an applied-count, so the
   // revision that produced this frame is `revisions[currentIndex - 1]`; index 0 is
@@ -1053,10 +1069,17 @@ const ReplaySurface: Component<{
                                   />
                                 )}
                               </Show>
-                              <GridViewport
-                                sheet={sheet()}
-                                showFidelityNotice={gridHasFidelityNotice()}
-                              />
+                              <div
+                                role="tabpanel"
+                                id={SHEET_GRID_PANEL_ID}
+                                aria-labelledby={sheetPanelLabelledBy()}
+                                tabindex="0"
+                              >
+                                <GridViewport
+                                  sheet={sheet()}
+                                  showFidelityNotice={gridHasFidelityNotice()}
+                                />
+                              </div>
                             </div>
                           )}
                         </Show>

@@ -157,6 +157,17 @@ describe("apply — sheets (tabs)", () => {
     expect(model.sheets.get(asGid("849076485"))?.name).toBe("Ark2");
     expect(model.sheets.get(GID0)?.name).toBe("Renamed");
   });
+
+  test("add-sheet repositions a lazily-created sheet to its wire index (not just rename)", () => {
+    // A cell op references gid "849076485" before its add-sheet arrives, so
+    // ensureSheet lazily creates it at the END of order: [GID0, "849076485"].
+    // The later add-sheet declares index 0 — it must MOVE the sheet to the front,
+    // not merely set its name (the index gap that claim 3501810500 describes).
+    const add0 = [21350203, [null, 0, 0, "849076485", { "1": [[null, 0, 0, "Ark2"]] }]];
+    const model = gridFrom(changelog([setNum(0, 0, 1), setNum(0, 0, 5, "849076485"), add0]));
+    expect(model.order).toEqual([asGid("849076485"), GID0]);
+    expect(model.sheets.get(asGid("849076485"))?.name).toBe("Ark2");
+  });
 });
 
 const CHART_OBJECT = [
@@ -236,6 +247,16 @@ describe("apply — Phase-5 op families", () => {
     expect(model.order).toEqual([GID0]);
   });
 
+  test("reorder ignores an out-of-range `from` instead of moving the wrong sheet", () => {
+    // Two sheets: [GID0, "849076485"]. `from=5` is out of range for len 2 — clamping
+    // it would move whatever sheet sits at the clamped index (the WRONG sheet, since
+    // the op carries no gid). The op must be a no-op (claim 3501810505).
+    const add = [21350203, [null, 1, 0, "849076485", { "1": [[null, 0, 0, "Ark2"]] }]];
+    const reorder = [31997291, [null, 5, 0]]; // from out of range, to = 0
+    const model = gridFrom(changelog([setNum(0, 0, 1), add, reorder]));
+    expect(model.order).toEqual([GID0, asGid("849076485")]);
+  });
+
   test("structure-shift on a WIDE merge + TALL placeholder shifts AND re-grows extent", () => {
     const merge = [27911206, { "1": [null, "0", 0, 1, 15, 17] }]; // cols beyond MIN_COLS
     const chart = [27809640, { "1": [null, "obj", { "1": 3 }, [null, 0, "0", [null, 30, 0]]] }];
@@ -304,6 +325,36 @@ describe("apply — additional coverage", () => {
     const model = gridFrom(changelog([setNum(5, 0, 7), hugeBold]));
     expect(cellOf(model, 5, 0)?.style.bold).toBe(true);
     expect(model.sheets.get(GID0)?.cells.size).toBe(1);
+    // Format-only is lossless over the bounded path → no fidelity notice fires.
+    expect(model.fidelityNotices).toHaveLength(0);
+  });
+
+  test("an oversized VALUE mutation stays bounded but signals the dropped content", () => {
+    // rows*cols (70000 * 2) exceeds MAX_CELLS_PER_MUTATION, so new cells are NOT
+    // materialized (R7). The one pre-existing cell in range is still updated, but
+    // the dropped new-cell values are surfaced honestly (claim 3501810512).
+    const hugeNum = [
+      21299578,
+      [
+        null,
+        [null, "0", 0, 70000, 0, 2],
+        [null, 132274236, 3, { "1": 3, "3": 99 }, null, null, 0],
+        {},
+      ],
+    ];
+    const model = gridFrom(changelog([setNum(5, 0, 7), hugeNum]));
+    expect(cellOf(model, 5, 0)?.value).toBe(99); // existing cell still written
+    expect(model.sheets.get(GID0)?.cells.size).toBe(1); // no new cells materialized
+    expect(model.fidelityNotices.some((n) => n.kind === "oversized-mutation-dropped")).toBe(true);
+  });
+
+  test("an oversized clear loses nothing and raises no oversized-mutation notice", () => {
+    // A clear over an oversized range only empties existing cells — absent cells
+    // are already empty — so it must NOT raise a false 'dropped content' notice.
+    const hugeClear = [21299578, [null, [null, "0", 0, 70000, 0, 2], { "1": 2 }, []]];
+    const model = gridFrom(changelog([setNum(5, 0, 7), hugeClear]));
+    expect(cellOf(model, 5, 0)?.value).toBeNull(); // existing cell cleared
+    expect(model.fidelityNotices.some((n) => n.kind === "oversized-mutation-dropped")).toBe(false);
   });
 
   test("deleting a column removes it and shifts the rest left", () => {

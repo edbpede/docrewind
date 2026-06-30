@@ -13,7 +13,7 @@
 
 import { createIdbStore } from "@/lib/db";
 import { asDocId } from "@/lib/domain/ids";
-import type { DocumentKind } from "@/lib/domain/kind";
+import { type DocumentKind, isDocumentKind } from "@/lib/domain/kind";
 import type { DecodedRevision, TimelineEvent } from "@/lib/domain/model";
 import type { SheetsDecodedRevision } from "@/lib/sheets-decoder/types";
 import type { StoredGridSnapshot, StoredSnapshot } from "@/lib/store";
@@ -82,6 +82,15 @@ scope.addEventListener("message", (event: MessageEvent) => {
   if (!isParseRequest(request)) {
     // Malformed message — no usable docId, so we cannot post a per-doc signal;
     // drop it rather than crash the worker with an unhandled rejection.
+    return;
+  }
+  // `kind` is just as untyped at this boundary as docId/runId, so validate it
+  // too: an out-of-set value must not silently fall through to the Docs pipeline
+  // and post a wrong `docKind: "doc"` result. docId/runId are valid here, so
+  // post a terminal `failed` signal (the page waits for exactly one) instead.
+  const rawKind: unknown = (request as { kind?: unknown }).kind;
+  if (rawKind !== undefined && !isDocumentKind(rawKind)) {
+    post({ kind: "failed", docId: request.docId, runId: request.runId, revisionCount: 0 });
     return;
   }
   // Async rejections (invalid docId, store I/O) would otherwise be unhandled and

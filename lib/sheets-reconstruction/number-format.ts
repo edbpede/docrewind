@@ -28,8 +28,10 @@ const CURRENCY_TOKEN = /\[\$([^\]-]*)(?:-[0-9A-Za-z]+)?\]/g;
 // The numeric skeleton: a run of #/0 with optional grouping commas + decimals.
 const SKELETON = /[#0][#0,]*(?:\.[#0]+)?/;
 // Tokens that mark a pattern v1 does NOT support (dates, scientific, multi-
-// section, text, fill/padding) — reject so the caller falls back honestly.
-const UNSUPPORTED = /[eE?@*;yYmMdDhHsS]/;
+// section, fill/padding, and `"`-quoted literal text) — reject so the caller
+// falls back honestly. v1 does not strip `"` delimiters, so a quoted run like
+// `0.00" kr"` would otherwise leak the literal quote chars into the output.
+const UNSUPPORTED = /[eE?@*;yYmMdDhHsS"]/;
 
 /**
  * Parse a number-format pattern into the supported {@link NumberFormatSpec}, or

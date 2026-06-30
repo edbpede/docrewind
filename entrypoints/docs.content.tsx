@@ -91,18 +91,33 @@ export default defineContentScript({
       return;
     }
 
+    // Mount inside the editor titlebar button group (near Share) so the control
+    // reads as native. The toolbar is built asynchronously, so `autoMount` (below)
+    // observes the DOM and mounts once a host matches. The exact class can vary, so
+    // we list a fallback: `:has(> #…share…)` is the CSS equivalent of the share
+    // button's parent.
+    const titlebarAnchor = ".docs-titlebar-buttons, :has(> #docs-titlebar-share-client-button)";
+    // Sheets is served by this same script, but its chrome is not guaranteed to
+    // expose the Docs titlebar selectors above. autoMount would otherwise watch
+    // forever and the affordance would never appear on such a surface — so on a
+    // sheet, once a grace period lapses without the titlebar showing up, fall back
+    // to a guaranteed host (`body`) so the control still reaches the user. Docs is
+    // unaffected: the resolver below never returns anything but `titlebarAnchor`
+    // for a doc, preserving the existing behavior exactly.
+    const fallbackDeadline = Date.now() + 5_000;
+
     const ui = await createShadowRootUi(ctx, {
       name: "docrewind-affordance",
       position: "inline",
-      // Mount inside the Docs titlebar button group (near Share) so the control
-      // reads as native. The toolbar is built asynchronously, so `autoMount`
-      // (below) observes the DOM and mounts once a host matches. autoMount drives
-      // a MutationObserver off this selector and REJECTS an `Element`/`() => Element`
-      // anchor, so it must be a string. The exact class can vary, so we list a
-      // fallback: `:has(> #…share…)` is the CSS equivalent of the share button's
-      // parent. `append: "first"` places us at the start of the row, left of the
+      // A function anchor, re-resolved by autoMount on each DOM change. autoMount
+      // accepts `() => string`; it only rejects an `Element`/`() => Element`
+      // anchor. `append: "first"` places us at the start of the row, left of the
       // version-history/comment icons.
-      anchor: ".docs-titlebar-buttons, :has(> #docs-titlebar-share-client-button)",
+      anchor: () => {
+        if (document.querySelector(titlebarAnchor) !== null) return titlebarAnchor;
+        if (info.kind === "sheet" && Date.now() >= fallbackDeadline) return "body";
+        return titlebarAnchor;
+      },
       append: "first",
       // Keep page shortcuts from leaking into our control and vice versa.
       isolateEvents: ["keydown", "keyup", "click", "wheel"],

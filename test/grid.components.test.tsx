@@ -6,7 +6,7 @@
 import { fireEvent, render } from "@solidjs/testing-library";
 import { describe, expect, it, vi } from "vitest";
 import GridViewport from "@/components/GridViewport";
-import SheetTabs from "@/components/SheetTabs";
+import SheetTabs, { SHEET_GRID_PANEL_ID, sheetTabId } from "@/components/SheetTabs";
 import { asGid, type Gid } from "@/lib/sheets-decoder/types";
 import {
   type Cell,
@@ -144,6 +144,45 @@ describe("SheetTabs", () => {
       <SheetTabs model={model} activeGid={asGid("0")} onSelect={onSelect} />
     ));
     fireEvent.click(getByText("Summary"));
+    expect(onSelect).toHaveBeenCalledWith(asGid("849076485"));
+  });
+
+  it("keeps only the active tab in the page Tab order (roving tabindex)", () => {
+    const model = twoSheetModel();
+    const { getByText } = render(() => (
+      <SheetTabs model={model} activeGid={asGid("0")} onSelect={() => {}} />
+    ));
+    expect(getByText("Data").getAttribute("tabindex")).toBe("0");
+    expect(getByText("Summary").getAttribute("tabindex")).toBe("-1");
+  });
+
+  it("links each tab to the grid panel and carries a stable id", () => {
+    const model = twoSheetModel();
+    const { getByText } = render(() => (
+      <SheetTabs model={model} activeGid={asGid("0")} onSelect={() => {}} />
+    ));
+    const data = getByText("Data");
+    expect(data.getAttribute("aria-controls")).toBe(SHEET_GRID_PANEL_ID);
+    expect(data.getAttribute("id")).toBe(sheetTabId(asGid("0")));
+  });
+
+  it("selects the next sheet on ArrowRight (focus follows selection)", () => {
+    const model = twoSheetModel();
+    const onSelect = vi.fn<(gid: Gid) => void>();
+    const { getByRole } = render(() => (
+      <SheetTabs model={model} activeGid={asGid("0")} onSelect={onSelect} />
+    ));
+    fireEvent.keyDown(getByRole("tablist"), { key: "ArrowRight" });
+    expect(onSelect).toHaveBeenCalledWith(asGid("849076485"));
+  });
+
+  it("wraps to the last sheet on ArrowLeft from the first", () => {
+    const model = twoSheetModel();
+    const onSelect = vi.fn<(gid: Gid) => void>();
+    const { getByRole } = render(() => (
+      <SheetTabs model={model} activeGid={asGid("0")} onSelect={onSelect} />
+    ));
+    fireEvent.keyDown(getByRole("tablist"), { key: "ArrowLeft" });
     expect(onSelect).toHaveBeenCalledWith(asGid("849076485"));
   });
 });

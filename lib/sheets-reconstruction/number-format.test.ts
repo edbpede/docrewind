@@ -43,6 +43,12 @@ describe("number-format — unsupported patterns fall back", () => {
     expect(formatNumber("#,##0;(#,##0)", 5)).toBeNull();
   });
 
+  test("quoted literal text returns null (quotes are not stripped)", () => {
+    expect(parseNumberFormat('0.00" kr"')).toBeNull();
+    expect(isSupportedNumberFormat('0.00" kr"')).toBe(false);
+    expect(formatNumber('0.00" kr"', 5.5)).toBeNull();
+  });
+
   test("an empty pattern returns null", () => {
     expect(parseNumberFormat("")).toBeNull();
     expect(formatNumber("", 5)).toBeNull();

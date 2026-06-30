@@ -273,6 +273,46 @@ describe("decodeSheetsOperations — open-world degradation", () => {
     expect(op.op).toBe("unknown");
   });
 
+  test("a confirmed value-set with an unparseable CONTENT degrades to unknown", () => {
+    // CELL_CONTENT_TAG (132274236) matched — the decoder has committed "this op
+    // sets the cell's value" — but neither known value shape parses, so the op
+    // must surface as unknown rather than be silently dropped as {kind:"none"}.
+    // Array CONTENT whose text slot ([2]) is not a string.
+    expect(
+      firstOp(
+        changelog([
+          [21299578, [null, [null, "0", 1, 2, 0, 1], [null, 132274236, 3, [null, 2, 7]], {}]],
+        ]),
+      ).op,
+    ).toBe("unknown");
+    // Record CONTENT whose value field ("3") is neither a number nor a string.
+    expect(
+      firstOp(
+        changelog([
+          [
+            21299578,
+            [null, [null, "0", 1, 2, 0, 1], [null, 132274236, 3, { "1": 3, "3": true }], {}],
+          ],
+        ]),
+      ).op,
+    ).toBe("unknown");
+    // CONTENT is a bare primitive (neither array nor record).
+    expect(
+      firstOp(changelog([[21299578, [null, [null, "0", 1, 2, 0, 1], [null, 132274236, 3, 5], {}]]]))
+        .op,
+    ).toBe("unknown");
+  });
+
+  test("a reversed range degrades to unknown (cell + merge)", () => {
+    // Half-open ranges are end >= start; a reversed range is a malformed payload.
+    // Reversed rows through a cell mutation.
+    expect(firstOp(changelog([[21299578, [null, [null, "0", 5, 2, 0, 1], {}, {}]]])).op).toBe(
+      "unknown",
+    );
+    // Reversed cols through a merge.
+    expect(firstOp(changelog([[27911206, { "1": [null, "0", 0, 1, 3, 1] }]])).op).toBe("unknown");
+  });
+
   test("a non-array entry op degrades to unknown without throwing", () => {
     const op = firstOp({ changelog: [["not-an-op", 1, "u", 1, "s", 0]] });
     expect(op.op).toBe("unknown");

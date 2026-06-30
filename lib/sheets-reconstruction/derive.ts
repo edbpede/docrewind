@@ -60,6 +60,10 @@ function opPosition(op: SheetsOperation): number | null {
       return null;
     }
     case "cell":
+      // A format-only mutation (content.kind === "none") changes no cell value,
+      // so it has no "where a human change landed" position — mirror opDelta's
+      // guard and the Docs convention (see lib/summary/derive.ts:128-131).
+      if (op.content.kind === "none") return null;
       return op.range.rowStart + 1;
     default:
       return null;

@@ -47,10 +47,10 @@ interface GradingDoc {
 // Returns null until the iframe exists (the educator lacks access, or it hasn't loaded).
 function detectGradingDoc(): GradingDoc | null {
   const iframe = document.querySelector<HTMLIFrameElement>(
-    'iframe[src*="/document/d/"], iframe[src*="/spreadsheets/d/"]',
+    'iframe[src*="/document/d/"], iframe[src*="/document/u/"][src*="/d/"], iframe[src*="/spreadsheets/d/"], iframe[src*="/spreadsheets/u/"][src*="/d/"]',
   );
   const dataEl = document.querySelector<HTMLElement>(
-    '[data-url*="/document/d/"], [data-url*="/spreadsheets/d/"]',
+    '[data-url*="/document/d/"], [data-url*="/document/u/"][data-url*="/d/"], [data-url*="/spreadsheets/d/"], [data-url*="/spreadsheets/u/"][data-url*="/d/"]',
   );
   const src = iframe?.src || dataEl?.getAttribute("data-url") || "";
   if (src === "") return null;

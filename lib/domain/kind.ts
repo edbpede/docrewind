@@ -11,6 +11,11 @@
 /** Which Google editor a captured document belongs to. */
 export type DocumentKind = "doc" | "sheet";
 
+/** Runtime guard for the untyped boundaries (worker/messaging) the tag crosses. */
+export function isDocumentKind(value: unknown): value is DocumentKind {
+  return value === "doc" || value === "sheet";
+}
+
 /** The URL path prefix Google uses for each kind (`/document/` vs `/spreadsheets/`). */
 export function pathPrefixForKind(kind: DocumentKind): "document" | "spreadsheets" {
   return kind === "sheet" ? "spreadsheets" : "document";

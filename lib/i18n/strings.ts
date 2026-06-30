@@ -314,10 +314,17 @@ export function sessionDetail(charsInserted: number, charsDeleted: number): stri
   return `${charsInserted.toLocaleString()} inserted · ${charsDeleted.toLocaleString()} deleted`;
 }
 
-/** Large-edit detail from a signed char delta, e.g. "+1,240 characters". */
-export function largeEditDetail(charDelta: number): string {
-  const sign = charDelta < 0 ? "−" : "+"; // U+2212 MINUS SIGN for deletions
-  return `${sign}${Math.abs(charDelta).toLocaleString()} characters`;
+/** The counting unit a large-edit marker reports — characters for a Docs char
+ *  delta, cells for a Sheets cell-count delta. Chosen by document kind at the
+ *  marker call site so the same shared event shape never assumes one unit. */
+export type EditUnit = "characters" | "cells";
+
+/** Large-edit detail from a signed delta, e.g. "+1,240 characters" (Docs) or
+ *  "+120 cells" (Sheets). `unit` is required so a Sheets cell count is never
+ *  silently labelled in characters. */
+export function largeEditDetail(delta: number, unit: EditUnit): string {
+  const sign = delta < 0 ? "−" : "+"; // U+2212 MINUS SIGN for deletions
+  return `${sign}${Math.abs(delta).toLocaleString()} ${unit}`;
 }
 
 /** Pause detail from a gap duration, e.g. "12m without edits". */

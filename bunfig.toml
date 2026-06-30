@@ -16,7 +16,8 @@ exact = true
 # The threshold is enforced only when `--coverage` is passed, so `test:logic` (no flag)
 # is unaffected; `test:coverage` enforces the floor and exits non-zero on a real miss.
 # Sync requirement: the GATED tier is defined POSITIVELY by the path args of the
-# `test:coverage` script in package.json (currently `./lib/decoder ./lib/reconstruction`)
+# `test:coverage` script in package.json (currently `./lib/decoder ./lib/reconstruction
+# ./lib/replay-core ./lib/sheets-decoder ./lib/sheets-reconstruction`)
 # and NEGATIVELY by the ignore list below. Bun has no inclusion-side key, so when changing
 # the `test:coverage` paths, also decide here whether the affected tier is gated (leave it
 # out) or excluded (add it to coveragePathIgnorePatterns). Keep the two lists in agreement.

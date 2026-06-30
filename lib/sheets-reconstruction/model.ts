@@ -77,16 +77,18 @@ export interface SheetGrid {
 
 /**
  * Privacy-safe fidelity notice: appended whenever an op degrades to
- * `SheetsUnknownOp`, a `modelVersion` mismatch is detected (R9), or a
- * number-format pattern falls back to its raw value. `detail` is a content-free
- * code (an opcode, a version pair, or "") — never cell content.
+ * `SheetsUnknownOp`, a `modelVersion` mismatch is detected (R9), a number-format
+ * pattern falls back to its raw value, or a value-bearing mutation over an
+ * oversized range drops its new-cell values (R7 boundedness). `detail` is a
+ * content-free code (an opcode, a version pair, or "") — never cell content.
  */
 export interface FidelityNotice {
   readonly kind:
     | "unknown-op"
     | "model-version-mismatch"
     | "number-format-fallback"
-    | "conditional-format-dropped";
+    | "conditional-format-dropped"
+    | "oversized-mutation-dropped";
   readonly detail: string;
 }
 
