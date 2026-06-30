@@ -22,7 +22,9 @@ import type { DocId } from "@/lib/domain/model";
 import { errorTitle, strings } from "@/lib/i18n/strings";
 import { loadReplayData } from "@/lib/replay/load";
 import { retrievalError } from "@/lib/retrieval/errors";
+import { deriveSheetsSummary } from "@/lib/sheets-reconstruction/derive";
 import type { RevisionStore } from "@/lib/store";
+import { deriveDocumentSummary } from "@/lib/summary/derive";
 
 export interface SummaryAppProps {
   /** Bulk store (page realm). Injected in tests; defaults to the idb backend. */
@@ -67,9 +69,14 @@ const SummarySurface: Component<{ readonly docId: DocId; readonly store: Revisio
     () => props.docId,
     (docId) => loadReplayData(props.store, docId),
   );
-  const data = () => {
+  // Derive the content-free summary by kind: Docs count characters, Sheets count
+  // cell edits (both via the shared summary core). A miss / stub yields undefined.
+  const summary = () => {
     const value = result();
-    return value !== undefined && value.kind === "ok" ? value.data : undefined;
+    if (value === undefined) return undefined;
+    if (value.kind === "ok") return deriveDocumentSummary(value.data.revisions);
+    if (value.kind === "ok-sheet") return deriveSheetsSummary(value.data.revisions);
+    return undefined;
   };
 
   return (
@@ -111,7 +118,7 @@ const SummarySurface: Component<{ readonly docId: DocId; readonly store: Revisio
           }
         >
           <Show
-            when={data()}
+            when={summary()}
             fallback={
               <StatusCard
                 icon={IconHistory}
@@ -121,7 +128,7 @@ const SummarySurface: Component<{ readonly docId: DocId; readonly store: Revisio
               />
             }
           >
-            {(loaded) => <DocumentSummary revisions={loaded().revisions} />}
+            {(derived) => <DocumentSummary summary={derived()} />}
           </Show>
         </Suspense>
       </ErrorBoundary>

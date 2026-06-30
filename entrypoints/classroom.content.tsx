@@ -29,15 +29,16 @@ import { render } from "solid-js/web";
 import "virtual:uno.css";
 import ReplayAffordance from "@/components/ReplayAffordance";
 import { decideReconcile } from "@/lib/classroom/reconcile";
-import { extractDocId } from "@/lib/docs-url";
+import { parseDocsUrl } from "@/lib/docs-url";
 import { buildGradingPath, parseClassroomLocation } from "@/lib/docs-url/classroom";
 import type { DocId } from "@/lib/domain/ids";
+import type { DocumentKind } from "@/lib/domain/kind";
 import { sendMessage } from "@/lib/messaging";
-import { detectUserIndex } from "@/lib/protocol/endpoints";
 
 interface GradingDoc {
   readonly docId: DocId;
   readonly userIndex: number | null;
+  readonly kind: DocumentKind;
 }
 
 // Find the embedded student doc in the grading view and recover its id + account
@@ -45,13 +46,17 @@ interface GradingDoc {
 // also carries. Reads an attribute on our own page — never the cross-origin frame's DOM.
 // Returns null until the iframe exists (the educator lacks access, or it hasn't loaded).
 function detectGradingDoc(): GradingDoc | null {
-  const iframe = document.querySelector<HTMLIFrameElement>('iframe[src*="/document/d/"]');
-  const dataEl = document.querySelector<HTMLElement>('[data-url*="/document/d/"]');
+  const iframe = document.querySelector<HTMLIFrameElement>(
+    'iframe[src*="/document/d/"], iframe[src*="/document/u/"][src*="/d/"], iframe[src*="/spreadsheets/d/"], iframe[src*="/spreadsheets/u/"][src*="/d/"]',
+  );
+  const dataEl = document.querySelector<HTMLElement>(
+    '[data-url*="/document/d/"], [data-url*="/document/u/"][data-url*="/d/"], [data-url*="/spreadsheets/d/"], [data-url*="/spreadsheets/u/"][data-url*="/d/"]',
+  );
   const src = iframe?.src || dataEl?.getAttribute("data-url") || "";
   if (src === "") return null;
-  const docId = extractDocId(src);
-  if (docId === null) return null;
-  return { docId, userIndex: detectUserIndex(src) };
+  const info = parseDocsUrl(src);
+  if (info === null) return null;
+  return { docId: info.docId, userIndex: info.userIndex, kind: info.kind };
 }
 
 // The grading view's action group (the flex row holding the native "Return" button).
@@ -165,12 +170,14 @@ export default defineContentScript({
     // the explicit user action (PRD §9.2); the content script owns neither the fetch
     // nor the surface (Seam A1) — fire-and-forget over typed messaging.
     const activate = (doc: GradingDoc): void => {
-      void sendMessage("activateReplay", { docId: doc.docId, userIndex: doc.userIndex }).catch(
-        () => {
-          // SW restarting or page navigating away (MV3 idle termination) — swallow so
-          // it isn't an unhandled rejection; the educator can simply re-activate.
-        },
-      );
+      void sendMessage("activateReplay", {
+        docId: doc.docId,
+        userIndex: doc.userIndex,
+        kind: doc.kind,
+      }).catch(() => {
+        // SW restarting or page navigating away (MV3 idle termination) — swallow so
+        // it isn't an unhandled rejection; the educator can simply re-activate.
+      });
     };
 
     // The single click handler, re-reading the live context each time so a stale

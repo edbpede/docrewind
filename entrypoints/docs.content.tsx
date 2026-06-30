@@ -82,7 +82,7 @@ async function harvestSelfIdentity(): Promise<void> {
 }
 
 export default defineContentScript({
-  matches: ["*://docs.google.com/document/*"],
+  matches: ["*://docs.google.com/document/*", "*://docs.google.com/spreadsheets/*"],
   cssInjectionMode: "ui",
   async main(ctx) {
     const info = parseDocsUrl(location.href);
@@ -91,18 +91,37 @@ export default defineContentScript({
       return;
     }
 
+    // Mount inside the editor titlebar button group (near Share) so the control
+    // reads as native. The toolbar is built asynchronously, so `autoMount` (below)
+    // observes the DOM and mounts once a host matches. The exact class can vary, so
+    // we list a fallback: `:has(> #…share…)` is the CSS equivalent of the share
+    // button's parent.
+    const titlebarAnchor = ".docs-titlebar-buttons, :has(> #docs-titlebar-share-client-button)";
+    // Sheets is served by this same script, but its chrome is not guaranteed to
+    // expose the Docs titlebar selectors above. autoMount would otherwise watch
+    // forever and the affordance would never appear on such a surface — so on a
+    // sheet, once a grace period lapses without the titlebar showing up, fall back
+    // to a guaranteed host (`body`) so the control still reaches the user. Docs is
+    // unaffected: the resolver below never returns anything but `titlebarAnchor`
+    // for a doc, preserving the existing behavior exactly.
+    // One grace window, shared by the resolver's `body` fallback below and the
+    // post-autoMount timer backstop further down, so both gates fire on the same
+    // clock and can't drift apart.
+    const FALLBACK_GRACE_MS = 5_000;
+    const fallbackDeadline = Date.now() + FALLBACK_GRACE_MS;
+
     const ui = await createShadowRootUi(ctx, {
       name: "docrewind-affordance",
       position: "inline",
-      // Mount inside the Docs titlebar button group (near Share) so the control
-      // reads as native. The toolbar is built asynchronously, so `autoMount`
-      // (below) observes the DOM and mounts once a host matches. autoMount drives
-      // a MutationObserver off this selector and REJECTS an `Element`/`() => Element`
-      // anchor, so it must be a string. The exact class can vary, so we list a
-      // fallback: `:has(> #…share…)` is the CSS equivalent of the share button's
-      // parent. `append: "first"` places us at the start of the row, left of the
+      // A function anchor, re-resolved by autoMount on each DOM change. autoMount
+      // accepts `() => string`; it only rejects an `Element`/`() => Element`
+      // anchor. `append: "first"` places us at the start of the row, left of the
       // version-history/comment icons.
-      anchor: ".docs-titlebar-buttons, :has(> #docs-titlebar-share-client-button)",
+      anchor: () => {
+        if (document.querySelector(titlebarAnchor) !== null) return titlebarAnchor;
+        if (info.kind === "sheet" && Date.now() >= fallbackDeadline) return "body";
+        return titlebarAnchor;
+      },
       append: "first",
       // Keep page shortcuts from leaking into our control and vice versa.
       isolateEvents: ["keydown", "keyup", "click", "wheel"],
@@ -119,6 +138,7 @@ export default defineContentScript({
                 void sendMessage("activateReplay", {
                   docId: info.docId,
                   userIndex: info.userIndex,
+                  kind: info.kind,
                 }).catch(() => {
                   // Best-effort: the background SW may be restarting or the page
                   // navigating away (MV3 idle termination). Swallow the rejection
@@ -143,5 +163,25 @@ export default defineContentScript({
     // observe the DOM and mount once the anchor exists (and re-mount if Docs
     // re-renders the titlebar). Replaces the eager `ui.mount()`.
     ui.autoMount();
+
+    // autoMount re-consults the anchor resolver ONLY from its MutationObserver —
+    // WXT gives it no timer of its own. So on a sheet whose DOM goes quiet after
+    // the grace window, the resolver's time-based `body` fallback is never
+    // re-evaluated and the affordance never mounts. Add a real timer backstop:
+    // once the grace lapses, if nothing has mounted yet, mount once to the
+    // now-`body` anchor. `ui.remove()` first stops autoMount (it calls
+    // `stopAutoMount` internally) so a later mutation can't have autoMount mount
+    // `body` a SECOND time onto our host — autoMount's own `mount()` is
+    // unguarded. `remove()` is harmless while unmounted (no host attached, the
+    // dispose is skipped). Docs (`kind !== "sheet"`) never schedules this, so its
+    // path is byte-for-byte unchanged.
+    if (info.kind === "sheet") {
+      ctx.setTimeout(() => {
+        if (ui.mounted == null) {
+          ui.remove();
+          ui.mount();
+        }
+      }, FALLBACK_GRACE_MS);
+    }
   },
 });

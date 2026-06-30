@@ -26,6 +26,7 @@
 
 import { createIdbStore } from "@/lib/db";
 import { asRevisionId } from "@/lib/domain/ids";
+import type { DocumentKind } from "@/lib/domain/kind";
 import type { DocId, RawPayload, RevisionId } from "@/lib/domain/model";
 import {
   attachCollaboratorEmails,
@@ -272,10 +273,15 @@ export default defineBackground(() => {
   // Build the replay-page query string. OMITS `u` entirely when userIndex is null
   // (so the page's strict parse reads `null`, never a wrong `/u/0/` account slot);
   // appends `&u=<n>` only for a real integer.
-  const buildReplayQuery = (docId: DocId, userIndex: number | null): string => {
+  const buildReplayQuery = (docId: DocId, userIndex: number | null, kind: DocumentKind): string => {
     const params = new URLSearchParams({ doc: docId });
     if (userIndex !== null && Number.isInteger(userIndex)) {
       params.set("u", String(userIndex));
+    }
+    // Tag the replay page with the kind so it drives the right pipeline/viewport
+    // before any publication exists; "doc" is the default and is omitted.
+    if (kind === "sheet") {
+      params.set("kind", "sheet");
     }
     return `?${params.toString()}`;
   };
@@ -295,6 +301,7 @@ export default defineBackground(() => {
   const harvestCollaboratorIdentities = async (
     docId: DocId,
     userIndex: number | null,
+    kind: DocumentKind,
   ): Promise<void> => {
     if (identitiesHarvested.has(docId) || !(await realIdentities.getValue())) {
       return;
@@ -309,7 +316,7 @@ export default defineBackground(() => {
       for (const surface of IDENTITY_BOOTSTRAP_SURFACES) {
         let response: Response;
         try {
-          response = await fetch(buildDocBootstrapUrl(docId, userIndex, surface), {
+          response = await fetch(buildDocBootstrapUrl(docId, userIndex, surface, kind), {
             credentials: "include",
             signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
           });
@@ -328,7 +335,7 @@ export default defineBackground(() => {
         return;
       }
       const tilesResponse = await fetch(
-        buildRevisionsTilesUrl({ docId, userIndex, token: params.token, ouid: params.ouid }),
+        buildRevisionsTilesUrl({ docId, userIndex, token: params.token, ouid: params.ouid, kind }),
         { credentials: "include", signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) },
       );
       if (!tilesResponse.ok) {
@@ -384,13 +391,14 @@ export default defineBackground(() => {
   // permission; no custom header / read token is required (§24 Q3/Q4). The raw
   // `)]}'`-framed text is stored opaque as `body` for the worker to parse/decode
   // — this adapter commits NO wire-format assumption beyond the URL shape.
-  const liveFetcher: ChunkFetcher = {
+  const createLiveFetcher = (kind: DocumentKind): ChunkFetcher => ({
     async fetchChunk(request: ChunkRequest): Promise<Result<RawPayload, RetrievalError>> {
       const url = buildRevisionsLoadUrl({
         docId: request.docId,
         start: request.span.start,
         end: request.span.end,
         userIndex: request.userIndex,
+        kind,
       });
       let response: Response;
       try {
@@ -420,7 +428,7 @@ export default defineBackground(() => {
         body,
       });
     },
-  };
+  });
 
   // Probe whether revision `end` is in range: 200 ⇒ in-range, any 4xx (the 2026
   // out-of-range signal is HTTP 400, §24 Q5) ⇒ over. Throws on a transport error
@@ -429,12 +437,14 @@ export default defineBackground(() => {
     docId: DocId,
     userIndex: number | null,
     end: number,
+    kind: DocumentKind,
   ): Promise<"in" | "over"> => {
     const url = buildRevisionsLoadUrl({
       docId,
       start: asRevisionId(1),
       end: asRevisionId(end),
       userIndex,
+      kind,
     });
     const response = await fetch(url, {
       credentials: "include",
@@ -458,12 +468,15 @@ export default defineBackground(() => {
   // boundary if the bootstrap shape ever changes. Both are encapsulated here so
   // the orchestrator stays strategy-agnostic (it consumes `discoverUpperBound`
   // only). `userIndex` is captured per request for the multi-account path.
-  const createLiveDiscovery = (userIndex: number | null): RevisionRangeDiscovery => ({
+  const createLiveDiscovery = (
+    userIndex: number | null,
+    kind: DocumentKind,
+  ): RevisionRangeDiscovery => ({
     strategy: "revision-count-metadata",
     async discoverUpperBound(docId: DocId): Promise<RevisionId> {
       // Primary: bootstrap metadata.
       try {
-        const response = await fetch(buildDocBootstrapUrl(docId, userIndex, "edit"), {
+        const response = await fetch(buildDocBootstrapUrl(docId, userIndex, "edit", kind), {
           credentials: "include",
           signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
         });
@@ -480,21 +493,21 @@ export default defineBackground(() => {
       }
 
       // Fallback: confirm revision 1 is in range, then bracket + binary-search.
-      if ((await probeInRange(docId, userIndex, 1)) === "over") {
+      if ((await probeInRange(docId, userIndex, 1, kind)) === "over") {
         throw new Error("no revisions in range");
       }
       let lo = 1; // always in range
       let hi = 2;
       for (let guard = 0; guard < 40; guard += 1) {
         await pause(200); // gentle spacing — undocumented soft limits (A.9)
-        if ((await probeInRange(docId, userIndex, hi)) === "over") break;
+        if ((await probeInRange(docId, userIndex, hi, kind)) === "over") break;
         lo = hi;
         hi *= 2;
       }
       while (lo + 1 < hi) {
         const mid = Math.floor((lo + hi) / 2);
         await pause(200);
-        if ((await probeInRange(docId, userIndex, mid)) === "in") lo = mid;
+        if ((await probeInRange(docId, userIndex, mid, kind)) === "in") lo = mid;
         else hi = mid;
       }
       return asRevisionId(lo);
@@ -510,7 +523,9 @@ export default defineBackground(() => {
     // and the privacy invariant holds. The replay page then validates the id,
     // drives the worker, and starts retrieval itself.
     void browser.tabs.create({
-      url: browser.runtime.getURL(`/replay.html${buildReplayQuery(data.docId, data.userIndex)}`),
+      url: browser.runtime.getURL(
+        `/replay.html${buildReplayQuery(data.docId, data.userIndex, data.kind ?? "doc")}`,
+      ),
     });
   });
 
@@ -594,7 +609,8 @@ export default defineBackground(() => {
     // the retrieval critical path: it gates internally and never throws, so a
     // fire-and-forget launch can't delay or fail the changelog fetch. Names land
     // asynchronously in `resolvedIdentities`, which the replay surface watches.
-    void harvestCollaboratorIdentities(data.docId, data.userIndex);
+    const kind: DocumentKind = data.kind ?? "doc";
+    void harvestCollaboratorIdentities(data.docId, data.userIndex, kind);
     // Claim a fresh epoch; any earlier run for this docId is now stale and will
     // self-cancel on its next `isCancelled()` check.
     const epoch = (runEpochByDoc.get(data.docId) ?? 0) + 1;
@@ -605,8 +621,8 @@ export default defineBackground(() => {
     try {
       const result = await runRetrieval(
         {
-          fetcher: liveFetcher,
-          discovery: createLiveDiscovery(data.userIndex),
+          fetcher: createLiveFetcher(kind),
+          discovery: createLiveDiscovery(data.userIndex, kind),
           store,
           sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
           now: () => Date.now(),

@@ -25,13 +25,14 @@ import {
   onMount,
   Show,
 } from "solid-js";
-import type { DecodedRevision, TimelineEvent } from "@/lib/domain/model";
+import type { TimelineEvent } from "@/lib/domain/model";
 import { authorActiveRange, formatDuration, strings } from "@/lib/i18n/strings";
 import { type AuthorEntry, deriveAuthors } from "@/lib/identity/authors";
 import type { IdentityMap } from "@/lib/identity/resolve";
+import type { RevisionMeta } from "@/lib/replay-core/meta";
 
 export interface SummaryInsightsProps {
-  readonly revisions: readonly DecodedRevision[];
+  readonly revisions: readonly RevisionMeta[];
   readonly timeline: readonly TimelineEvent[];
   /** When false, authors render as opaque "Author N" labels only. Defaults to false
    * here (component-local default); the app passes the user's setting, which is on. */

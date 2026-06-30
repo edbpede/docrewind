@@ -5,34 +5,47 @@
 // shared connection with the background), READS rawChunks, runs the PURE
 // pipeline (lib/worker/pipeline.ts), and posts run-tagged derived data back to
 // the replay page. The page owns derived writes after verifying the run tag, so
-// stale worker results from a retried run cannot publish decoded/snapshot/
-// timeline data.
+// stale worker results from a retried run cannot publish derived data.
 //
-// The replay page (Phase 5) instantiates this via
-//   new Worker(new URL("./parse.worker.ts", import.meta.url), { type: "module" })
-// — WXT resolves the worker bundle by inspecting this constructor pattern.
+// Kind-aware (plan row 7): the request carries the document `kind` so the worker
+// runs the Docs pipeline (linear-text model) or the Sheets pipeline (grid model)
+// and posts a `docKind`-tagged `done` payload the page publishes accordingly.
 
 import { createIdbStore } from "@/lib/db";
 import { asDocId } from "@/lib/domain/ids";
+import { type DocumentKind, isDocumentKind } from "@/lib/domain/kind";
 import type { DecodedRevision, TimelineEvent } from "@/lib/domain/model";
-import type { StoredSnapshot } from "@/lib/store";
-import { runPipelineOverBodies } from "@/lib/worker/pipeline";
+import type { SheetsDecodedRevision } from "@/lib/sheets-decoder/types";
+import type { StoredGridSnapshot, StoredSnapshot } from "@/lib/store";
+import { runPipelineOverBodies, runSheetsPipelineOverBodies } from "@/lib/worker/pipeline";
 
 /** Request: decode + reconstruct the document with this id from its raw chunks. */
 interface ParseRequest {
   readonly docId: string;
   readonly runId: number;
+  readonly kind?: DocumentKind;
 }
 
 /** Run-tagged result posted back to the replay page for verified publication. */
 type ParseResultMessage =
   | {
       readonly kind: "done";
+      readonly docKind: "doc";
       readonly docId: string;
       readonly runId: number;
       readonly revisionCount: number;
       readonly revisions: readonly DecodedRevision[];
       readonly snapshots: readonly StoredSnapshot[];
+      readonly timeline: readonly TimelineEvent[];
+    }
+  | {
+      readonly kind: "done";
+      readonly docKind: "sheet";
+      readonly docId: string;
+      readonly runId: number;
+      readonly revisionCount: number;
+      readonly revisions: readonly SheetsDecodedRevision[];
+      readonly snapshots: readonly StoredGridSnapshot[];
       readonly timeline: readonly TimelineEvent[];
     }
   | {
@@ -71,6 +84,15 @@ scope.addEventListener("message", (event: MessageEvent) => {
     // drop it rather than crash the worker with an unhandled rejection.
     return;
   }
+  // `kind` is just as untyped at this boundary as docId/runId, so validate it
+  // too: an out-of-set value must not silently fall through to the Docs pipeline
+  // and post a wrong `docKind: "doc"` result. docId/runId are valid here, so
+  // post a terminal `failed` signal (the page waits for exactly one) instead.
+  const rawKind: unknown = (request as { kind?: unknown }).kind;
+  if (rawKind !== undefined && !isDocumentKind(rawKind)) {
+    post({ kind: "failed", docId: request.docId, runId: request.runId, revisionCount: 0 });
+    return;
+  }
   // Async rejections (invalid docId, store I/O) would otherwise be unhandled and
   // leave the page waiting forever; post a terminal signal instead.
   void handleParse(request).catch(() => {
@@ -85,19 +107,41 @@ async function handleParse(request: ParseRequest): Promise<void> {
     post({ kind: "empty", docId: request.docId, runId: request.runId, revisionCount: 0 });
     return;
   }
+  const bodies = chunks.map((chunk) => chunk.body);
 
-  const result = runPipelineOverBodies(chunks.map((chunk) => chunk.body));
-  if (result.kind === "unsupported") {
-    // Unknown/parse-failed format — surface a content-free diagnostic signal.
-    post({ kind: "unsupported", docId: request.docId, runId: request.runId, revisionCount: 0 });
+  if (request.kind === "sheet") {
+    const result = runSheetsPipelineOverBodies(bodies);
+    if (result.kind === "unsupported") {
+      post({ kind: "unsupported", docId: request.docId, runId: request.runId, revisionCount: 0 });
+      return;
+    }
+    const snapshots: StoredGridSnapshot[] = [...result.replayIndex.snapshots.entries()].map(
+      ([appliedCount, model]) => ({ appliedCount, model }),
+    );
+    post({
+      kind: "done",
+      docKind: "sheet",
+      docId: request.docId,
+      runId: request.runId,
+      revisionCount: result.revisions.length,
+      revisions: result.revisions,
+      snapshots,
+      timeline: result.timeline,
+    });
     return;
   }
 
+  const result = runPipelineOverBodies(bodies);
+  if (result.kind === "unsupported") {
+    post({ kind: "unsupported", docId: request.docId, runId: request.runId, revisionCount: 0 });
+    return;
+  }
   const snapshots: StoredSnapshot[] = [...result.replayIndex.snapshots.entries()].map(
     ([appliedCount, model]) => ({ appliedCount, model }),
   );
   post({
     kind: "done",
+    docKind: "doc",
     docId: request.docId,
     runId: request.runId,
     revisionCount: result.revisions.length,
@@ -108,7 +152,5 @@ async function handleParse(request: ParseRequest): Promise<void> {
 }
 
 function post(message: ParseResultMessage): void {
-  // Phase 5 streams reconstructed frames using Transferable buffers; the Phase 4
-  // shell posts only a small structured-clone completion signal.
   scope.postMessage(message);
 }

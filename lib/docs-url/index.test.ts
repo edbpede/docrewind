@@ -14,8 +14,8 @@ describe("extractDocId", () => {
     expect(extractDocId(`https://docs.google.com/document/u/1/d/${ID}/edit`)).toBe(asDocId(ID));
   });
 
-  test("returns null for a non-document Docs URL", () => {
-    expect(extractDocId("https://docs.google.com/spreadsheets/d/abc/edit")).toBeNull();
+  test("extracts the id from a spreadsheets URL (kind sheet)", () => {
+    expect(extractDocId("https://docs.google.com/spreadsheets/d/abc/edit")).toBe(asDocId("abc"));
   });
 
   test("extracts the id regardless of host (host is gated by the content-script `matches`, not here)", () => {
@@ -49,6 +49,7 @@ describe("parseDocsUrl", () => {
     expect(parseDocsUrl(`https://docs.google.com/document/d/${ID}/edit`)).toEqual({
       docId: asDocId(ID),
       userIndex: null,
+      kind: "doc",
     });
   });
 
@@ -56,6 +57,7 @@ describe("parseDocsUrl", () => {
     expect(parseDocsUrl(`https://docs.google.com/document/u/2/d/${ID}/edit`)).toEqual({
       docId: asDocId(ID),
       userIndex: 2,
+      kind: "doc",
     });
   });
 
@@ -67,6 +69,19 @@ describe("parseDocsUrl", () => {
     expect(parseDocsUrl(`https://docs.google.com/document/d/${ID}/grading?authuser=0`)).toEqual({
       docId: asDocId(ID),
       userIndex: 0,
+      kind: "doc",
+    });
+  });
+  test("tags a spreadsheets URL with kind sheet (multi-account aware)", () => {
+    expect(parseDocsUrl(`https://docs.google.com/spreadsheets/d/${ID}/edit`)).toEqual({
+      docId: asDocId(ID),
+      userIndex: null,
+      kind: "sheet",
+    });
+    expect(parseDocsUrl(`https://docs.google.com/spreadsheets/u/3/d/${ID}/edit`)).toEqual({
+      docId: asDocId(ID),
+      userIndex: 3,
+      kind: "sheet",
     });
   });
 });

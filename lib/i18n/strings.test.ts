@@ -15,6 +15,7 @@ import {
   formatDayLabel,
   formatHourLabel,
   formatSummaryStamp,
+  largeEditDetail,
   opaqueLabel,
   percentLabel,
   revisionOf,
@@ -81,6 +82,16 @@ describe("strings catalog", () => {
     expect(speedLabel(2)).toBe("2×");
     expect(percentLabel(42)).toBe("42%");
     expect(authorLabel(0)).toBe("Author 1");
+  });
+
+  it("labels a large-edit delta in the document's own unit", () => {
+    // Docs count characters; Sheets count cells — the same signed delta must
+    // never be mislabelled (CID 3501810461). Small magnitudes keep the
+    // thousands separator out of the assertion (locale-independent).
+    expect(largeEditDetail(120, "characters")).toBe("+120 characters");
+    expect(largeEditDetail(-120, "characters")).toBe("−120 characters"); // U+2212
+    expect(largeEditDetail(120, "cells")).toBe("+120 cells");
+    expect(largeEditDetail(-7, "cells")).toBe("−7 cells");
   });
 
   it("formats a contributor's active range", () => {

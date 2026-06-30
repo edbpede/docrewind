@@ -16,17 +16,25 @@ import type {
   RevisionId,
 } from "./domain/model";
 import { createModel } from "./reconstruction/model";
+import type { SheetsDecodedRevision } from "./sheets-decoder/types";
+import { createModel as createGridModel } from "./sheets-reconstruction/model";
 import type {
   ReplayPublication,
   RetrievalCheckpoint,
   RevisionStore,
+  SheetReplayPublication,
+  StoredGridSnapshot,
   StoredSnapshot,
 } from "./store";
 
-/** A store plus a way to reopen the same backing data at a new parser version. */
+/**
+ * A store plus a way to reopen the same backing data at new parser versions.
+ * `sheetsParserVersion` defaults to 1 so existing single-arg `reopen(n)` calls
+ * (which bump only the Docs version) keep working.
+ */
 export interface StoreHarness {
   readonly store: RevisionStore;
-  reopen(parserVersion: number): RevisionStore;
+  reopen(parserVersion: number, sheetsParserVersion?: number): RevisionStore;
 }
 
 const rev = (n: number): RevisionId => asRevisionId(n);
@@ -60,6 +68,7 @@ function snapshot(appliedCount: number): StoredSnapshot {
 
 function replayPublication(publicationId: string, revisions = [decodedRev(1)]): ReplayPublication {
   return {
+    kind: "doc",
     publicationId,
     parserVersion: 1,
     revisions,
@@ -69,13 +78,46 @@ function replayPublication(publicationId: string, revisions = [decodedRev(1)]): 
   };
 }
 
+function sheetRev(id: number): SheetsDecodedRevision {
+  return {
+    revisionId: rev(id),
+    userId: null,
+    sessionId: null,
+    time: null,
+    operations: [],
+    modelVersion: 99,
+    modelVersionMismatch: false,
+  };
+}
+
+function gridSnapshot(appliedCount: number): StoredGridSnapshot {
+  return { appliedCount, model: createGridModel() };
+}
+
+function sheetReplayPublication(
+  publicationId: string,
+  options: { placeholder?: boolean } = {},
+): SheetReplayPublication {
+  const placeholder = options.placeholder === true;
+  return {
+    kind: "sheet",
+    publicationId,
+    sheetsParserVersion: 1,
+    revisions: placeholder ? [] : [sheetRev(1)],
+    snapshots: placeholder ? [] : [gridSnapshot(0), gridSnapshot(1)],
+    timeline: [largeEdit(1)],
+    publishedAt: 123,
+    ...(placeholder ? { placeholder: true } : {}),
+  };
+}
+
 async function saveActiveReplayPublication(
   store: RevisionStore,
   docId: DocId,
   publication: ReplayPublication,
 ): Promise<void> {
   await store.saveReplayPublication(docId, publication);
-  await store.setActiveReplayPublication(docId, publication.publicationId);
+  await store.setActiveReplayPublication(docId, publication.publicationId, publication.kind);
 }
 
 function cacheRec(
@@ -333,6 +375,60 @@ export function runRevisionStoreContract(
       await saveActiveReplayPublication(store, docA, replayPublication("pub-parser-stale"));
       const bumped = harness.reopen(2);
       expect(await bumped.getActiveReplayPublication(docA)).toBeNull();
+    });
+
+    it("round-trips a legacy (no-kind) doc publication + pointer and reads them as doc", async () => {
+      // Simulate legacy on-disk data: a doc publication + active pointer with no
+      // kind field (the active pointer omits the kind arg, defaulting to "doc").
+      const legacy: ReplayPublication = {
+        publicationId: "pub-legacy",
+        parserVersion: 1,
+        revisions: [decodedRev(1)],
+        snapshots: [snapshot(0), snapshot(1)],
+        timeline: [largeEdit(1)],
+        publishedAt: 123,
+      };
+      await store.saveReplayPublication(docA, legacy);
+      await store.setActiveReplayPublication(docA, "pub-legacy");
+
+      const loaded = await store.getReplayPublication(docA, "pub-legacy");
+      expect(loaded).not.toBeNull();
+      expect(loaded?.kind ?? "doc").toBe("doc");
+      expect((await store.getActiveReplayPublication(docA))?.publicationId).toBe("pub-legacy");
+    });
+
+    it("gates a doc active pointer by the DOC baseline, not the sheets baseline", async () => {
+      await saveActiveReplayPublication(store, docA, replayPublication("pub-doc-ptr"));
+      // Bumping ONLY the sheets baseline must not invalidate a doc pointer.
+      expect(await harness.reopen(1, 2).getActiveReplayPublication(docA)).not.toBeNull();
+      // Bumping the doc baseline does.
+      expect(await harness.reopen(2, 1).getActiveReplayPublication(docA)).toBeNull();
+    });
+
+    it("round-trips a sheet publication and resolves its active pointer as sheet", async () => {
+      await saveActiveReplayPublication(store, docA, sheetReplayPublication("pub-sheet"));
+      const loaded = await store.getReplayPublication(docA, "pub-sheet");
+      expect(loaded?.kind).toBe("sheet");
+      expect((await store.getActiveReplayPublication(docA))?.kind).toBe("sheet");
+    });
+
+    it("gates a sheet active pointer by the SHEETS baseline, not the doc baseline", async () => {
+      await saveActiveReplayPublication(store, docA, sheetReplayPublication("pub-sheet-ver"));
+      // Bumping ONLY the doc baseline must not invalidate a sheet pointer.
+      expect(await harness.reopen(2, 1).getActiveReplayPublication(docA)).not.toBeNull();
+      // Bumping the sheets baseline does.
+      expect(await harness.reopen(1, 2).getActiveReplayPublication(docA)).toBeNull();
+    });
+
+    it("round-trips a P0 stub sheet publication (placeholder, empty grid)", async () => {
+      await store.saveReplayPublication(
+        docA,
+        sheetReplayPublication("pub-stub", { placeholder: true }),
+      );
+      const loaded = await store.getReplayPublication(docA, "pub-stub");
+      expect(loaded?.kind).toBe("sheet");
+      expect(loaded?.revisions).toEqual([]);
+      if (loaded?.kind === "sheet") expect(loaded.placeholder).toBe(true);
     });
 
     it("deletes one replay publication and clears the pointer only when it named that row", async () => {

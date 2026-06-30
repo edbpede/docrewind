@@ -11,8 +11,8 @@
 // PURE by design (no Solid, no DOM): the reactive wrappers (`createMemo`) live in
 // the components; this module is the testable derivation they both call.
 
-import type { DecodedRevision } from "../domain/model";
 import { authorLabel } from "../i18n/strings";
+import type { RevisionMeta } from "../replay-core/meta";
 import type { IdentityMap } from "./resolve";
 
 /** One distinct contributor, keyed by its opaque author token (never the raw id). */
@@ -42,7 +42,7 @@ export interface AuthorEntry {
  * entry falls back to its opaque label and carries no name/email/colour.
  */
 export function deriveAuthors(
-  revisions: readonly DecodedRevision[],
+  revisions: readonly RevisionMeta[],
   realIdentities: boolean,
   identities: IdentityMap,
 ): readonly AuthorEntry[] {

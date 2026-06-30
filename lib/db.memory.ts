@@ -7,6 +7,7 @@
 // shared contract suite proves both.
 
 import { PARSER_VERSION } from "./decoder/version";
+import type { DocumentKind } from "./domain/kind";
 import type {
   CacheRecord,
   DecodedRevision,
@@ -15,6 +16,7 @@ import type {
   RevisionId,
   TimelineEvent,
 } from "./domain/model";
+import { SHEETS_PARSER_VERSION } from "./sheets-decoder/version";
 import type {
   ActiveReplayPublication,
   ReplayPublication,
@@ -23,6 +25,7 @@ import type {
   StoredSnapshot,
   UsageEstimate,
 } from "./store";
+import { publicationKind, publicationVersion } from "./store";
 
 interface VersionedDecoded {
   readonly parserVersion: number;
@@ -97,6 +100,8 @@ function estimatePayloadBytes(payload: RawPayload): number {
 /** Options for {@link createMemoryStore}. */
 export interface MemoryStoreOptions {
   readonly parserVersion?: number;
+  /** Independent Sheets decode-pipeline version. */
+  readonly sheetsParserVersion?: number;
   /** Share an existing backend (e.g. to simulate a parser-version bump). */
   readonly backend?: MemoryBackend;
 }
@@ -104,6 +109,9 @@ export interface MemoryStoreOptions {
 /** Construct an in-memory {@link RevisionStore} over a (possibly shared) backend. */
 export function createMemoryStore(options: MemoryStoreOptions = {}): RevisionStore {
   const parserVersion = options.parserVersion ?? PARSER_VERSION;
+  const sheetsParserVersion = options.sheetsParserVersion ?? SHEETS_PARSER_VERSION;
+  const baselineFor = (kind: DocumentKind): number =>
+    kind === "sheet" ? sheetsParserVersion : parserVersion;
   const backend = options.backend ?? createMemoryBackend();
 
   // An in-memory store is ephemeral, so there is nothing to persist; only
@@ -153,9 +161,13 @@ export function createMemoryStore(options: MemoryStoreOptions = {}): RevisionSto
     docId: DocId,
     publication: ReplayPublication,
   ): Promise<void> {
+    const stamped: ReplayPublication =
+      publication.kind === "sheet"
+        ? { ...publication, sheetsParserVersion }
+        : { ...publication, parserVersion };
     backend.replayPublications.set(
       publicationKey(docId, publication.publicationId),
-      cloneValue({ ...publication, parserVersion }),
+      cloneValue(stamped),
     );
   }
 
@@ -168,7 +180,7 @@ export function createMemoryStore(options: MemoryStoreOptions = {}): RevisionSto
     );
     if (
       publication === undefined ||
-      publication.parserVersion < parserVersion ||
+      publicationVersion(publication) < baselineFor(publicationKind(publication)) ||
       publication.publicationId !== expectedPublicationId
     ) {
       return null;
@@ -176,17 +188,22 @@ export function createMemoryStore(options: MemoryStoreOptions = {}): RevisionSto
     return cloneValue(publication);
   }
 
-  async function setActiveReplayPublication(docId: DocId, publicationId: string): Promise<void> {
+  async function setActiveReplayPublication(
+    docId: DocId,
+    publicationId: string,
+    kind: DocumentKind = "doc",
+  ): Promise<void> {
     backend.activeReplayPublications.set(docId, {
       publicationId,
-      parserVersion,
+      parserVersion: baselineFor(kind),
       activatedAt: Date.now(),
+      kind,
     });
   }
 
   async function getActiveReplayPublication(docId: DocId): Promise<ReplayPublication | null> {
     const active = backend.activeReplayPublications.get(docId);
-    if (active === undefined || active.parserVersion < parserVersion) {
+    if (active === undefined || active.parserVersion < baselineFor(active.kind ?? "doc")) {
       return null;
     }
     return getReplayPublication(docId, active.publicationId);

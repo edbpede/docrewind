@@ -13,6 +13,7 @@ import { asRevisionId } from "@/lib/domain/ids";
 import type { DecodedRevision } from "@/lib/domain/model";
 import { formatHourLabel, strings } from "@/lib/i18n/strings";
 import { buildHourTicks } from "@/lib/summary/axis";
+import { deriveDocumentSummary } from "@/lib/summary/derive";
 
 const HOUR = 3_600_000;
 const DAY = 86_400_000;
@@ -49,11 +50,11 @@ describe("DocumentSummary", () => {
     const t0 = Date.UTC(2026, 5, 21, 12, 0, 0);
     const { container } = render(() => (
       <DocumentSummary
-        revisions={[
+        summary={deriveDocumentSummary([
           rev(1, t0, [insert("hello", 1)]),
           rev(2, t0 + DAY, [insert(" world", 6)]),
           rev(3, t0 + 2 * DAY, [insert("!", 12)]),
-        ]}
+        ])}
       />
     ));
 
@@ -79,12 +80,12 @@ describe("DocumentSummary", () => {
     const end = start + 2 * HOUR + 59 * 60 * 1000;
     const { container } = render(() => (
       <DocumentSummary
-        revisions={[
+        summary={deriveDocumentSummary([
           rev(1, start, [insert("a", 1)]),
           rev(2, start + HOUR, [insert("b", 2)]),
           rev(3, start + 2 * HOUR, [insert("c", 3)]),
           rev(4, end, [insert("d", 4)]),
-        ]}
+        ])}
       />
     ));
 
@@ -106,11 +107,11 @@ describe("DocumentSummary", () => {
     const t0 = Date.UTC(2026, 5, 21, 12, 0, 0);
     const { container } = render(() => (
       <DocumentSummary
-        revisions={[
+        summary={deriveDocumentSummary([
           rev(1, t0, [insert("hello", 1)]),
           rev(2, t0 + DAY, [insert(" world", 6)]),
           rev(3, t0 + 2 * DAY, [insert("!", 12)]),
-        ]}
+        ])}
       />
     ));
 

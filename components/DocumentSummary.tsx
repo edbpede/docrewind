@@ -26,7 +26,7 @@
 import type { Component } from "solid-js";
 import { createMemo, createSignal, For, Show } from "solid-js";
 import { IconChart } from "@/components/icons";
-import type { DecodedRevision } from "@/lib/domain/model";
+
 import {
   formatCompactCount,
   formatDayLabel,
@@ -46,10 +46,10 @@ import {
   nearestPoint,
   startOfDay,
 } from "@/lib/summary/axis";
-import { deriveDocumentSummary, type SummaryPoint } from "@/lib/summary/derive";
+import type { DocumentSummary as DocumentSummaryData, SummaryPoint } from "@/lib/summary/derive";
 
 export interface DocumentSummaryProps {
-  readonly revisions: readonly DecodedRevision[];
+  readonly summary: DocumentSummaryData;
 }
 
 // ── Logical chart geometry (a fixed viewBox; CSS scales it to the container) ──
@@ -139,7 +139,7 @@ const LegendSwatch: Component<{ readonly color: string; readonly label: string }
 );
 
 const DocumentSummary: Component<DocumentSummaryProps> = (props) => {
-  const summary = createMemo(() => deriveDocumentSummary(props.revisions));
+  const summary = () => props.summary;
 
   const stats = createMemo(() => {
     const s = summary();

@@ -1,21 +1,26 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
-// Docs-URL parsing (plan §1.6 / A.5). PURE: extracts the branded `DocId` from a
-// `/document/d/{id}/` or `/document/u/{N}/d/{id}/` path and the multi-account slot from a Google
-// Docs URL. Matches against the pathname only so a `/d/` or `/u/N/` embedded in a
+// Docs/Sheets-URL parsing (plan §1.6 / A.5). PURE: extracts the branded `DocId`
+// and the multi-account slot from a `/document/d/{id}/` OR `/spreadsheets/d/{id}/`
+// path (also their `/u/{N}/` multi-account variants), and tags the document
+// `kind`. Matches against the pathname only so a `/d/` or `/u/N/` embedded in a
 // query or fragment can't spoof detection. No browser / fetch / Worker here.
 
 import { asDocId, type DocId } from "../domain/ids";
+import type { DocumentKind } from "../domain/kind";
 import { detectUserIndex } from "../protocol/endpoints";
 
-/** A parsed Docs URL: the document id plus its multi-account slot (A.5). */
+/** A parsed Docs/Sheets URL: the document id, its multi-account slot, and kind (A.5). */
 export interface DocsUrlInfo {
   readonly docId: DocId;
   readonly userIndex: number | null;
+  readonly kind: DocumentKind;
 }
 
-// The `/document/d/{id}` or `/document/u/{N}/d/{id}` segment; `{id}` is then validated by `asDocId`.
-const DOC_ID_PATH = /\/document\/(?:u\/\d+\/)?d\/([^/]+)/;
+// The `/document/d/{id}` or `/spreadsheets/d/{id}` segment (with an optional
+// `/u/{N}/` multi-account slot); group 1 is the kind prefix, group 2 the id
+// (then validated by `asDocId`).
+const DOC_ID_PATH = /\/(document|spreadsheets)\/(?:u\/\d+\/)?d\/([^/]+)/;
 
 function pathOf(url: string): string {
   try {
@@ -32,27 +37,40 @@ function pathOf(url: string): string {
   }
 }
 
+/** The raw id segment + document kind, or null when the path matches neither shape. */
+function matchDocument(url: string): { raw: string; kind: DocumentKind } | null {
+  const match = DOC_ID_PATH.exec(pathOf(url));
+  const raw = match?.[2];
+  if (raw === undefined) return null;
+  return { raw, kind: match?.[1] === "spreadsheets" ? "sheet" : "doc" };
+}
+
 /**
- * Extract the branded {@link DocId} from a Docs URL, or `null` when the URL is
- * not a Docs document page or the id fails validation.
+ * Extract the branded {@link DocId} from a Docs/Sheets URL, or `null` when the
+ * URL is not a recognizable document/spreadsheet page or the id fails validation.
  */
 export function extractDocId(url: string): DocId | null {
-  const match = DOC_ID_PATH.exec(pathOf(url));
-  const raw = match?.[1];
-  if (raw === undefined) return null;
+  const match = matchDocument(url);
+  if (match === null) return null;
   try {
-    return asDocId(raw);
+    return asDocId(match.raw);
   } catch {
     return null;
   }
 }
 
 /**
- * Parse a Docs URL into its {@link DocsUrlInfo}, or `null` when it isn't a
- * recognizable Google Docs document URL.
+ * Parse a Docs/Sheets URL into its {@link DocsUrlInfo}, or `null` when it isn't a
+ * recognizable Google document/spreadsheet URL.
  */
 export function parseDocsUrl(url: string): DocsUrlInfo | null {
-  const docId = extractDocId(url);
-  if (docId === null) return null;
-  return { docId, userIndex: detectUserIndex(url) };
+  const match = matchDocument(url);
+  if (match === null) return null;
+  let docId: DocId;
+  try {
+    docId = asDocId(match.raw);
+  } catch {
+    return null;
+  }
+  return { docId, userIndex: detectUserIndex(url), kind: match.kind };
 }

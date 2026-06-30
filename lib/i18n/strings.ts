@@ -99,6 +99,23 @@ export const strings = {
     // has scrolled out of view — clicking it re-engages follow and snaps to the caret.
     jumpToEdit: "Jump to edit",
   },
+  sheet: {
+    // Sheets (Ritz) replay surface. Content-free labels only — never cell data.
+    tabsLabel: "Sheets",
+    gridLabel: "Spreadsheet grid",
+    // The calm, non-blocking fidelity notice shown when some content could not be
+    // fully reconstructed (an unknown op, a model-version drift, or an
+    // unsupported number format). Mirrors the empty/error-state guidance — never a
+    // scary banner, never blocking the replay (PRODUCT.md Principle 6).
+    fidelityNotice: "Some content couldn't be fully reconstructed.",
+    formulaLabel: "Formula (shown as text, not evaluated)",
+    placeholderTitle: "Spreadsheet replay isn't ready yet",
+    placeholderHint: "DocRewind recognized this spreadsheet but hasn't rebuilt its history.",
+    // Label-only chips for embedded objects rendered at their anchor cell — never
+    // image bytes or a network fetch (local-first; §4). Content-free.
+    chartPlaceholder: "Chart",
+    imagePlaceholder: "Image",
+  },
   progress: {
     discovering: "Discovering revisions…",
     fetching: "Fetching revisions",
@@ -297,10 +314,17 @@ export function sessionDetail(charsInserted: number, charsDeleted: number): stri
   return `${charsInserted.toLocaleString()} inserted · ${charsDeleted.toLocaleString()} deleted`;
 }
 
-/** Large-edit detail from a signed char delta, e.g. "+1,240 characters". */
-export function largeEditDetail(charDelta: number): string {
-  const sign = charDelta < 0 ? "−" : "+"; // U+2212 MINUS SIGN for deletions
-  return `${sign}${Math.abs(charDelta).toLocaleString()} characters`;
+/** The counting unit a large-edit marker reports — characters for a Docs char
+ *  delta, cells for a Sheets cell-count delta. Chosen by document kind at the
+ *  marker call site so the same shared event shape never assumes one unit. */
+export type EditUnit = "characters" | "cells";
+
+/** Large-edit detail from a signed delta, e.g. "+1,240 characters" (Docs) or
+ *  "+120 cells" (Sheets). `unit` is required so a Sheets cell count is never
+ *  silently labelled in characters. */
+export function largeEditDetail(delta: number, unit: EditUnit): string {
+  const sign = delta < 0 ? "−" : "+"; // U+2212 MINUS SIGN for deletions
+  return `${sign}${Math.abs(delta).toLocaleString()} ${unit}`;
 }
 
 /** Pause detail from a gap duration, e.g. "12m without edits". */

@@ -25,10 +25,12 @@ import {
 } from "solid-js";
 import BrandMark from "@/components/BrandMark";
 import DocumentViewport from "@/components/DocumentViewport";
+import GridViewport from "@/components/GridViewport";
 import { IconAlert, IconChart, IconSettings } from "@/components/icons";
 import PlaybackControls from "@/components/PlaybackControls";
 import PrivacyBanner from "@/components/PrivacyBanner";
 import ProgressView, { type ProgressPhase } from "@/components/ProgressView";
+import SheetTabs, { SHEET_GRID_PANEL_ID, sheetTabId } from "@/components/SheetTabs";
 import SummaryInsights from "@/components/SummaryInsights";
 import ThemeControl from "@/components/ThemeControl";
 import Timeline, { type TimelineMarker } from "@/components/Timeline";
@@ -36,8 +38,10 @@ import TimelineLegend from "@/components/TimelineLegend";
 import { useThemeSync } from "@/components/theme-sync";
 import { createIdbStore } from "@/lib/db";
 import { asDocId } from "@/lib/domain/ids";
-import type { DecodedRevision, DocId, TimelineEvent } from "@/lib/domain/model";
+import type { DocumentKind } from "@/lib/domain/kind";
+import type { DocId, TimelineEvent } from "@/lib/domain/model";
 import {
+  type EditUnit,
   errorTitle,
   largeEditDetail,
   pauseDetail,
@@ -53,10 +57,16 @@ import {
   type DecodeOutcome,
   loadReplayData,
   publishDerivedData,
+  publishSheetsDerivedData,
   type ReplayData,
   type ReplayDerivedData,
+  type ReplayLoadResult,
   runPipelineSameThread,
+  runSheetsPipelineSameThread,
+  type SheetReplayData,
+  type SheetReplayDerivedData,
 } from "@/lib/replay/load";
+import type { RevisionMeta } from "@/lib/replay-core/meta";
 import { type RetrievalErrorCategory, retrievalError } from "@/lib/retrieval/errors";
 import {
   createPendingStorageMaintenanceRequest,
@@ -68,6 +78,9 @@ import {
   storageBudget,
   upsertPendingStorageMaintenance,
 } from "@/lib/settings";
+import type { Gid } from "@/lib/sheets-decoder/types";
+import { hasFidelityNotice } from "@/lib/sheets-reconstruction/render";
+import { gridAtRevisionIndex } from "@/lib/sheets-reconstruction/snapshot";
 import type { RevisionStore } from "@/lib/store";
 
 export interface ReplayAppProps {
@@ -80,10 +93,18 @@ export interface ReplayAppProps {
 type WorkerDecodeMessage =
   | ({
       readonly kind: "done";
+      readonly docKind: "doc";
       readonly docId: string;
       readonly runId: number;
       readonly revisionCount: number;
     } & ReplayDerivedData)
+  | ({
+      readonly kind: "done";
+      readonly docKind: "sheet";
+      readonly docId: string;
+      readonly runId: number;
+      readonly revisionCount: number;
+    } & SheetReplayDerivedData)
   | {
       readonly kind: "unsupported" | "empty" | "failed";
       readonly docId: string;
@@ -171,10 +192,13 @@ function isWorkerDecodeMessage(value: unknown): value is WorkerDecodeMessage {
   );
 }
 
-/** Project timeline events onto the applied-count axis for the Timeline markers. */
+/** Project timeline events onto the applied-count axis for the Timeline markers.
+ *  `unit` is the document's large-edit counting unit (characters for Docs, cells
+ *  for Sheets) — the shared TimelineEvent carries a unit-agnostic delta. */
 function buildMarkers(
   events: readonly TimelineEvent[],
-  revisions: readonly DecodedRevision[],
+  revisions: readonly RevisionMeta[],
+  unit: EditUnit,
 ): TimelineMarker[] {
   const indexByRevision = new Map<number, number>();
   for (let i = 0; i < revisions.length; i++) {
@@ -202,13 +226,13 @@ function buildMarkers(
         anchor = Number(event.atRevision);
         kind = "large-insertion";
         label = strings.timeline.markerLargeInsertion;
-        detail = largeEditDetail(event.charDelta);
+        detail = largeEditDetail(event.charDelta, unit);
         break;
       case "large-deletion":
         anchor = Number(event.atRevision);
         kind = "large-deletion";
         label = strings.timeline.markerLargeDeletion;
-        detail = largeEditDetail(event.charDelta);
+        detail = largeEditDetail(event.charDelta, unit);
         break;
       case "pause":
         anchor = Number(event.afterRevision);
@@ -268,12 +292,25 @@ const MessageCard: Component<{
 
 type NonReplayState = "empty" | "unsupported" | "failed" | "missing-publication";
 
+/** Loaded replay data, discriminated by document kind (doc viewport vs grid). */
+type LoadedReplay =
+  | { readonly kind: "doc"; readonly data: ReplayData }
+  | { readonly kind: "sheet"; readonly data: SheetReplayData };
+
+/** Map a store load result into the kind-discriminated loaded wrapper, or null. */
+function toLoaded(result: ReplayLoadResult): LoadedReplay | null {
+  if (result.kind === "ok") return { kind: "doc", data: result.data };
+  if (result.kind === "ok-sheet") return { kind: "sheet", data: result.data };
+  return null;
+}
+
 /** The active replay surface for a validated document. */
 const ReplaySurface: Component<{
   readonly docId: DocId;
   readonly userIndex: number | null;
   readonly store: RevisionStore;
   readonly useWorker: boolean;
+  readonly kind: DocumentKind;
 }> = (props) => {
   // Playback state (flat signals).
   const [currentIndex, setCurrentIndex] = createSignal(0);
@@ -332,16 +369,16 @@ const ReplaySurface: Component<{
         ? undefined
         : { docId: props.docId, runId, publicationId: publicationIdForRun(runId) };
     },
-    async ({ docId, runId, publicationId }): Promise<ReplayData | undefined> => {
+    async ({ docId, runId, publicationId }): Promise<LoadedReplay | undefined> => {
       let reconstructionStatus: "partial" | "complete" = "partial";
       try {
         const outcome = await decode(docId, runId, publicationId);
         if (outcome.kind !== "published") {
           if (outcome.kind === "empty") {
-            const existing = await loadReplayData(props.store, docId);
-            if (existing.kind === "ok") {
+            const existing = toLoaded(await loadReplayData(props.store, docId));
+            if (existing !== null) {
               reconstructionStatus = "complete";
-              return existing.data;
+              return existing;
             }
           }
           if (outcome.kind !== "stale" && isActiveRun(runId)) {
@@ -349,15 +386,15 @@ const ReplaySurface: Component<{
           }
           return undefined;
         }
-        const result = await loadReplayData(props.store, docId, publicationId);
-        if (result.kind !== "ok") {
+        const result = toLoaded(await loadReplayData(props.store, docId, publicationId));
+        if (result === null) {
           if (isActiveRun(runId)) {
             setNonReplayState("missing-publication");
           }
           return undefined;
         }
         reconstructionStatus = "complete";
-        return result.data;
+        return result;
       } catch {
         if (isActiveRun(runId)) {
           setNonReplayState("failed");
@@ -460,10 +497,15 @@ const ReplaySurface: Component<{
     if (props.useWorker && typeof Worker !== "undefined") {
       return decodeInWorker(docId, runId, publicationId);
     }
-    return runPipelineSameThread(props.store, docId, {
-      publicationId,
-      shouldPublish: () => isActiveRun(runId),
-    });
+    return props.kind === "sheet"
+      ? runSheetsPipelineSameThread(props.store, docId, {
+          publicationId,
+          shouldPublish: () => isActiveRun(runId),
+        })
+      : runPipelineSameThread(props.store, docId, {
+          publicationId,
+          shouldPublish: () => isActiveRun(runId),
+        });
   }
 
   function decodeInWorker(
@@ -492,10 +534,17 @@ const ReplaySurface: Component<{
           resolve(message.kind === "done" ? { kind: "stale" } : { kind: message.kind });
           return;
         }
-        publishDerivedData(props.store, docId, message, {
-          publicationId,
-          shouldPublish: () => isActiveRun(runId),
-        }).then(
+        const publish =
+          message.docKind === "sheet"
+            ? publishSheetsDerivedData(props.store, docId, message, {
+                publicationId,
+                shouldPublish: () => isActiveRun(runId),
+              })
+            : publishDerivedData(props.store, docId, message, {
+                publicationId,
+                shouldPublish: () => isActiveRun(runId),
+              });
+        publish.then(
           (published) =>
             resolve(
               published
@@ -513,20 +562,55 @@ const ReplaySurface: Component<{
         void event.error;
         resolve({ kind: "failed" });
       });
-      localWorker.postMessage({ docId, runId });
+      localWorker.postMessage({ docId, runId, kind: props.kind });
     });
   }
 
   // Derived playback views. `modelAtRevisionIndex` time-travels; `blocksAt` (over
   // `segmentsAt`) is single-arg over that model (no second time-cut).
-  const maxIndex = createMemo(() => loaded()?.revisions.length ?? 0);
+  const maxIndex = createMemo(() => loaded()?.data.revisions.length ?? 0);
   const currentModel = createMemo(() => {
-    const data = loaded();
-    return data === undefined ? undefined : modelAtRevisionIndex(data.replayIndex, currentIndex());
+    const entry = loaded();
+    return entry === undefined || entry.kind !== "doc"
+      ? undefined
+      : modelAtRevisionIndex(entry.data.replayIndex, currentIndex());
   });
   const currentBlocks = createMemo(() => {
     const model = currentModel();
     return model === undefined ? [] : blocksAt(model);
+  });
+
+  // ── Sheets grid views (the Docs memos above stay untouched) ─────────────────
+  // The active grid at the current frame, the active tab gid, and the §9 notice.
+  const [selectedGid, setSelectedGid] = createSignal<Gid | null>(null);
+  const currentGrid = createMemo(() => {
+    const entry = loaded();
+    return entry === undefined || entry.kind !== "sheet"
+      ? undefined
+      : gridAtRevisionIndex(entry.data.replayIndex, currentIndex());
+  });
+  // The tab to render: the user's selection if it still exists, else the first.
+  const activeGid = createMemo<Gid | null>(() => {
+    const grid = currentGrid();
+    if (grid === undefined || grid.order.length === 0) return null;
+    const selected = selectedGid();
+    if (selected !== null && grid.sheets.has(selected)) return selected;
+    return grid.order[0] ?? null;
+  });
+  const currentSheet = createMemo(() => {
+    const grid = currentGrid();
+    const gid = activeGid();
+    return grid !== undefined && gid !== null ? grid.sheets.get(gid) : undefined;
+  });
+  const gridHasFidelityNotice = createMemo(() => {
+    const grid = currentGrid();
+    return grid !== undefined && hasFidelityNotice(grid);
+  });
+  // Reverse link for the grid tabpanel: name it by the active tab when one exists
+  // (the tabs only render when there is at least one sheet).
+  const sheetPanelLabelledBy = createMemo(() => {
+    const gid = activeGid();
+    return gid === null ? undefined : sheetTabId(gid);
   });
 
   // ── Authorship attribution (§9.7) ───────────────────────────────────────────
@@ -534,7 +618,11 @@ const ReplaySurface: Component<{
   // they agree on opaque keys, "Author N" numbering, and assigned colours. Built off the
   // loaded revisions + the (opt-in) resolved identities — the same inputs the colophon uses.
   const authors = createMemo(() =>
-    deriveAuthors(loaded()?.revisions ?? [], showRealIdentities() ?? false, identities() ?? {}),
+    deriveAuthors(
+      loaded()?.data.revisions ?? [],
+      showRealIdentities() ?? false,
+      identities() ?? {},
+    ),
   );
   // author key → assigned hue (null when the source carried none); the caret + highlight
   // tints read it. Keyed by the stable opaque token, never the raw Gaia id.
@@ -549,7 +637,7 @@ const ReplaySurface: Component<{
   // revision) back to its contributor. Stable per load.
   const authorKeyByRevision = createMemo(() => {
     const map = new Map<number, string>();
-    for (const revision of loaded()?.revisions ?? []) {
+    for (const revision of loaded()?.data.revisions ?? []) {
       if (revision.userId !== null) {
         map.set(Number(revision.revisionId), revision.userId);
       }
@@ -582,7 +670,7 @@ const ReplaySurface: Component<{
     if (data === undefined || index <= 0) {
       return null;
     }
-    const revision = data.revisions[index - 1];
+    const revision = data.data.revisions[index - 1];
     if (revision === undefined) {
       return null;
     }
@@ -593,7 +681,13 @@ const ReplaySurface: Component<{
 
   const markers = createMemo(() => {
     const data = loaded();
-    return data === undefined ? [] : buildMarkers(data.timeline, data.revisions);
+    if (data === undefined) {
+      return [];
+    }
+    // Sheets large-edit deltas count cells; Docs count characters. The marker
+    // detail must name the right unit (CID 3501810461).
+    const unit: EditUnit = data.kind === "sheet" ? "cells" : "characters";
+    return buildMarkers(data.data.timeline, data.data.revisions, unit);
   });
   // The dateline of the frame in view. `currentIndex` is an applied-count, so the
   // revision that produced this frame is `revisions[currentIndex - 1]`; index 0 is
@@ -604,7 +698,7 @@ const ReplaySurface: Component<{
     if (data === undefined || index <= 0) {
       return "";
     }
-    const time = data.revisions[index - 1]?.time;
+    const time = data.data.revisions[index - 1]?.time;
     // The decoder admits any finite number, but `format` throws RangeError beyond
     // the Date epoch bound (±8.64e15 ms). Out-of-range metadata degrades to blank.
     if (time === null || time === undefined || Math.abs(time) > 8.64e15) {
@@ -667,7 +761,11 @@ const ReplaySurface: Component<{
     // Fire start; the ack resolves only at end-of-run, so it is the only
     // terminal signal allowed to open the decode gate for this page run.
     // Persisted completed checkpoints have no run id and can be stale.
-    void sendMessage("startRetrieval", { docId: props.docId, userIndex: props.userIndex })
+    void sendMessage("startRetrieval", {
+      docId: props.docId,
+      userIndex: props.userIndex,
+      kind: props.kind,
+    })
       .then((ack) => {
         if (!isActiveRun(runId)) {
           return;
@@ -948,22 +1046,62 @@ const ReplaySurface: Component<{
                         under its transport, so the controls read as the margin of
                         the page they drive. The caret + highlight surface authorship:
                         who is writing now, and (on a colophon hover) who wrote what. */}
-                    <DocumentViewport
-                      blocks={currentBlocks()}
-                      caret={caret()}
-                      highlight={highlight()}
-                      authorKeyByRevision={authorKeyByRevision()}
-                      follow={follow()}
-                      scrollBehavior={followBehavior()}
-                      onFollowOff={() => setFollow(false)}
-                      onFollowOn={() => setFollow(true)}
-                    />
+                    <Show
+                      when={data().kind === "doc"}
+                      fallback={
+                        <Show
+                          when={currentSheet()}
+                          fallback={
+                            <div class="dr-card text-center">
+                              <p class="dr-subheading">{strings.sheet.placeholderTitle}</p>
+                              <p class="dr-muted mt-1">{strings.sheet.placeholderHint}</p>
+                            </div>
+                          }
+                        >
+                          {(sheet) => (
+                            <div class="flex flex-col gap-3">
+                              <Show when={currentGrid()}>
+                                {(grid) => (
+                                  <SheetTabs
+                                    model={grid()}
+                                    activeGid={activeGid()}
+                                    onSelect={setSelectedGid}
+                                  />
+                                )}
+                              </Show>
+                              <div
+                                role="tabpanel"
+                                id={SHEET_GRID_PANEL_ID}
+                                aria-labelledby={sheetPanelLabelledBy()}
+                                tabindex="0"
+                              >
+                                <GridViewport
+                                  sheet={sheet()}
+                                  showFidelityNotice={gridHasFidelityNotice()}
+                                />
+                              </div>
+                            </div>
+                          )}
+                        </Show>
+                      }
+                    >
+                      <DocumentViewport
+                        blocks={currentBlocks()}
+                        caret={caret()}
+                        highlight={highlight()}
+                        authorKeyByRevision={authorKeyByRevision()}
+                        follow={follow()}
+                        scrollBehavior={followBehavior()}
+                        onFollowOff={() => setFollow(false)}
+                        onFollowOn={() => setFollow(true)}
+                      />
+                    </Show>
 
                     {/* The colophon: content-free insights close the record. Foregrounding
                         a contributor here highlights their runs on the leaf above. */}
                     <SummaryInsights
-                      revisions={data().revisions}
-                      timeline={data().timeline}
+                      revisions={data().data.revisions}
+                      timeline={data().data.timeline}
                       realIdentities={showRealIdentities() ?? false}
                       identities={identities() ?? {}}
                       onActiveAuthorChange={setActiveAuthorKey}
@@ -996,6 +1134,7 @@ const App: Component<ReplayAppProps> = (props) => {
   const params = new URLSearchParams(window.location.search);
   const rawDoc = params.get("doc");
   const userIndex = parseUserIndex(params.get("u"));
+  const kind: DocumentKind = params.get("kind") === "sheet" ? "sheet" : "doc";
 
   let docId: DocId | null = null;
   try {
@@ -1025,7 +1164,13 @@ const App: Component<ReplayAppProps> = (props) => {
       }
     >
       {(id) => (
-        <ReplaySurface docId={id()} userIndex={userIndex} store={store} useWorker={useWorker} />
+        <ReplaySurface
+          docId={id()}
+          userIndex={userIndex}
+          store={store}
+          useWorker={useWorker}
+          kind={kind}
+        />
       )}
     </Show>
   );
