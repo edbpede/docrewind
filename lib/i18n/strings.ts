@@ -99,6 +99,19 @@ export const strings = {
     // has scrolled out of view — clicking it re-engages follow and snaps to the caret.
     jumpToEdit: "Jump to edit",
   },
+  sheet: {
+    // Sheets (Ritz) replay surface. Content-free labels only — never cell data.
+    tabsLabel: "Sheets",
+    gridLabel: "Spreadsheet grid",
+    // The calm, non-blocking fidelity notice shown when some content could not be
+    // fully reconstructed (an unknown op, a model-version drift, or an
+    // unsupported number format). Mirrors the empty/error-state guidance — never a
+    // scary banner, never blocking the replay (PRODUCT.md Principle 6).
+    fidelityNotice: "Some content couldn't be fully reconstructed.",
+    formulaLabel: "Formula (shown as text, not evaluated)",
+    placeholderTitle: "Spreadsheet replay isn't ready yet",
+    placeholderHint: "DocRewind recognized this spreadsheet but hasn't rebuilt its history.",
+  },
   progress: {
     discovering: "Discovering revisions…",
     fetching: "Fetching revisions",
