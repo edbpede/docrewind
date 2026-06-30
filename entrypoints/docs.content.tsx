@@ -104,7 +104,11 @@ export default defineContentScript({
     // to a guaranteed host (`body`) so the control still reaches the user. Docs is
     // unaffected: the resolver below never returns anything but `titlebarAnchor`
     // for a doc, preserving the existing behavior exactly.
-    const fallbackDeadline = Date.now() + 5_000;
+    // One grace window, shared by the resolver's `body` fallback below and the
+    // post-autoMount timer backstop further down, so both gates fire on the same
+    // clock and can't drift apart.
+    const FALLBACK_GRACE_MS = 5_000;
+    const fallbackDeadline = Date.now() + FALLBACK_GRACE_MS;
 
     const ui = await createShadowRootUi(ctx, {
       name: "docrewind-affordance",
@@ -159,5 +163,25 @@ export default defineContentScript({
     // observe the DOM and mount once the anchor exists (and re-mount if Docs
     // re-renders the titlebar). Replaces the eager `ui.mount()`.
     ui.autoMount();
+
+    // autoMount re-consults the anchor resolver ONLY from its MutationObserver —
+    // WXT gives it no timer of its own. So on a sheet whose DOM goes quiet after
+    // the grace window, the resolver's time-based `body` fallback is never
+    // re-evaluated and the affordance never mounts. Add a real timer backstop:
+    // once the grace lapses, if nothing has mounted yet, mount once to the
+    // now-`body` anchor. `ui.remove()` first stops autoMount (it calls
+    // `stopAutoMount` internally) so a later mutation can't have autoMount mount
+    // `body` a SECOND time onto our host — autoMount's own `mount()` is
+    // unguarded. `remove()` is harmless while unmounted (no host attached, the
+    // dispose is skipped). Docs (`kind !== "sheet"`) never schedules this, so its
+    // path is byte-for-byte unchanged.
+    if (info.kind === "sheet") {
+      ctx.setTimeout(() => {
+        if (ui.mounted == null) {
+          ui.remove();
+          ui.mount();
+        }
+      }, FALLBACK_GRACE_MS);
+    }
   },
 });
