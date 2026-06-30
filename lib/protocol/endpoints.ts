@@ -10,6 +10,8 @@
 // variant must be detected or requests silently fail (the documented 2017 breakage).
 
 import type { DocId, RevisionId } from "../domain/ids";
+import type { DocumentKind } from "../domain/kind";
+import { pathPrefixForKind } from "../domain/kind";
 
 const DOCS_ORIGIN = "https://docs.google.com";
 
@@ -18,8 +20,11 @@ export interface RevisionsLoadParams {
   readonly docId: DocId;
   readonly start: RevisionId;
   readonly end: RevisionId;
-  // null = single-account path (no `/document/u/{N}/d/`); a number selects the slot (A.5).
+  // null = single-account path (no `/u/{N}/d/`); a number selects the slot (A.5).
   readonly userIndex: number | null;
+  // Document kind selects the `/document/` vs `/spreadsheets/` path prefix
+  // (same host, same template otherwise). Defaults to "doc".
+  readonly kind?: DocumentKind;
 }
 
 /**
@@ -36,7 +41,8 @@ export function buildRevisionsLoadUrl(params: RevisionsLoadParams): string {
     start: String(params.start),
     end: String(params.end),
   });
-  return `${DOCS_ORIGIN}/document${userSegment}/d/${params.docId}/revisions/load?${query.toString()}`;
+  const prefix = pathPrefixForKind(params.kind ?? "doc");
+  return `${DOCS_ORIGIN}/${prefix}${userSegment}/d/${params.docId}/revisions/load?${query.toString()}`;
 }
 
 /** Parameters for a `revisions/tiles` request (the version-history / userMap feed). */
@@ -49,6 +55,8 @@ export interface RevisionsTilesParams {
   readonly ouid: string;
   // Server caps the batch; 1500 matches the native version-history request.
   readonly revisionBatchSize?: number;
+  // `/document/` vs `/spreadsheets/` path prefix; defaults to "doc".
+  readonly kind?: DocumentKind;
 }
 
 /**
@@ -62,6 +70,7 @@ export function buildRevisionsTilesUrl(params: RevisionsTilesParams): string {
     throw new TypeError("buildRevisionsTilesUrl: userIndex must be a non-negative integer or null");
   }
   const userSegment = params.userIndex !== null ? `/u/${params.userIndex}` : "";
+  const prefix = pathPrefixForKind(params.kind ?? "doc");
   const query = new URLSearchParams({
     id: params.docId,
     start: "1",
@@ -74,7 +83,7 @@ export function buildRevisionsTilesUrl(params: RevisionsTilesParams): string {
     cros_files: "false",
     nded: "false",
   });
-  return `${DOCS_ORIGIN}/document${userSegment}/d/${params.docId}/revisions/tiles?${query.toString()}`;
+  return `${DOCS_ORIGIN}/${prefix}${userSegment}/d/${params.docId}/revisions/tiles?${query.toString()}`;
 }
 
 /**
@@ -113,16 +122,18 @@ export function buildDocBootstrapUrl(
   docId: DocId,
   userIndex: number | null,
   surface: DocBootstrapSurface,
+  kind: DocumentKind = "doc",
 ): string {
   if (userIndex !== null && (!Number.isInteger(userIndex) || userIndex < 0)) {
     throw new TypeError("buildDocBootstrapUrl: userIndex must be a non-negative integer or null");
   }
   const userSegment = userIndex !== null ? `/u/${userIndex}` : "";
-  return `${DOCS_ORIGIN}/document${userSegment}/d/${docId}/${surface}`;
+  return `${DOCS_ORIGIN}/${pathPrefixForKind(kind)}${userSegment}/d/${docId}/${surface}`;
 }
 
-// Extracts the multi-account slot from a `/document/u/{N}/d/` path segment (A.5).
-const USER_INDEX_PATTERN = /\/document\/u\/(\d+)\/d\//;
+// Extracts the multi-account slot from a `/document/u/{N}/d/` or
+// `/spreadsheets/u/{N}/d/` path segment (A.5).
+const USER_INDEX_PATTERN = /\/(?:document|spreadsheets)\/u\/(\d+)\/d\//;
 
 /**
  * Detect the multi-account account slot in a Google URL, or null when none is present.

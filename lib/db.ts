@@ -11,6 +11,7 @@
 
 import { type DBSchema, type IDBPDatabase, openDB } from "idb";
 import { PARSER_VERSION } from "./decoder/version";
+import type { DocumentKind } from "./domain/kind";
 import type {
   CacheRecord,
   DecodedRevision,
@@ -19,6 +20,7 @@ import type {
   RevisionId,
   TimelineEvent,
 } from "./domain/model";
+import { SHEETS_PARSER_VERSION } from "./sheets-decoder/version";
 import type {
   ActiveReplayPublication,
   ReplayPublication,
@@ -27,6 +29,7 @@ import type {
   StoredSnapshot,
   UsageEstimate,
 } from "./store";
+import { publicationKind, publicationVersion } from "./store";
 
 const DB_NAME = "docrewind";
 const DB_VERSION = 4;
@@ -163,8 +166,10 @@ function estimatePayloadBytes(payload: RawPayload): number {
 export interface IdbStoreOptions {
   /** DB name (override only for isolated tests). */
   readonly name?: string;
-  /** Effective decode-pipeline version for cache invalidation. */
+  /** Effective Docs decode-pipeline version for cache invalidation. */
   readonly parserVersion?: number;
+  /** Effective Sheets decode-pipeline version (independent of Docs). */
+  readonly sheetsParserVersion?: number;
 }
 
 /**
@@ -175,6 +180,10 @@ export interface IdbStoreOptions {
 export function createIdbStore(options: IdbStoreOptions = {}): RevisionStore {
   const name = options.name ?? DB_NAME;
   const parserVersion = options.parserVersion ?? PARSER_VERSION;
+  const sheetsParserVersion = options.sheetsParserVersion ?? SHEETS_PARSER_VERSION;
+  // Select the version baseline a publication/pointer is gated by, per its kind.
+  const baselineFor = (kind: DocumentKind): number =>
+    kind === "sheet" ? sheetsParserVersion : parserVersion;
   let dbPromise: Promise<IDBPDatabase<DocRewindDB>> | undefined;
   let persistRequested = false;
 
@@ -249,7 +258,12 @@ export function createIdbStore(options: IdbStoreOptions = {}): RevisionStore {
     publication: ReplayPublication,
   ): Promise<void> {
     const d = await db();
-    const currentPublication: ReplayPublication = { ...publication, parserVersion };
+    // Re-stamp the version that produced this publication, keyed by its kind, so a
+    // sheet publication carries the Sheets version and a doc the Docs version.
+    const currentPublication: ReplayPublication =
+      publication.kind === "sheet"
+        ? { ...publication, sheetsParserVersion }
+        : { ...publication, parserVersion };
     await d.put("replayPublications", {
       docId,
       publicationId: currentPublication.publicationId,
@@ -265,7 +279,7 @@ export function createIdbStore(options: IdbStoreOptions = {}): RevisionStore {
     const rec = await d.get("replayPublications", [docId, expectedPublicationId]);
     if (
       rec === undefined ||
-      rec.publication.parserVersion < parserVersion ||
+      publicationVersion(rec.publication) < baselineFor(publicationKind(rec.publication)) ||
       rec.publication.publicationId !== expectedPublicationId
     ) {
       return null;
@@ -273,20 +287,28 @@ export function createIdbStore(options: IdbStoreOptions = {}): RevisionStore {
     return rec.publication;
   }
 
-  async function setActiveReplayPublication(docId: DocId, publicationId: string): Promise<void> {
+  async function setActiveReplayPublication(
+    docId: DocId,
+    publicationId: string,
+    kind: DocumentKind = "doc",
+  ): Promise<void> {
     const d = await db();
     await d.put("activeReplayPublications", {
       docId,
       publicationId,
-      parserVersion,
+      // Stamp the version baseline for this kind so the pointer is gated correctly.
+      parserVersion: baselineFor(kind),
       activatedAt: Date.now(),
+      kind,
     });
   }
 
   async function getActiveReplayPublication(docId: DocId): Promise<ReplayPublication | null> {
     const d = await db();
     const active = await d.get("activeReplayPublications", docId);
-    if (active === undefined || active.parserVersion < parserVersion) {
+    // Select the version baseline by the POINTER's kind (legacy → "doc") BEFORE
+    // comparing, so a sheet pointer is never compared against the Docs baseline.
+    if (active === undefined || active.parserVersion < baselineFor(active.kind ?? "doc")) {
       return null;
     }
     return getReplayPublication(docId, active.publicationId);

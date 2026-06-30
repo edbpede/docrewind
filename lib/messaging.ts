@@ -7,6 +7,7 @@
 
 import { defineExtensionMessaging } from "@webext-core/messaging";
 import type { DocId } from "./domain/ids";
+import type { DocumentKind } from "./domain/kind";
 import type { CacheRecord } from "./domain/model";
 import type { RetrievalError } from "./retrieval/errors";
 import type { StorageBudget } from "./settings";
@@ -16,12 +17,16 @@ import type { RetrievalCheckpoint } from "./store";
 export interface ActivateReplayMessage {
   readonly docId: DocId;
   readonly userIndex: number | null;
+  /** Document kind (doc vs sheet); defaults to "doc" when omitted by a legacy sender. */
+  readonly kind?: DocumentKind;
 }
 
 /** Begin (or resume) background retrieval for a document. */
 export interface StartRetrievalMessage {
   readonly docId: DocId;
   readonly userIndex: number | null;
+  /** Document kind selects the `/document/` vs `/spreadsheets/` transport prefix. */
+  readonly kind?: DocumentKind;
 }
 
 /** Cancel an in-flight retrieval. */

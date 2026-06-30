@@ -14,18 +14,38 @@ import { PARSER_VERSION } from "../decoder/version";
 import type { DecodedRevision, DocId, TimelineEvent } from "../domain/model";
 import type { DocumentModel } from "../reconstruction/model";
 import { type ReplayIndex, SNAPSHOT_CADENCE } from "../reconstruction/snapshot";
-import type { ReplayPublication, RevisionStore, StoredSnapshot } from "../store";
-import { runPipelineOverBodies } from "../worker/pipeline";
+import type { SheetsDecodedRevision } from "../sheets-decoder/types";
+import { SHEETS_PARSER_VERSION } from "../sheets-decoder/version";
+import type { GridModel } from "../sheets-reconstruction/model";
+import { SHEETS_SNAPSHOT_CADENCE, type SheetsReplayIndex } from "../sheets-reconstruction/snapshot";
+import type {
+  ReplayPublication,
+  RevisionStore,
+  SheetReplayPublication,
+  StoredGridSnapshot,
+  StoredSnapshot,
+} from "../store";
+import { runPipelineOverBodies, runSheetsPipelineOverBodies } from "../worker/pipeline";
 
-/** Everything the replay surface needs after a successful load. */
+/** Everything the DOCS replay surface needs after a successful load (unchanged). */
 export interface ReplayData {
   readonly revisions: readonly DecodedRevision[];
   readonly timeline: readonly TimelineEvent[];
   readonly replayIndex: ReplayIndex;
 }
 
+/** Everything the SHEETS replay surface needs after a successful load. */
+export interface SheetReplayData {
+  readonly revisions: readonly SheetsDecodedRevision[];
+  readonly timeline: readonly TimelineEvent[];
+  readonly replayIndex: SheetsReplayIndex;
+  /** True for the P0 stub publication (recognized Sheet, not yet replayable). */
+  readonly placeholder: boolean;
+}
+
 export type ReplayLoadResult =
   | { readonly kind: "ok"; readonly data: ReplayData }
+  | { readonly kind: "ok-sheet"; readonly data: SheetReplayData }
   | { readonly kind: "missing-publication" };
 
 /** Plain structured-cloneable derived data ready for store publication. */
@@ -65,18 +85,39 @@ export function rebuildReplayIndex(
   return { revisions: decoded, cadence: SNAPSHOT_CADENCE, snapshots: map };
 }
 
-function replayDataFromPublication(publication: ReplayPublication): ReplayData {
+/** Rebuild a Sheets replay index from persisted grid revisions + grid snapshots. */
+export function rebuildSheetsReplayIndex(
+  decoded: readonly SheetsDecodedRevision[],
+  snapshots: readonly StoredGridSnapshot[],
+): SheetsReplayIndex {
+  const map = new Map<number, GridModel>(snapshots.map((s) => [s.appliedCount, s.model]));
+  return { revisions: decoded, cadence: SHEETS_SNAPSHOT_CADENCE, snapshots: map };
+}
+
+function docReplayData(publication: ReplayPublication): ReplayData {
+  // Narrowed by the caller (publicationKind === "doc"); legacy/missing kind → doc.
+  const doc = publication as Exclude<ReplayPublication, SheetReplayPublication>;
+  return {
+    revisions: doc.revisions,
+    timeline: doc.timeline,
+    replayIndex: rebuildReplayIndex(doc.revisions, doc.snapshots),
+  };
+}
+
+function sheetReplayData(publication: SheetReplayPublication): SheetReplayData {
   return {
     revisions: publication.revisions,
     timeline: publication.timeline,
-    replayIndex: rebuildReplayIndex(publication.revisions, publication.snapshots),
+    replayIndex: rebuildSheetsReplayIndex(publication.revisions, publication.snapshots),
+    placeholder: publication.placeholder === true,
   };
 }
 
 /**
- * Read replay data and rebuild its replay index. By default this resolves the
- * document's explicit active-publication pointer; an expected id keeps the
- * exact-id legacy/test path available without falling back to latest-row scans.
+ * Read replay data and rebuild its replay index, branching on the publication's
+ * kind. By default this resolves the document's explicit active-publication
+ * pointer; an expected id keeps the exact-id legacy/test path available without
+ * falling back to latest-row scans.
  */
 export async function loadReplayData(
   store: RevisionStore,
@@ -90,10 +131,10 @@ export async function loadReplayData(
   if (publication === null) {
     return { kind: "missing-publication" };
   }
-  return {
-    kind: "ok",
-    data: replayDataFromPublication(publication),
-  };
+  if (publication.kind === "sheet") {
+    return { kind: "ok-sheet", data: sheetReplayData(publication) };
+  }
+  return { kind: "ok", data: docReplayData(publication) };
 }
 
 /**
@@ -111,6 +152,7 @@ export async function publishDerivedData(
   const shouldPublish = options.shouldPublish ?? (() => true);
   if (!shouldPublish()) return false;
   const publication: ReplayPublication = {
+    kind: "doc",
     publicationId: options.publicationId,
     parserVersion: PARSER_VERSION,
     revisions: data.revisions,
@@ -123,7 +165,7 @@ export async function publishDerivedData(
     await store.deleteReplayPublication(docId, publication.publicationId);
     return false;
   }
-  await store.setActiveReplayPublication(docId, publication.publicationId);
+  await store.setActiveReplayPublication(docId, publication.publicationId, "doc");
   if (!shouldPublish()) {
     await store.deleteReplayPublication(docId, publication.publicationId);
     return false;
@@ -156,6 +198,87 @@ export async function runPipelineSameThread(
       ([appliedCount, model]) => ({ appliedCount, model }),
     );
     const published = await publishDerivedData(
+      store,
+      docId,
+      { revisions: result.revisions, snapshots, timeline: result.timeline },
+      options,
+    );
+    return published
+      ? { kind: "published", revisionCount: result.revisions.length }
+      : { kind: "stale" };
+  } catch {
+    return { kind: "failed" };
+  }
+}
+
+// --- Sheets publish + same-thread fallback (parallel to the Docs path) --------
+
+/** Plain structured-cloneable Sheets derived data ready for store publication. */
+export interface SheetReplayDerivedData {
+  readonly revisions: readonly SheetsDecodedRevision[];
+  readonly snapshots: readonly StoredGridSnapshot[];
+  readonly timeline: readonly TimelineEvent[];
+  readonly placeholder?: boolean;
+}
+
+/**
+ * Persist a Sheets replay artifact and promote it active (mirrors
+ * {@link publishDerivedData}). Used for both the P0 stub publication (empty +
+ * `placeholder:true`) and the full grid publication.
+ */
+export async function publishSheetsDerivedData(
+  store: RevisionStore,
+  docId: DocId,
+  data: SheetReplayDerivedData,
+  options: ReplayPublishOptions,
+): Promise<boolean> {
+  const shouldPublish = options.shouldPublish ?? (() => true);
+  if (!shouldPublish()) return false;
+  const publication: SheetReplayPublication = {
+    kind: "sheet",
+    publicationId: options.publicationId,
+    sheetsParserVersion: SHEETS_PARSER_VERSION,
+    revisions: data.revisions,
+    snapshots: data.snapshots,
+    timeline: data.timeline,
+    publishedAt: options.now?.() ?? Date.now(),
+    ...(data.placeholder === true ? { placeholder: true } : {}),
+  };
+  await store.saveReplayPublication(docId, publication);
+  if (!shouldPublish()) {
+    await store.deleteReplayPublication(docId, publication.publicationId);
+    return false;
+  }
+  await store.setActiveReplayPublication(docId, publication.publicationId, "sheet");
+  if (!shouldPublish()) {
+    await store.deleteReplayPublication(docId, publication.publicationId);
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Same-thread Sheets fallback: run the PURE Sheets pipeline over the stored raw
+ * chunk bodies and publish the grid artifact only while the run is still current.
+ */
+export async function runSheetsPipelineSameThread(
+  store: RevisionStore,
+  docId: DocId,
+  options: ReplayPublishOptions,
+): Promise<DecodeOutcome> {
+  try {
+    const chunks = await store.getRawChunks(docId);
+    if (chunks.length === 0) {
+      return { kind: "empty" };
+    }
+    const result = runSheetsPipelineOverBodies(chunks.map((chunk) => chunk.body));
+    if (result.kind !== "ok") {
+      return { kind: "unsupported" };
+    }
+    const snapshots: StoredGridSnapshot[] = [...result.replayIndex.snapshots.entries()].map(
+      ([appliedCount, model]) => ({ appliedCount, model }),
+    );
+    const published = await publishSheetsDerivedData(
       store,
       docId,
       { revisions: result.revisions, snapshots, timeline: result.timeline },

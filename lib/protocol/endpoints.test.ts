@@ -34,6 +34,30 @@ describe("buildRevisionsLoadUrl", () => {
     );
   });
 
+  test("uses the /spreadsheets/ prefix for kind sheet (same template otherwise)", () => {
+    expect(
+      buildRevisionsLoadUrl({
+        docId: asDocId("doc_123"),
+        start: asRevisionId(1),
+        end: asRevisionId(5),
+        userIndex: 1,
+        kind: "sheet",
+      }),
+    ).toBe(
+      "https://docs.google.com/spreadsheets/u/1/d/doc_123/revisions/load?id=doc_123&start=1&end=5",
+    );
+  });
+
+  test("kind doc is string-identical to the default (golden)", () => {
+    const base = {
+      docId: asDocId("doc_123"),
+      start: asRevisionId(1),
+      end: asRevisionId(5),
+      userIndex: null,
+    } as const;
+    expect(buildRevisionsLoadUrl({ ...base, kind: "doc" })).toBe(buildRevisionsLoadUrl(base));
+  });
+
   test("rejects invalid userIndex values", () => {
     expect(() =>
       buildRevisionsLoadUrl({
@@ -109,6 +133,15 @@ describe("buildDocBootstrapUrl", () => {
     );
   });
 
+  test("uses the /spreadsheets/ prefix for kind sheet", () => {
+    expect(buildDocBootstrapUrl(asDocId("doc_123"), null, "edit", "sheet")).toBe(
+      "https://docs.google.com/spreadsheets/d/doc_123/edit",
+    );
+    expect(buildDocBootstrapUrl(asDocId("doc_123"), 2, "grading", "doc")).toBe(
+      "https://docs.google.com/document/u/2/d/doc_123/grading",
+    );
+  });
+
   test("rejects invalid userIndex values", () => {
     expect(() => buildDocBootstrapUrl(asDocId("doc_123"), -1, "edit")).toThrow(TypeError);
     expect(() => buildDocBootstrapUrl(asDocId("doc_123"), 1.5, "edit")).toThrow(TypeError);
@@ -125,6 +158,10 @@ describe("buildDocBootstrapUrl", () => {
 describe("detectUserIndex", () => {
   test("reads the /document/u/{N}/d/ path slot", () => {
     expect(detectUserIndex("https://docs.google.com/document/u/1/d/abc/edit")).toBe(1);
+  });
+
+  test("reads the /spreadsheets/u/{N}/d/ path slot", () => {
+    expect(detectUserIndex("https://docs.google.com/spreadsheets/u/2/d/abc/edit")).toBe(2);
   });
 
   test("returns null for a single-account path with no slot", () => {

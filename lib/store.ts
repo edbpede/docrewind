@@ -25,6 +25,7 @@
 // verification.
 // Readers (the replay UI) may read anything.
 
+import type { DocumentKind } from "./domain/kind";
 import type {
   CacheRecord,
   DecodedRevision,
@@ -34,6 +35,8 @@ import type {
   TimelineEvent,
 } from "./domain/model";
 import type { DocumentModel } from "./reconstruction/model";
+import type { SheetsDecodedRevision } from "./sheets-decoder/types";
+import type { GridModel } from "./sheets-reconstruction/model";
 
 /**
  * One persisted reconstruction snapshot: the document model state after
@@ -47,11 +50,25 @@ export interface StoredSnapshot {
 }
 
 /**
- * One atomic replay artifact for a decoded document. Replay rendering reads this
- * single record only; the legacy split decoded/snapshot/timeline stores remain
- * compatibility surfaces and are not authoritative for replay load.
+ * One persisted GRID reconstruction snapshot: the grid model after `appliedCount`
+ * revisions (0 = base grid). The Sheets analogue of {@link StoredSnapshot}; lives
+ * ONLY on a `kind:"sheet"` publication (never in the legacy split stores).
  */
-export interface ReplayPublication {
+export interface StoredGridSnapshot {
+  readonly appliedCount: number;
+  readonly model: GridModel;
+}
+
+/**
+ * One atomic replay artifact for a decoded DOCS document. Replay rendering reads
+ * this single record only; the legacy split decoded/snapshot/timeline stores
+ * remain compatibility surfaces and are not authoritative for replay load.
+ *
+ * `kind` is the OPTIONAL discriminant: absent (legacy on-disk data) or `"doc"`
+ * both mean a Docs publication — readers default a missing `kind` to `"doc"`.
+ */
+export interface DocReplayPublication {
+  readonly kind?: "doc";
   /** Unique per replay attempt / document epoch; never a bare page-local run id. */
   readonly publicationId: string;
   /** Decode-pipeline version that produced this publication. */
@@ -63,15 +80,54 @@ export interface ReplayPublication {
 }
 
 /**
+ * One atomic replay artifact for a decoded SHEETS document. Carries the grid
+ * snapshots + sheets revisions and versions INDEPENDENTLY of Docs via
+ * `sheetsParserVersion`. The P0 stub publication is this shape with empty
+ * revisions/snapshots and `placeholder:true`.
+ */
+export interface SheetReplayPublication {
+  readonly kind: "sheet";
+  readonly publicationId: string;
+  /** Sheets decode-pipeline version that produced this publication. */
+  readonly sheetsParserVersion: number;
+  readonly revisions: readonly SheetsDecodedRevision[];
+  readonly snapshots: readonly StoredGridSnapshot[];
+  readonly timeline: readonly TimelineEvent[];
+  readonly publishedAt: number;
+  /** True for the P0 stub publication (recognized Sheet URL, not yet replayable). */
+  readonly placeholder?: boolean;
+}
+
+/** A replay artifact, discriminated by document kind (legacy/missing → doc). */
+export type ReplayPublication = DocReplayPublication | SheetReplayPublication;
+
+/** Document kind of a stored publication; legacy (no-`kind`) data defaults to "doc". */
+export function publicationKind(pub: ReplayPublication): DocumentKind {
+  return pub.kind === "sheet" ? "sheet" : "doc";
+}
+
+/** The version a stored publication was produced under (doc vs sheets baseline). */
+export function publicationVersion(pub: ReplayPublication): number {
+  return pub.kind === "sheet" ? pub.sheetsParserVersion : pub.parserVersion;
+}
+
+/**
  * The doc-scoped replay publication pointer. Replay loading follows this
  * pointer first and then reads the exact publication row it names; it never
  * guesses "latest" by document.
  */
 export interface ActiveReplayPublication {
   readonly publicationId: string;
-  /** Decode-pipeline version in force when this pointer was promoted. */
+  /**
+   * The version in force when this pointer was promoted (the Docs `parserVersion`
+   * for a doc, the `SHEETS_PARSER_VERSION` for a sheet). Compared against the
+   * baseline selected by {@link kind} so a sheet pointer is never category-error
+   * compared against the Docs baseline.
+   */
   readonly parserVersion: number;
   readonly activatedAt: number;
+  /** Document kind; absent (legacy) defaults to `"doc"` on read. */
+  readonly kind?: DocumentKind;
 }
 
 /**
@@ -146,8 +202,16 @@ export interface RevisionStore {
     docId: DocId,
     expectedPublicationId: string,
   ): Promise<ReplayPublication | null>;
-  /** Promote one publication id as the document's active replay pointer. */
-  setActiveReplayPublication(docId: DocId, publicationId: string): Promise<void>;
+  /**
+   * Promote one publication id as the document's active replay pointer. `kind`
+   * (default `"doc"`) selects which version baseline the pointer is gated by, so
+   * a sheet pointer is compared against `SHEETS_PARSER_VERSION`, not the Docs one.
+   */
+  setActiveReplayPublication(
+    docId: DocId,
+    publicationId: string,
+    kind?: DocumentKind,
+  ): Promise<void>;
   /**
    * Resolve the active replay pointer and then read that exact publication. A
    * missing pointer, stale parser version, dangling row, or stale publication
