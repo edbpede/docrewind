@@ -39,11 +39,14 @@ export interface SlidePageModel {
 
 /**
  * Privacy-safe fidelity notice: appended whenever an op degrades to
- * `SlidesUnknownOp` or a `modelVersion` mismatch is detected. `detail` is a
- * content-free code (an opcode or a version) — never slide text.
+ * `SlidesUnknownOp`, a `modelVersion` mismatch is detected, or a value-bearing shape
+ * can never be placed because its transform failed to decode (`unplaced-shape` — the
+ * render pass drops such a shape, so recording the loss keeps it honest, not silent).
+ * `detail` is a content-free code (an opcode, a version, or a shape type) — never
+ * slide text.
  */
 export interface SlidesFidelityNotice {
-  readonly kind: "unknown-op" | "model-version-mismatch";
+  readonly kind: "unknown-op" | "model-version-mismatch" | "unplaced-shape";
   readonly detail: string;
 }
 

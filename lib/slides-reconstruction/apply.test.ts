@@ -186,3 +186,42 @@ describe("page size + txn + inert + fidelity", () => {
     expect(m.fidelityNotices).toEqual([{ kind: "model-version-mismatch", detail: "5" }]);
   });
 });
+
+describe("unplaceable-shape fidelity", () => {
+  test("a null-transform text box that gains real text raises one unplaced-shape notice", () => {
+    const m = createModel();
+    // createShape defaults to a null transform (a decode that failed the 6-number matrix).
+    apply(m, createShape("t", "p"));
+    apply(m, { op: "insert-text", shapeId: S("t"), offset: 0, text: "kept" });
+    apply(m, { op: "insert-text", shapeId: S("t"), offset: 999, text: "!" });
+    // The text still folds normally; the loss is flagged once (deduped by type code).
+    expect(m.shapes.get(S("t"))?.text).toBe("kept!");
+    expect(m.fidelityNotices).toEqual([{ kind: "unplaced-shape", detail: "108" }]);
+  });
+
+  test("a null-transform media shape raises an unplaced-shape notice on create", () => {
+    const m = createModel();
+    apply(m, createShape("img", "p", 6));
+    expect(m.fidelityNotices).toEqual([{ kind: "unplaced-shape", detail: "6" }]);
+  });
+
+  test("empty text boxes and background frames with null transforms raise no notice", () => {
+    const m = createModel();
+    apply(m, createShape("empty", "p", 108));
+    apply(m, createShape("bg", "p", 158));
+    expect(m.fidelityNotices).toEqual([]);
+  });
+
+  test("a shape carrying text with a valid transform raises no notice", () => {
+    const m = createModel();
+    apply(m, {
+      op: "create-shape",
+      shapeId: S("t"),
+      parentId: P("p"),
+      shapeType: 108,
+      transform: { scaleX: 1, shearY: 0, shearX: 0, scaleY: 1, translateX: 1, translateY: 2 },
+    });
+    apply(m, { op: "insert-text", shapeId: S("t"), offset: 0, text: "placed" });
+    expect(m.fidelityNotices).toEqual([]);
+  });
+});

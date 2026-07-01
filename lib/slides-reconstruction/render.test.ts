@@ -129,7 +129,7 @@ describe("edge cases + helpers", () => {
     expect(renderSlide(build("TITLE"), 5)).toBeNull();
   });
 
-  test("a null-transform text shape is skipped", () => {
+  test("a null-transform text shape is skipped from render but raises a fidelity notice", () => {
     const m = createModel();
     for (const op of [
       { op: "define-page", pageId: P("p"), pageType: "slide", theme: null },
@@ -138,7 +138,10 @@ describe("edge cases + helpers", () => {
     ] satisfies SlidesOperation[]) {
       applySlidesOperation(m, op);
     }
+    // Render still can't place a shape whose geometry failed to decode...
     expect(renderSlide(m, 0)?.shapes).toEqual([]);
+    // ...but the dropped value-bearing text is now observable, not silent.
+    expect(hasFidelityNotice(m)).toBe(true);
   });
 
   test("falls back to a 16:9 page and white background with no page-size/theme", () => {

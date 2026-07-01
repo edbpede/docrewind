@@ -22,10 +22,19 @@ function rev(op: SlidesOperation, id: number, time: number | null): SlidesDecode
 }
 
 describe("slidesSummaryExtractor", () => {
-  test("counts inserted characters (code points)", () => {
+  test("counts inserted characters (UTF-16 code units)", () => {
     const r = rev({ op: "insert-text", shapeId: "i0" as never, offset: 2, text: "hello" }, 1, 1);
     expect(slidesSummaryExtractor.delta(r)).toEqual({ inserted: 5, deleted: 0 });
     expect(slidesSummaryExtractor.position(r)).toBe(3); // offset + 1
+  });
+
+  test("counts inserts in UTF-16 units so astral inserts/deletes stay symmetric", () => {
+    // "😀" is one code point but two UTF-16 code units; delete-text ranges are UTF-16
+    // (types.ts), so inserts must match to keep net-zero edits balanced.
+    const ins = rev({ op: "insert-text", shapeId: "i0" as never, offset: 0, text: "😀" }, 1, 1);
+    const del = rev({ op: "delete-text", shapeId: "i0" as never, start: 0, end: 2 }, 1, 1);
+    expect(slidesSummaryExtractor.delta(ins)).toEqual({ inserted: 2, deleted: 0 });
+    expect(slidesSummaryExtractor.delta(del)).toEqual({ inserted: 0, deleted: 2 });
   });
 
   test("counts deleted characters and reports the delete start", () => {

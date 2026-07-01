@@ -18,9 +18,10 @@ import ThemeControl from "@/components/ThemeControl";
 import { useThemeSync } from "@/components/theme-sync";
 import { createIdbStore } from "@/lib/db";
 import { asDocId } from "@/lib/domain/ids";
+import type { DocumentKind } from "@/lib/domain/kind";
 import type { DocId } from "@/lib/domain/model";
 import { errorTitle, strings } from "@/lib/i18n/strings";
-import { loadReplayData } from "@/lib/replay/load";
+import { loadReplayData, type ReplayLoadResult } from "@/lib/replay/load";
 import { retrievalError } from "@/lib/retrieval/errors";
 import { deriveSheetsSummary } from "@/lib/sheets-reconstruction/derive";
 import { deriveSlidesSummary } from "@/lib/slides-reconstruction/derive";
@@ -32,8 +33,18 @@ export interface SummaryAppProps {
   readonly store?: RevisionStore;
 }
 
-function replayHref(docId: DocId): string {
-  return `replay.html?doc=${encodeURIComponent(docId)}`;
+// The replay URL kind of a loaded publication. Unknown (still loading) or a Docs
+// publication → "doc", which keeps the URL bare; Sheets/Slides must round-trip
+// so the replay route retries against the right Google endpoint on return.
+function replayKind(result: ReplayLoadResult | undefined): DocumentKind {
+  if (result?.kind === "ok-sheet") return "sheet";
+  if (result?.kind === "ok-slides") return "slides";
+  return "doc";
+}
+
+function replayHref(docId: DocId, kind: DocumentKind = "doc"): string {
+  const base = `replay.html?doc=${encodeURIComponent(docId)}`;
+  return kind === "doc" ? base : `${base}&kind=${kind}`;
 }
 
 /** A centered status card (loading / missing / error). Calm, plain-language, with
@@ -86,7 +97,10 @@ const SummarySurface: Component<{ readonly docId: DocId; readonly store: Revisio
     <main class="mx-auto flex max-w-[64rem] flex-col gap-6 p-6 sm:p-8">
       <header class="dr-masthead">
         <div class="flex items-center justify-between gap-3">
-          <a class="dr-link inline-flex items-center gap-1.5" href={replayHref(props.docId)}>
+          <a
+            class="dr-link inline-flex items-center gap-1.5"
+            href={replayHref(props.docId, replayKind(result()))}
+          >
             <IconArrowLeft size={16} />
             {strings.summary.backToReplay}
           </a>
@@ -127,7 +141,10 @@ const SummarySurface: Component<{ readonly docId: DocId; readonly store: Revisio
                 icon={IconHistory}
                 title={strings.summary.missingTitle}
                 body={strings.summary.missingHint}
-                action={{ label: strings.summary.openReplay, href: replayHref(props.docId) }}
+                action={{
+                  label: strings.summary.openReplay,
+                  href: replayHref(props.docId, replayKind(result())),
+                }}
               />
             }
           >

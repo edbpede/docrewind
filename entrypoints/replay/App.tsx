@@ -1043,7 +1043,9 @@ const ReplaySurface: Component<{
                         <div class="flex shrink-0 items-center gap-2.5">
                           <a
                             class="dr-summary-cta"
-                            href={`summary.html?doc=${encodeURIComponent(props.docId)}`}
+                            href={`summary.html?doc=${encodeURIComponent(props.docId)}${
+                              props.kind === "doc" ? "" : `&kind=${props.kind}`
+                            }`}
                           >
                             <IconChart size={18} />
                             <span>{strings.summary.title}</span>

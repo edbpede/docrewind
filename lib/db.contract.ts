@@ -33,12 +33,16 @@ import type {
 
 /**
  * A store plus a way to reopen the same backing data at new parser versions.
- * `sheetsParserVersion` defaults to 1 so existing single-arg `reopen(n)` calls
- * (which bump only the Docs version) keep working.
+ * `sheetsParserVersion` and `slidesParserVersion` default to 1 so existing
+ * single-arg `reopen(n)` calls (which bump only the Docs version) keep working.
  */
 export interface StoreHarness {
   readonly store: RevisionStore;
-  reopen(parserVersion: number, sheetsParserVersion?: number): RevisionStore;
+  reopen(
+    parserVersion: number,
+    sheetsParserVersion?: number,
+    slidesParserVersion?: number,
+  ): RevisionStore;
 }
 
 const rev = (n: number): RevisionId => asRevisionId(n);
@@ -473,6 +477,14 @@ export function runRevisionStoreContract(
       const loaded = await store.getReplayPublication(docA, "pub-slides");
       expect(loaded?.kind).toBe("slides");
       expect((await store.getActiveReplayPublication(docA))?.kind).toBe("slides");
+    });
+
+    it("gates a slides active pointer by the SLIDES baseline, not the doc/sheets baseline", async () => {
+      await saveActiveReplayPublication(store, docA, slideReplayPublication("pub-slides-ver"));
+      // Bumping ONLY the doc/sheets baseline must not invalidate a slides pointer.
+      expect(await harness.reopen(2, 2, 1).getActiveReplayPublication(docA)).not.toBeNull();
+      // Bumping the slides baseline does.
+      expect(await harness.reopen(1, 1, 2).getActiveReplayPublication(docA)).toBeNull();
     });
 
     it("round-trips a P0 stub slides publication (placeholder, empty presentation)", async () => {

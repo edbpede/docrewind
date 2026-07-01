@@ -28,7 +28,7 @@ function opDelta(op: SlidesOperation): { inserted: number; deleted: number } {
       return { inserted, deleted };
     }
     case "insert-text":
-      return { inserted: [...op.text].length, deleted: 0 };
+      return { inserted: op.text.length, deleted: 0 };
     case "delete-text":
       return { inserted: 0, deleted: Math.max(0, op.end - op.start) };
     default:

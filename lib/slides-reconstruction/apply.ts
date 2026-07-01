@@ -15,12 +15,36 @@
 import type { ShapeId, SlidesDecodedRevision, SlidesOperation } from "../slides-decoder/types";
 import type { PresentationModel, ShapeModel, SlidesFidelityNotice } from "./model";
 
+/** Text-box / background Punch type codes (mirrors the render projection). */
+const TYPE_TEXT = 108;
+const TYPE_BACKGROUND = 158;
+
 /** Append a fidelity notice, de-duplicated by (kind, detail). */
 function pushNotice(model: PresentationModel, notice: SlidesFidelityNotice): void {
   if (model.fidelityNotices.some((n) => n.kind === notice.kind && n.detail === notice.detail)) {
     return;
   }
   model.fidelityNotices.push(notice);
+}
+
+/**
+ * Flag a value-bearing shape the render pass can never place. A null transform means
+ * the 6-number matrix failed to decode, so render drops the shape: harmless for an
+ * empty text placeholder or a background frame (they draw nothing), but a text box
+ * carrying real text or an embedded media object would vanish silently. Record an
+ * honest, content-free `unplaced-shape` notice (deduped by type code) so
+ * `hasFidelityNotice()` reports the loss instead of hiding it — the same "degradation
+ * is honest, never silent" contract the unknown-op / version-mismatch notices uphold.
+ * Called after each mutation that can decide a shape's placeability; a later re-create
+ * that supplies a transform makes the shape placeable but cannot retract the notice,
+ * so this over-reports in that rare case rather than ever under-reporting a real loss.
+ */
+function noteUnplaceableShape(model: PresentationModel, shape: ShapeModel): void {
+  if (shape.transform !== null || shape.shapeType === TYPE_BACKGROUND) return;
+  const hasValue = shape.shapeType === TYPE_TEXT ? shape.text.trim().length > 0 : true;
+  if (hasValue) {
+    pushNotice(model, { kind: "unplaced-shape", detail: String(shape.shapeType) });
+  }
 }
 
 /** Splice `text` into `shape.text` at a clamped UTF-16 offset. */
@@ -58,14 +82,16 @@ export function applySlidesOperation(model: PresentationModel, op: SlidesOperati
     case "create-shape": {
       const existing = model.shapes.get(op.shapeId);
       if (existing === undefined) {
-        model.shapes.set(op.shapeId, {
+        const created: ShapeModel = {
           id: op.shapeId,
           pageId: op.parentId,
           shapeType: op.shapeType,
           transform: op.transform,
           text: "",
-        });
+        };
+        model.shapes.set(op.shapeId, created);
         model.shapeOrder.push(op.shapeId);
+        noteUnplaceableShape(model, created);
       } else {
         // Re-create (rare): refresh geometry/parent, keep accumulated text. Keep the
         // last known-good transform when the re-create carries none (a decode that
@@ -73,6 +99,7 @@ export function applySlidesOperation(model: PresentationModel, op: SlidesOperati
         existing.pageId = op.parentId;
         existing.shapeType = op.shapeType;
         if (op.transform !== null) existing.transform = op.transform;
+        noteUnplaceableShape(model, existing);
       }
       return;
     }
@@ -105,7 +132,12 @@ export function applySlidesOperation(model: PresentationModel, op: SlidesOperati
     }
     case "insert-text": {
       const shape = getShape(model, op.shapeId);
-      if (shape !== undefined) insertText(shape, op.offset, op.text);
+      if (shape !== undefined) {
+        insertText(shape, op.offset, op.text);
+        // Inserting real text into a shape whose geometry never decoded turns a
+        // harmless empty placeholder into a value-bearing shape render will drop.
+        noteUnplaceableShape(model, shape);
+      }
       return;
     }
     case "delete-text": {
