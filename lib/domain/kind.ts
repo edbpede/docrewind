@@ -9,14 +9,18 @@
 // PURE: a single string-literal union, no runtime, no imports.
 
 /** Which Google editor a captured document belongs to. */
-export type DocumentKind = "doc" | "sheet";
+export type DocumentKind = "doc" | "sheet" | "slides";
 
 /** Runtime guard for the untyped boundaries (worker/messaging) the tag crosses. */
 export function isDocumentKind(value: unknown): value is DocumentKind {
-  return value === "doc" || value === "sheet";
+  return value === "doc" || value === "sheet" || value === "slides";
 }
 
-/** The URL path prefix Google uses for each kind (`/document/` vs `/spreadsheets/`). */
-export function pathPrefixForKind(kind: DocumentKind): "document" | "spreadsheets" {
-  return kind === "sheet" ? "spreadsheets" : "document";
+/** The URL path prefix Google uses for each kind (`/document/`, `/spreadsheets/`, `/presentation/`). */
+export function pathPrefixForKind(
+  kind: DocumentKind,
+): "document" | "spreadsheets" | "presentation" {
+  if (kind === "sheet") return "spreadsheets";
+  if (kind === "slides") return "presentation";
+  return "document";
 }

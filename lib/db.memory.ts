@@ -17,6 +17,7 @@ import type {
   TimelineEvent,
 } from "./domain/model";
 import { SHEETS_PARSER_VERSION } from "./sheets-decoder/version";
+import { SLIDES_PARSER_VERSION } from "./slides-decoder/version";
 import type {
   ActiveReplayPublication,
   ReplayPublication,
@@ -102,6 +103,8 @@ export interface MemoryStoreOptions {
   readonly parserVersion?: number;
   /** Independent Sheets decode-pipeline version. */
   readonly sheetsParserVersion?: number;
+  /** Independent Slides decode-pipeline version. */
+  readonly slidesParserVersion?: number;
   /** Share an existing backend (e.g. to simulate a parser-version bump). */
   readonly backend?: MemoryBackend;
 }
@@ -110,8 +113,12 @@ export interface MemoryStoreOptions {
 export function createMemoryStore(options: MemoryStoreOptions = {}): RevisionStore {
   const parserVersion = options.parserVersion ?? PARSER_VERSION;
   const sheetsParserVersion = options.sheetsParserVersion ?? SHEETS_PARSER_VERSION;
-  const baselineFor = (kind: DocumentKind): number =>
-    kind === "sheet" ? sheetsParserVersion : parserVersion;
+  const slidesParserVersion = options.slidesParserVersion ?? SLIDES_PARSER_VERSION;
+  const baselineFor = (kind: DocumentKind): number => {
+    if (kind === "sheet") return sheetsParserVersion;
+    if (kind === "slides") return slidesParserVersion;
+    return parserVersion;
+  };
   const backend = options.backend ?? createMemoryBackend();
 
   // An in-memory store is ephemeral, so there is nothing to persist; only
@@ -164,7 +171,9 @@ export function createMemoryStore(options: MemoryStoreOptions = {}): RevisionSto
     const stamped: ReplayPublication =
       publication.kind === "sheet"
         ? { ...publication, sheetsParserVersion }
-        : { ...publication, parserVersion };
+        : publication.kind === "slides"
+          ? { ...publication, slidesParserVersion }
+          : { ...publication, parserVersion };
     backend.replayPublications.set(
       publicationKey(docId, publication.publicationId),
       cloneValue(stamped),

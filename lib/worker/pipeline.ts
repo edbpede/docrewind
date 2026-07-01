@@ -20,6 +20,14 @@ import {
   SHEETS_SNAPSHOT_CADENCE,
   type SheetsReplayIndex,
 } from "../sheets-reconstruction/snapshot";
+import { decodeSlidesOperations, decodeSlidesSnapshot } from "../slides-decoder/decode";
+import type { SlidesDecodedRevision, SlidesOperation } from "../slides-decoder/types";
+import { deriveSlidesTimeline } from "../slides-reconstruction/derive";
+import {
+  buildSlidesReplayIndex,
+  SLIDES_SNAPSHOT_CADENCE,
+  type SlidesReplayIndex,
+} from "../slides-reconstruction/snapshot";
 import { deriveTimeline } from "../timeline/derive";
 
 /** Why a body could not be decoded (content-free, privacy-safe). */
@@ -210,4 +218,89 @@ export function runSheetsPipelineOverBodies(bodies: readonly unknown[]): SheetsP
 /** Run the Sheets pipeline over a single raw chunk body. Never throws. */
 export function runSheetsPipeline(rawBody: unknown): SheetsPipelineResult {
   return runSheetsPipelineOverBodies([rawBody]);
+}
+
+// --- Slides pipeline (parallel to the Docs pipeline above) -------------------
+
+/** A fully decoded Slides pipeline result, ready to persist + render. */
+export interface SlidesPipelineSuccess {
+  readonly kind: "ok";
+  readonly revisions: readonly SlidesDecodedRevision[];
+  readonly replayIndex: SlidesReplayIndex;
+  readonly timeline: readonly TimelineEvent[];
+  readonly skippedChunks: number;
+}
+
+export type SlidesPipelineResult = SlidesPipelineSuccess | PipelineUnsupported;
+
+/** One decodable Slides body: its changelog revisions + base-state snapshot ops. */
+interface DecodedSlidesBody {
+  readonly revisions: readonly SlidesDecodedRevision[];
+  readonly snapshotOps: readonly SlidesOperation[];
+}
+
+function decodeSlidesBody(
+  rawBody: unknown,
+  withSnapshot: boolean,
+): DecodedSlidesBody | UnsupportedReason {
+  let parsed: unknown;
+  try {
+    parsed = typeof rawBody === "string" ? parseFramed(rawBody) : rawBody;
+  } catch {
+    return "parse-error";
+  }
+  if (detectSchema(parsed).kind === "unknown") {
+    return "unknown-schema";
+  }
+  return {
+    revisions: decodeSlidesOperations(parsed),
+    snapshotOps: withSnapshot ? decodeSlidesSnapshot(parsed) : [],
+  };
+}
+
+/**
+ * Run the full Slides pipeline over several raw chunk bodies (document order).
+ * Mirrors {@link runPipelineOverBodies}: unsupported chunks are skipped, the
+ * first decodable body's `chunkedSnapshot` seeds the base, and the result carries
+ * one presentation replay index + timeline. Never throws.
+ */
+export function runSlidesPipelineOverBodies(bodies: readonly unknown[]): SlidesPipelineResult {
+  const revisions: SlidesDecodedRevision[] = [];
+  let baseOps: readonly SlidesOperation[] = [];
+  let baseCaptured = false;
+  let decodedAny = false;
+  let skippedChunks = 0;
+  let firstReason: UnsupportedReason | null = null;
+
+  for (const body of bodies) {
+    const decoded = decodeSlidesBody(body, !baseCaptured);
+    if (decoded === "parse-error" || decoded === "unknown-schema") {
+      skippedChunks += 1;
+      firstReason ??= decoded;
+      continue;
+    }
+    decodedAny = true;
+    if (!baseCaptured) {
+      baseOps = decoded.snapshotOps;
+      baseCaptured = true;
+    }
+    revisions.push(...decoded.revisions);
+  }
+
+  if (!decodedAny && firstReason !== null) {
+    return { kind: "unsupported", reason: firstReason };
+  }
+
+  return {
+    kind: "ok",
+    revisions,
+    replayIndex: buildSlidesReplayIndex(revisions, SLIDES_SNAPSHOT_CADENCE, baseOps),
+    timeline: deriveSlidesTimeline(revisions),
+    skippedChunks,
+  };
+}
+
+/** Run the Slides pipeline over a single raw chunk body. Never throws. */
+export function runSlidesPipeline(rawBody: unknown): SlidesPipelineResult {
+  return runSlidesPipelineOverBodies([rawBody]);
 }

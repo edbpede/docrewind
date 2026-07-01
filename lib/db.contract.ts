@@ -18,12 +18,16 @@ import type {
 import { createModel } from "./reconstruction/model";
 import type { SheetsDecodedRevision } from "./sheets-decoder/types";
 import { createModel as createGridModel } from "./sheets-reconstruction/model";
+import type { SlidesDecodedRevision } from "./slides-decoder/types";
+import { createModel as createPresentationModel } from "./slides-reconstruction/model";
 import type {
   ReplayPublication,
   RetrievalCheckpoint,
   RevisionStore,
   SheetReplayPublication,
+  SlideReplayPublication,
   StoredGridSnapshot,
+  StoredSlidesSnapshot,
   StoredSnapshot,
 } from "./store";
 
@@ -105,6 +109,39 @@ function sheetReplayPublication(
     sheetsParserVersion: 1,
     revisions: placeholder ? [] : [sheetRev(1)],
     snapshots: placeholder ? [] : [gridSnapshot(0), gridSnapshot(1)],
+    timeline: [largeEdit(1)],
+    publishedAt: 123,
+    ...(placeholder ? { placeholder: true } : {}),
+  };
+}
+
+function slidesRev(id: number): SlidesDecodedRevision {
+  return {
+    revisionId: rev(id),
+    userId: null,
+    sessionId: null,
+    time: null,
+    operations: [],
+    modelVersion: 99,
+    modelVersionMismatch: false,
+  };
+}
+
+function slidesSnapshot(appliedCount: number): StoredSlidesSnapshot {
+  return { appliedCount, model: createPresentationModel() };
+}
+
+function slideReplayPublication(
+  publicationId: string,
+  options: { placeholder?: boolean } = {},
+): SlideReplayPublication {
+  const placeholder = options.placeholder === true;
+  return {
+    kind: "slides",
+    publicationId,
+    slidesParserVersion: 1,
+    revisions: placeholder ? [] : [slidesRev(1)],
+    snapshots: placeholder ? [] : [slidesSnapshot(0), slidesSnapshot(1)],
     timeline: [largeEdit(1)],
     publishedAt: 123,
     ...(placeholder ? { placeholder: true } : {}),
@@ -429,6 +466,24 @@ export function runRevisionStoreContract(
       expect(loaded?.kind).toBe("sheet");
       expect(loaded?.revisions).toEqual([]);
       if (loaded?.kind === "sheet") expect(loaded.placeholder).toBe(true);
+    });
+
+    it("round-trips a slides publication and resolves its active pointer as slides", async () => {
+      await saveActiveReplayPublication(store, docA, slideReplayPublication("pub-slides"));
+      const loaded = await store.getReplayPublication(docA, "pub-slides");
+      expect(loaded?.kind).toBe("slides");
+      expect((await store.getActiveReplayPublication(docA))?.kind).toBe("slides");
+    });
+
+    it("round-trips a P0 stub slides publication (placeholder, empty presentation)", async () => {
+      await store.saveReplayPublication(
+        docA,
+        slideReplayPublication("pub-slides-stub", { placeholder: true }),
+      );
+      const loaded = await store.getReplayPublication(docA, "pub-slides-stub");
+      expect(loaded?.kind).toBe("slides");
+      expect(loaded?.revisions).toEqual([]);
+      if (loaded?.kind === "slides") expect(loaded.placeholder).toBe(true);
     });
 
     it("deletes one replay publication and clears the pointer only when it named that row", async () => {

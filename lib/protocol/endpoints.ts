@@ -131,9 +131,9 @@ export function buildDocBootstrapUrl(
   return `${DOCS_ORIGIN}/${pathPrefixForKind(kind)}${userSegment}/d/${docId}/${surface}`;
 }
 
-// Extracts the multi-account slot from a `/document/u/{N}/d/` or
-// `/spreadsheets/u/{N}/d/` path segment (A.5).
-const USER_INDEX_PATTERN = /\/(?:document|spreadsheets)\/u\/(\d+)\/d\//;
+// Extracts the multi-account slot from a `/document/u/{N}/d/`,
+// `/spreadsheets/u/{N}/d/` or `/presentation/u/{N}/d/` path segment (A.5).
+const USER_INDEX_PATTERN = /\/(?:document|spreadsheets|presentation)\/u\/(\d+)\/d\//;
 
 /**
  * Detect the multi-account account slot in a Google URL, or null when none is present.

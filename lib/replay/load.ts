@@ -18,14 +18,24 @@ import type { SheetsDecodedRevision } from "../sheets-decoder/types";
 import { SHEETS_PARSER_VERSION } from "../sheets-decoder/version";
 import type { GridModel } from "../sheets-reconstruction/model";
 import { SHEETS_SNAPSHOT_CADENCE, type SheetsReplayIndex } from "../sheets-reconstruction/snapshot";
+import type { SlidesDecodedRevision } from "../slides-decoder/types";
+import { SLIDES_PARSER_VERSION } from "../slides-decoder/version";
+import type { PresentationModel } from "../slides-reconstruction/model";
+import { SLIDES_SNAPSHOT_CADENCE, type SlidesReplayIndex } from "../slides-reconstruction/snapshot";
 import type {
   ReplayPublication,
   RevisionStore,
   SheetReplayPublication,
+  SlideReplayPublication,
   StoredGridSnapshot,
+  StoredSlidesSnapshot,
   StoredSnapshot,
 } from "../store";
-import { runPipelineOverBodies, runSheetsPipelineOverBodies } from "../worker/pipeline";
+import {
+  runPipelineOverBodies,
+  runSheetsPipelineOverBodies,
+  runSlidesPipelineOverBodies,
+} from "../worker/pipeline";
 
 /** Everything the DOCS replay surface needs after a successful load (unchanged). */
 export interface ReplayData {
@@ -43,9 +53,19 @@ export interface SheetReplayData {
   readonly placeholder: boolean;
 }
 
+/** Everything the SLIDES replay surface needs after a successful load. */
+export interface SlideReplayData {
+  readonly revisions: readonly SlidesDecodedRevision[];
+  readonly timeline: readonly TimelineEvent[];
+  readonly replayIndex: SlidesReplayIndex;
+  /** True for the P0 stub publication (recognized Slides, not yet replayable). */
+  readonly placeholder: boolean;
+}
+
 export type ReplayLoadResult =
   | { readonly kind: "ok"; readonly data: ReplayData }
   | { readonly kind: "ok-sheet"; readonly data: SheetReplayData }
+  | { readonly kind: "ok-slides"; readonly data: SlideReplayData }
   | { readonly kind: "missing-publication" };
 
 /** Plain structured-cloneable derived data ready for store publication. */
@@ -94,9 +114,21 @@ export function rebuildSheetsReplayIndex(
   return { revisions: decoded, cadence: SHEETS_SNAPSHOT_CADENCE, snapshots: map };
 }
 
+/** Rebuild a Slides replay index from persisted presentation revisions + snapshots. */
+export function rebuildSlidesReplayIndex(
+  decoded: readonly SlidesDecodedRevision[],
+  snapshots: readonly StoredSlidesSnapshot[],
+): SlidesReplayIndex {
+  const map = new Map<number, PresentationModel>(snapshots.map((s) => [s.appliedCount, s.model]));
+  return { revisions: decoded, cadence: SLIDES_SNAPSHOT_CADENCE, snapshots: map };
+}
+
 function docReplayData(publication: ReplayPublication): ReplayData {
   // Narrowed by the caller (publicationKind === "doc"); legacy/missing kind → doc.
-  const doc = publication as Exclude<ReplayPublication, SheetReplayPublication>;
+  const doc = publication as Exclude<
+    ReplayPublication,
+    SheetReplayPublication | SlideReplayPublication
+  >;
   return {
     revisions: doc.revisions,
     timeline: doc.timeline,
@@ -109,6 +141,15 @@ function sheetReplayData(publication: SheetReplayPublication): SheetReplayData {
     revisions: publication.revisions,
     timeline: publication.timeline,
     replayIndex: rebuildSheetsReplayIndex(publication.revisions, publication.snapshots),
+    placeholder: publication.placeholder === true,
+  };
+}
+
+function slideReplayData(publication: SlideReplayPublication): SlideReplayData {
+  return {
+    revisions: publication.revisions,
+    timeline: publication.timeline,
+    replayIndex: rebuildSlidesReplayIndex(publication.revisions, publication.snapshots),
     placeholder: publication.placeholder === true,
   };
 }
@@ -133,6 +174,9 @@ export async function loadReplayData(
   }
   if (publication.kind === "sheet") {
     return { kind: "ok-sheet", data: sheetReplayData(publication) };
+  }
+  if (publication.kind === "slides") {
+    return { kind: "ok-slides", data: slideReplayData(publication) };
   }
   return { kind: "ok", data: docReplayData(publication) };
 }
@@ -279,6 +323,88 @@ export async function runSheetsPipelineSameThread(
       ([appliedCount, model]) => ({ appliedCount, model }),
     );
     const published = await publishSheetsDerivedData(
+      store,
+      docId,
+      { revisions: result.revisions, snapshots, timeline: result.timeline },
+      options,
+    );
+    return published
+      ? { kind: "published", revisionCount: result.revisions.length }
+      : { kind: "stale" };
+  } catch {
+    return { kind: "failed" };
+  }
+}
+
+// --- Slides publish + same-thread fallback (parallel to the Docs path) --------
+
+/** Plain structured-cloneable Slides derived data ready for store publication. */
+export interface SlideReplayDerivedData {
+  readonly revisions: readonly SlidesDecodedRevision[];
+  readonly snapshots: readonly StoredSlidesSnapshot[];
+  readonly timeline: readonly TimelineEvent[];
+  readonly placeholder?: boolean;
+}
+
+/**
+ * Persist a Slides replay artifact and promote it active (mirrors
+ * {@link publishDerivedData}). Used for both the P0 stub publication (empty +
+ * `placeholder:true`) and the full presentation publication.
+ */
+export async function publishSlidesDerivedData(
+  store: RevisionStore,
+  docId: DocId,
+  data: SlideReplayDerivedData,
+  options: ReplayPublishOptions,
+): Promise<boolean> {
+  const shouldPublish = options.shouldPublish ?? (() => true);
+  if (!shouldPublish()) return false;
+  const publication: SlideReplayPublication = {
+    kind: "slides",
+    publicationId: options.publicationId,
+    slidesParserVersion: SLIDES_PARSER_VERSION,
+    revisions: data.revisions,
+    snapshots: data.snapshots,
+    timeline: data.timeline,
+    publishedAt: options.now?.() ?? Date.now(),
+    ...(data.placeholder === true ? { placeholder: true } : {}),
+  };
+  await store.saveReplayPublication(docId, publication);
+  if (!shouldPublish()) {
+    await store.deleteReplayPublication(docId, publication.publicationId);
+    return false;
+  }
+  await store.setActiveReplayPublication(docId, publication.publicationId, "slides");
+  if (!shouldPublish()) {
+    await store.deleteReplayPublication(docId, publication.publicationId);
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Same-thread Slides fallback: run the PURE Slides pipeline over the stored raw
+ * chunk bodies and publish the presentation artifact only while the run is still
+ * current.
+ */
+export async function runSlidesPipelineSameThread(
+  store: RevisionStore,
+  docId: DocId,
+  options: ReplayPublishOptions,
+): Promise<DecodeOutcome> {
+  try {
+    const chunks = await store.getRawChunks(docId);
+    if (chunks.length === 0) {
+      return { kind: "empty" };
+    }
+    const result = runSlidesPipelineOverBodies(chunks.map((chunk) => chunk.body));
+    if (result.kind !== "ok") {
+      return { kind: "unsupported" };
+    }
+    const snapshots: StoredSlidesSnapshot[] = [...result.replayIndex.snapshots.entries()].map(
+      ([appliedCount, model]) => ({ appliedCount, model }),
+    );
+    const published = await publishSlidesDerivedData(
       store,
       docId,
       { revisions: result.revisions, snapshots, timeline: result.timeline },

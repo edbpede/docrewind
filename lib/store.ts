@@ -37,6 +37,8 @@ import type {
 import type { DocumentModel } from "./reconstruction/model";
 import type { SheetsDecodedRevision } from "./sheets-decoder/types";
 import type { GridModel } from "./sheets-reconstruction/model";
+import type { SlidesDecodedRevision } from "./slides-decoder/types";
+import type { PresentationModel } from "./slides-reconstruction/model";
 
 /**
  * One persisted reconstruction snapshot: the document model state after
@@ -57,6 +59,17 @@ export interface StoredSnapshot {
 export interface StoredGridSnapshot {
   readonly appliedCount: number;
   readonly model: GridModel;
+}
+
+/**
+ * One persisted PRESENTATION reconstruction snapshot: the presentation model after
+ * `appliedCount` revisions (0 = base presentation). The Slides analogue of
+ * {@link StoredSnapshot}; lives ONLY on a `kind:"slides"` publication (never in the
+ * legacy split stores).
+ */
+export interface StoredSlidesSnapshot {
+  readonly appliedCount: number;
+  readonly model: PresentationModel;
 }
 
 /**
@@ -98,17 +111,43 @@ export interface SheetReplayPublication {
   readonly placeholder?: boolean;
 }
 
+/**
+ * One atomic replay artifact for a decoded SLIDES document. Carries the
+ * presentation snapshots + slides revisions and versions INDEPENDENTLY of Docs
+ * via `slidesParserVersion`. The P0 stub publication is this shape with empty
+ * revisions/snapshots and `placeholder:true`.
+ */
+export interface SlideReplayPublication {
+  readonly kind: "slides";
+  readonly publicationId: string;
+  /** Slides decode-pipeline version that produced this publication. */
+  readonly slidesParserVersion: number;
+  readonly revisions: readonly SlidesDecodedRevision[];
+  readonly snapshots: readonly StoredSlidesSnapshot[];
+  readonly timeline: readonly TimelineEvent[];
+  readonly publishedAt: number;
+  /** True for the P0 stub publication (recognized Slides URL, not yet replayable). */
+  readonly placeholder?: boolean;
+}
+
 /** A replay artifact, discriminated by document kind (legacy/missing → doc). */
-export type ReplayPublication = DocReplayPublication | SheetReplayPublication;
+export type ReplayPublication =
+  | DocReplayPublication
+  | SheetReplayPublication
+  | SlideReplayPublication;
 
 /** Document kind of a stored publication; legacy (no-`kind`) data defaults to "doc". */
 export function publicationKind(pub: ReplayPublication): DocumentKind {
-  return pub.kind === "sheet" ? "sheet" : "doc";
+  if (pub.kind === "sheet") return "sheet";
+  if (pub.kind === "slides") return "slides";
+  return "doc";
 }
 
-/** The version a stored publication was produced under (doc vs sheets baseline). */
+/** The version a stored publication was produced under (doc vs sheets vs slides baseline). */
 export function publicationVersion(pub: ReplayPublication): number {
-  return pub.kind === "sheet" ? pub.sheetsParserVersion : pub.parserVersion;
+  if (pub.kind === "sheet") return pub.sheetsParserVersion;
+  if (pub.kind === "slides") return pub.slidesParserVersion;
+  return pub.parserVersion;
 }
 
 /**

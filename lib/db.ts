@@ -21,6 +21,7 @@ import type {
   TimelineEvent,
 } from "./domain/model";
 import { SHEETS_PARSER_VERSION } from "./sheets-decoder/version";
+import { SLIDES_PARSER_VERSION } from "./slides-decoder/version";
 import type {
   ActiveReplayPublication,
   ReplayPublication,
@@ -170,6 +171,8 @@ export interface IdbStoreOptions {
   readonly parserVersion?: number;
   /** Effective Sheets decode-pipeline version (independent of Docs). */
   readonly sheetsParserVersion?: number;
+  /** Effective Slides decode-pipeline version (independent of Docs). */
+  readonly slidesParserVersion?: number;
 }
 
 /**
@@ -181,9 +184,13 @@ export function createIdbStore(options: IdbStoreOptions = {}): RevisionStore {
   const name = options.name ?? DB_NAME;
   const parserVersion = options.parserVersion ?? PARSER_VERSION;
   const sheetsParserVersion = options.sheetsParserVersion ?? SHEETS_PARSER_VERSION;
+  const slidesParserVersion = options.slidesParserVersion ?? SLIDES_PARSER_VERSION;
   // Select the version baseline a publication/pointer is gated by, per its kind.
-  const baselineFor = (kind: DocumentKind): number =>
-    kind === "sheet" ? sheetsParserVersion : parserVersion;
+  const baselineFor = (kind: DocumentKind): number => {
+    if (kind === "sheet") return sheetsParserVersion;
+    if (kind === "slides") return slidesParserVersion;
+    return parserVersion;
+  };
   let dbPromise: Promise<IDBPDatabase<DocRewindDB>> | undefined;
   let persistRequested = false;
 
@@ -259,11 +266,14 @@ export function createIdbStore(options: IdbStoreOptions = {}): RevisionStore {
   ): Promise<void> {
     const d = await db();
     // Re-stamp the version that produced this publication, keyed by its kind, so a
-    // sheet publication carries the Sheets version and a doc the Docs version.
+    // sheet publication carries the Sheets version, a slides the Slides version,
+    // and a doc the Docs version.
     const currentPublication: ReplayPublication =
       publication.kind === "sheet"
         ? { ...publication, sheetsParserVersion }
-        : { ...publication, parserVersion };
+        : publication.kind === "slides"
+          ? { ...publication, slidesParserVersion }
+          : { ...publication, parserVersion };
     await d.put("replayPublications", {
       docId,
       publicationId: currentPublication.publicationId,
