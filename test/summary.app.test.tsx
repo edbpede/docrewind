@@ -7,6 +7,7 @@ import { createMemoryStore } from "@/lib/db.memory";
 import type { Operation } from "@/lib/decoder/types";
 import { PARSER_VERSION } from "@/lib/decoder/version";
 import { asDocId, asRevisionId } from "@/lib/domain/ids";
+import type { DocumentKind } from "@/lib/domain/kind";
 import type { DecodedRevision } from "@/lib/domain/model";
 import { errorTitle, strings } from "@/lib/i18n/strings";
 import { SHEETS_PARSER_VERSION } from "@/lib/sheets-decoder/version";
@@ -20,8 +21,9 @@ import type {
 
 const DOC = asDocId("docSummaryTest");
 
-function setSummaryUrl(doc = DOC): void {
-  window.history.replaceState(null, "", `/summary.html?doc=${doc}`);
+function setSummaryUrl(doc = DOC, kind: DocumentKind = "doc"): void {
+  const suffix = kind === "doc" ? "" : `&kind=${kind}`;
+  window.history.replaceState(null, "", `/summary.html?doc=${doc}${suffix}`);
 }
 
 function installMatchMedia(): void {
@@ -113,6 +115,24 @@ describe("Summary App", () => {
     expect(await screen.findByText(strings.summary.missingTitle)).toBeTruthy();
     const openReplay = screen.getByText(strings.summary.openReplay).closest("a");
     expect(openReplay?.getAttribute("href")).toBe(`replay.html?doc=${DOC}`);
+  });
+
+  it("preserves the URL kind=slides in the back-link when no publication exists yet", async () => {
+    setSummaryUrl(DOC, "slides");
+    const store = createMemoryStore();
+    render(() => <App store={store} />);
+    expect(await screen.findByText(strings.summary.missingTitle)).toBeTruthy();
+    const openReplay = screen.getByText(strings.summary.openReplay).closest("a");
+    expect(openReplay?.getAttribute("href")).toBe(`replay.html?doc=${DOC}&kind=slides`);
+  });
+
+  it("preserves the URL kind=sheet in the back-link when no publication exists yet", async () => {
+    setSummaryUrl(DOC, "sheet");
+    const store = createMemoryStore();
+    render(() => <App store={store} />);
+    expect(await screen.findByText(strings.summary.missingTitle)).toBeTruthy();
+    const openReplay = screen.getByText(strings.summary.openReplay).closest("a");
+    expect(openReplay?.getAttribute("href")).toBe(`replay.html?doc=${DOC}&kind=sheet`);
   });
 
   it("renders both charts and the stat row for a timed publication", async () => {
