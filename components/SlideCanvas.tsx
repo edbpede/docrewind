@@ -17,7 +17,7 @@
 // destructure props.
 
 import type { Component } from "solid-js";
-import { For, Show } from "solid-js";
+import { Index, Show } from "solid-js";
 import { strings } from "@/lib/i18n/strings";
 import type { RenderedShape, RenderedSlide } from "@/lib/slides-reconstruction/render";
 
@@ -87,7 +87,14 @@ const SlideCanvas: Component<SlideCanvasProps> = (props) => (
       color: props.slide.textColor,
     }}
   >
-    <For each={props.slide.shapes}>{(shape) => <ShapeView shape={shape} />}</For>
+    {/* `<Index>`, not `<For>`: the reconstructed shapes are a BRAND-NEW array on
+        every replay frame (a fresh `renderSlide` projection), so reference-keyed
+        `<For>` would tear down and rebuild every shape node each revision — the
+        visible flicker. `<Index>` keys by position and updates each shape's
+        reactive box/text in place, so the canvas morphs smoothly instead of
+        blinking. Shapes are positionally stable (creation order); a mid-deck edit
+        updates shifted rows in place and trims one from the tail. */}
+    <Index each={props.slide.shapes}>{(shape) => <ShapeView shape={shape()} />}</Index>
   </div>
 );
 
