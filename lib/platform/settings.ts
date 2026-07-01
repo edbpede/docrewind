@@ -203,6 +203,73 @@ export const activeStorageLeases = storage.defineItem<readonly ActiveStorageLeas
   { fallback: [] },
 );
 
+/**
+ * Cold-start work marker (background wake cost). MV3 re-executes the whole
+ * background body on EVERY wake, so the wake path must learn from ONE cheap read
+ * whether any startup work exists at all: the one-shot legacy on-disk
+ * `resolvedIdentities` cleanup, and whether the durable-intent queues above may
+ * hold entries. Without it every wake paid one storage write (the legacy remove)
+ * plus two queue reads even to service a trivial `getCheckpoint`.
+ *
+ * The pending hint is deliberately one-sided: enqueues RAISE it strictly AFTER
+ * their queue write lands, and a drain LOWERS it strictly BEFORE reading the
+ * queues (re-raising if entries were left deferred). So if a drain's lower ever
+ * overwrites a concurrent enqueue's raise, that drain's queue read necessarily
+ * happened after the enqueue's queue write and the entry is seen anyway — a
+ * false "nothing pending" is impossible, while a stale "maybe pending" merely
+ * costs the two queue reads every wake used to pay unconditionally.
+ *
+ * The fallback declares work pending, so a user upgrading from a build without
+ * the marker still gets the legacy cleanup and a first drain.
+ */
+export interface BackgroundStartupMarker {
+  readonly legacyIdentityKeyCleared: boolean;
+  readonly durableIntentsMaybePending: boolean;
+}
+
+export const backgroundStartupMarker = storage.defineItem<BackgroundStartupMarker>(
+  "local:backgroundStartupMarker",
+  { fallback: { legacyIdentityKeyCleared: false, durableIntentsMaybePending: true } },
+);
+
+export async function readBackgroundStartupMarker(): Promise<BackgroundStartupMarker> {
+  return backgroundStartupMarker.getValue();
+}
+
+async function patchBackgroundStartupMarker(
+  patch: Partial<BackgroundStartupMarker>,
+): Promise<void> {
+  const current = await backgroundStartupMarker.getValue();
+  const next = { ...current, ...patch };
+  if (
+    next.legacyIdentityKeyCleared !== current.legacyIdentityKeyCleared ||
+    next.durableIntentsMaybePending !== current.durableIntentsMaybePending
+  ) {
+    await backgroundStartupMarker.setValue(next);
+  }
+}
+
+/** Record that the one-shot legacy `resolvedIdentities` on-disk cleanup ran. */
+export async function markLegacyIdentityKeyCleared(): Promise<void> {
+  await patchBackgroundStartupMarker({ legacyIdentityKeyCleared: true });
+}
+
+/**
+ * Raise the durable-intent hint. Called by the queue upserts below AFTER their
+ * queue write (see the ordering contract on {@link backgroundStartupMarker}).
+ */
+export async function markDurableIntentsMaybePending(): Promise<void> {
+  await patchBackgroundStartupMarker({ durableIntentsMaybePending: true });
+}
+
+/**
+ * Lower the durable-intent hint. Callers MUST lower BEFORE reading the queues
+ * and re-raise if entries remain (the drain in entrypoints/background.ts does).
+ */
+export async function markDurableIntentsDrained(): Promise<void> {
+  await patchBackgroundStartupMarker({ durableIntentsMaybePending: false });
+}
+
 let storageLeaseMutationQueue: Promise<void> = Promise.resolve();
 let pendingStorageMaintenanceMutationQueue: Promise<void> = Promise.resolve();
 let pendingDestructiveStorageClearMutationQueue: Promise<void> = Promise.resolve();
@@ -391,6 +458,9 @@ export async function upsertPendingStorageMaintenance(
       ...current.filter((item) => pendingMaintenanceScopeKey(item) !== scope),
       request,
     ]);
+    // Raise strictly AFTER the queue write — the ordering that makes the
+    // startup-marker hint safe (see backgroundStartupMarker).
+    await markDurableIntentsMaybePending();
   });
 }
 
@@ -491,6 +561,9 @@ export async function upsertPendingDestructiveStorageClear(
       ...current.filter((item) => item.id !== request.id),
       request,
     ]);
+    // Raise strictly AFTER the queue write — the ordering that makes the
+    // startup-marker hint safe (see backgroundStartupMarker).
+    await markDurableIntentsMaybePending();
   });
 }
 

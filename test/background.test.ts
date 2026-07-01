@@ -22,6 +22,7 @@ import {
   createPendingStorageMaintenanceRequest,
   getPendingDestructiveStorageClears,
   getPendingStorageMaintenance,
+  readBackgroundStartupMarker,
   upsertPendingDestructiveStorageClear,
   upsertPendingStorageMaintenance,
 } from "@/lib/platform/settings";
@@ -518,6 +519,28 @@ describe("background retrieval wiring", () => {
       expect(await store.getRawChunks(docId)).toEqual([]);
       expect(await getPendingDestructiveStorageClears()).toEqual([]);
     });
+  });
+
+  it("runs the legacy resolvedIdentities cleanup on first wake only", async () => {
+    // Simulate an upgrading user: the orphaned on-disk key exists, no marker yet.
+    await fakeBrowser.storage.local.set({ resolvedIdentities: { tok: { name: "Ada" } } });
+
+    runBackground();
+
+    await vi.waitFor(async () => {
+      const stored = await fakeBrowser.storage.local.get("resolvedIdentities");
+      expect(stored.resolvedIdentities).toBeUndefined();
+      expect((await readBackgroundStartupMarker()).legacyIdentityKeyCleared).toBe(true);
+    });
+
+    // A later wake must NOT re-issue the remove: re-seed the key and re-run the
+    // background body — the marker short-circuits the migration, so the key stays.
+    removeAllListeners();
+    await fakeBrowser.storage.local.set({ resolvedIdentities: { tok: { name: "Ada" } } });
+    runBackground();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const stored = await fakeBrowser.storage.local.get("resolvedIdentities");
+    expect(stored.resolvedIdentities).toEqual({ tok: { name: "Ada" } });
   });
 
   it("does not drain persisted destructive clear on startup while a durable lease is active", async () => {

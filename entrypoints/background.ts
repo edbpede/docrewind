@@ -61,6 +61,10 @@ import {
   getPendingDestructiveStorageClears,
   getPendingStorageMaintenance,
   hasActiveStorageLease,
+  markDurableIntentsDrained,
+  markDurableIntentsMaybePending,
+  markLegacyIdentityKeyCleared,
+  readBackgroundStartupMarker,
   realIdentities,
   refreshStorageLease,
   removePendingDestructiveStorageClear,
@@ -97,12 +101,29 @@ export default defineBackground(() => {
     .setAccessLevel?.({ accessLevel: "TRUSTED_AND_UNTRUSTED_CONTEXTS" })
     .catch(() => {});
 
-  // One-time cleanup: an earlier release cached resolved identities under
-  // `local:resolvedIdentities` (on disk). The cache is now session-scoped, so the
-  // legacy on-disk key is orphaned — drop it so resolved names don't outlive the
-  // session for users upgrading from that build. Best-effort and idempotent.
-  // WXT strips the area prefix, so the on-disk key is the bare `resolvedIdentities`.
-  void browser.storage.local.remove("resolvedIdentities").catch(() => {});
+  // Cold-start work, gated behind ONE cheap marker read (MV3 re-runs this whole
+  // body on every wake, so the steady-state wake must not pay a storage write +
+  // two queue reads to service a trivial message — see backgroundStartupMarker):
+  //
+  //  • One-time cleanup: an earlier release cached resolved identities under
+  //    `local:resolvedIdentities` (on disk). The cache is now session-scoped, so
+  //    the legacy on-disk key is orphaned — drop it once so resolved names don't
+  //    outlive the session for users upgrading from that build. Best-effort and
+  //    idempotent (a lost marker write merely re-runs the harmless remove). WXT
+  //    strips the area prefix, so the on-disk key is the bare `resolvedIdentities`.
+  //  • Durable-intent drain: only when the hint says entries may exist. The hint
+  //    can never falsely say "empty" (enqueues raise it after their queue write),
+  //    so a skipped drain is always safe.
+  void (async () => {
+    const marker = await readBackgroundStartupMarker();
+    if (!marker.legacyIdentityKeyCleared) {
+      await browser.storage.local.remove("resolvedIdentities").catch(() => {});
+      await markLegacyIdentityKeyCleared();
+    }
+    if (marker.durableIntentsMaybePending) {
+      await drainPersistedRequests();
+    }
+  })().catch(() => {});
 
   // Per-document cancellation flags for in-flight retrievals.
   const cancelledDocs = new Set<string>();
@@ -231,10 +252,20 @@ export default defineBackground(() => {
   }
 
   async function drainPersistedRequests(): Promise<void> {
+    // Lower the pending hint BEFORE reading the queues: a concurrent enqueue
+    // raises it again after its queue write, so either this pass already reads
+    // the new entry or the re-raised hint schedules a later drain. Entries left
+    // behind (deferred behind a lease) re-raise the hint below so the next
+    // lease-release drain still sees work.
+    await markDurableIntentsDrained();
+    let leftovers = false;
+
     for (const request of await getPendingDestructiveStorageClears()) {
       const ack = await requestDestructiveClear(request);
       if (ack.status === "completed") {
         await removePendingDestructiveStorageClear(request);
+      } else {
+        leftovers = true;
       }
     }
 
@@ -242,11 +273,22 @@ export default defineBackground(() => {
       const ack = await requestStorageMaintenance(request);
       if (ack.status === "completed") {
         await removePendingStorageMaintenance(request.id, request.queuedAt);
+      } else {
+        leftovers = true;
       }
+    }
+
+    if (leftovers) {
+      await markDurableIntentsMaybePending();
     }
   }
 
-  void drainPersistedRequests();
+  /** Drain only when the one-read hint says entries may exist (the common case is "no"). */
+  async function drainPersistedRequestsIfHinted(): Promise<void> {
+    if ((await readBackgroundStartupMarker()).durableIntentsMaybePending) {
+      await drainPersistedRequests();
+    }
+  }
 
   // ── LIVE §24 transport adapters ──────────────────────────────────────────
   const DOCS_ORIGIN = "https://docs.google.com";
@@ -560,7 +602,7 @@ export default defineBackground(() => {
   onMessage("endDecodeLease", async ({ data }) => {
     await endStorageLease(data.docId);
     const ack = await maintenance.endDecodeLease(data.docId);
-    await drainPersistedRequests();
+    await drainPersistedRequestsIfHinted();
     return ack;
   });
 
@@ -655,7 +697,7 @@ export default defineBackground(() => {
       clearInterval(leaseRefresh);
       await endStorageLease(data.docId);
       await maintenance.endDecodeLease(data.docId);
-      await drainPersistedRequests();
+      await drainPersistedRequestsIfHinted();
     }
   });
 

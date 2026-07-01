@@ -9,6 +9,7 @@ import { fakeBrowser } from "wxt/testing";
 import { asDocId } from "@/lib/core/domain/ids";
 import {
   activeStorageLeases,
+  backgroundStartupMarker,
   beginStorageLease,
   createPendingDestructiveStorageClear,
   createPendingStorageMaintenanceRequest,
@@ -20,8 +21,11 @@ import {
   isCurrentPendingDestructiveStorageClear,
   isCurrentPendingStorageMaintenance,
   keepRawData,
+  markDurableIntentsDrained,
+  markLegacyIdentityKeyCleared,
   pendingDestructiveStorageClears,
   pendingStorageMaintenance,
+  readBackgroundStartupMarker,
   realIdentities,
   refreshStorageLease,
   removePendingDestructiveStorageClear,
@@ -231,6 +235,56 @@ describe("settings", () => {
 
       await removePendingDestructiveStorageClear(second);
       expect(await getPendingDestructiveStorageClears()).toEqual([]);
+    });
+
+    it("startup marker defaults to work-pending so an upgrading user gets cleanup + a first drain", async () => {
+      expect(await readBackgroundStartupMarker()).toEqual({
+        legacyIdentityKeyCleared: false,
+        durableIntentsMaybePending: true,
+      });
+    });
+
+    it("marks the legacy identity cleanup done exactly once, surviving a drain's lower", async () => {
+      await markLegacyIdentityKeyCleared();
+      await markDurableIntentsDrained();
+      expect(await readBackgroundStartupMarker()).toEqual({
+        legacyIdentityKeyCleared: true,
+        durableIntentsMaybePending: false,
+      });
+    });
+
+    it("raises the durable-intent hint AFTER a maintenance upsert lands (never a false 'empty')", async () => {
+      await markDurableIntentsDrained();
+      expect((await readBackgroundStartupMarker()).durableIntentsMaybePending).toBe(false);
+
+      await upsertPendingStorageMaintenance(
+        createPendingStorageMaintenanceRequest({
+          docId: null,
+          keepRawData: true,
+          budget: DEFAULT_STORAGE_BUDGET,
+          queuedAt: 1,
+        }),
+      );
+
+      expect((await readBackgroundStartupMarker()).durableIntentsMaybePending).toBe(true);
+      expect(await getPendingStorageMaintenance()).toHaveLength(1);
+    });
+
+    it("raises the durable-intent hint AFTER a destructive-clear upsert lands", async () => {
+      await markDurableIntentsDrained();
+
+      await upsertPendingDestructiveStorageClear(
+        createPendingDestructiveStorageClear({ kind: "all", queuedAt: 1 }),
+      );
+
+      expect((await readBackgroundStartupMarker()).durableIntentsMaybePending).toBe(true);
+    });
+
+    it("skips the marker write when nothing changed (idempotent lower)", async () => {
+      await markDurableIntentsDrained();
+      const before = await backgroundStartupMarker.getValue();
+      await markDurableIntentsDrained();
+      expect(await backgroundStartupMarker.getValue()).toEqual(before);
     });
 
     it("does not let an old completion remove a newer same-id destructive clear", async () => {
