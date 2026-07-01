@@ -10,7 +10,7 @@
 import { fireEvent, render } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { describe, expect, it, vi } from "vitest";
-import SlideStrip from "@/components/SlideStrip";
+import SlideStrip, { SLIDE_PANEL_ID, slideTabId } from "@/components/SlideStrip";
 import type { RenderedShape, RenderedSlide } from "@/lib/slides-reconstruction/render";
 
 function textShape(text: string): RenderedShape {
@@ -53,6 +53,17 @@ describe("SlideStrip", () => {
     expect(tabs[1]?.tabIndex).toBe(0);
   });
 
+  it("links each tab to the shared slide panel and carries a stable id", () => {
+    const { container } = render(() => (
+      <SlideStrip slides={deck("a")} activeIndex={0} onSelect={() => {}} />
+    ));
+    const tabs = container.querySelectorAll<HTMLButtonElement>('[role="tab"]');
+    tabs.forEach((tab, index) => {
+      expect(tab.getAttribute("aria-controls")).toBe(SLIDE_PANEL_ID);
+      expect(tab.getAttribute("id")).toBe(slideTabId(index));
+    });
+  });
+
   it("fires onSelect with the clicked slide index", () => {
     const onSelect = vi.fn();
     const { container } = render(() => (
@@ -92,5 +103,37 @@ describe("SlideStrip", () => {
       <SlideStrip slides={[deck("a")[0] as RenderedSlide]} activeIndex={0} onSelect={() => {}} />
     ));
     expect(container.querySelector('[role="tablist"]')).toBeNull();
+  });
+
+  it("selects the next slide on ArrowRight (focus follows selection)", () => {
+    const onSelect = vi.fn();
+    const { container, getByRole } = render(() => (
+      <SlideStrip slides={deck("a")} activeIndex={0} onSelect={onSelect} />
+    ));
+    fireEvent.keyDown(getByRole("tablist"), { key: "ArrowRight" });
+    expect(onSelect).toHaveBeenCalledWith(1);
+    const tabs = container.querySelectorAll<HTMLButtonElement>('[role="tab"]');
+    expect(document.activeElement).toBe(tabs[1]);
+  });
+
+  it("wraps to the last slide on ArrowLeft from the first", () => {
+    const onSelect = vi.fn();
+    const { getByRole } = render(() => (
+      <SlideStrip slides={deck("a")} activeIndex={0} onSelect={onSelect} />
+    ));
+    fireEvent.keyDown(getByRole("tablist"), { key: "ArrowLeft" });
+    expect(onSelect).toHaveBeenCalledWith(1);
+  });
+
+  it("jumps to the first slide on Home and the last on End", () => {
+    const onSelect = vi.fn();
+    const { getByRole } = render(() => (
+      <SlideStrip slides={deck("a")} activeIndex={1} onSelect={onSelect} />
+    ));
+    const tablist = getByRole("tablist");
+    fireEvent.keyDown(tablist, { key: "Home" });
+    expect(onSelect).toHaveBeenLastCalledWith(0);
+    fireEvent.keyDown(tablist, { key: "End" });
+    expect(onSelect).toHaveBeenLastCalledWith(1);
   });
 });
