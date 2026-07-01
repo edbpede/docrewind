@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { cleanup, fireEvent, render } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it } from "vitest";
-import PrivacyBanner from "@/components/PrivacyBanner";
-import { strings } from "@/lib/i18n/strings";
+import PrivacyBanner from "@/components/common/PrivacyBanner";
+import { strings } from "@/lib/core/i18n/strings";
 
 afterEach(cleanup);
 

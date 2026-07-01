@@ -12,22 +12,21 @@
 // page-derived read token, no endpoint restriction).
 // The two pure gated stubs have been replaced HERE with the live `ChunkFetcher`
 // (`fetch(url, { credentials: "include" })` + `buildRevisionsLoadUrl`) and the
-// confirmed revision-count discovery. The orchestrator and all of lib/retrieval
+// confirmed revision-count discovery. The orchestrator and all of lib/core/retrieval
 // are UNCHANGED — the swap is localized to this one file, exactly as the seam
-// intended (the purity guard forbids `fetch(` inside lib/retrieval by design).
+// intended (the purity guard forbids `fetch(` inside lib/core/retrieval by design).
 //
 // Confirmed transport facts (also encoded as typed constants in
-// lib/protocol/types.ts / discovery.ts):
+// lib/core/protocol/types.ts / discovery.ts):
 //   • Framing: `)]}'`-guarded JSON; top-level object `{ chunkedSnapshot, changelog }`.
 //   • Read needs ONLY the first-party session cookie — no custom header, no token.
 //   • Out-of-range `end` ⇒ HTTP 400 (was 500 in 2014); in-range ⇒ 200.
 //   • The current revision count is published in the editor bootstrap as `"revision":N`.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { createIdbStore } from "@/lib/db";
-import { asRevisionId } from "@/lib/domain/ids";
-import type { DocumentKind } from "@/lib/domain/kind";
-import type { DocId, RawPayload, RevisionId } from "@/lib/domain/model";
+import { asRevisionId } from "@/lib/core/domain/ids";
+import type { DocumentKind } from "@/lib/core/domain/kind";
+import type { DocId, RawPayload, RevisionId } from "@/lib/core/domain/model";
 import {
   attachCollaboratorEmails,
   mergeIdentities,
@@ -36,19 +35,26 @@ import {
   parseTilesParams,
   parseUserMap,
   type TilesParams,
-} from "@/lib/identity/resolve";
-import { onMessage } from "@/lib/messaging";
-import type { RevisionRangeDiscovery } from "@/lib/protocol/discovery";
+} from "@/lib/core/identity/resolve";
+import type { RevisionRangeDiscovery } from "@/lib/core/protocol/discovery";
 import {
   buildDocBootstrapUrl,
   buildRevisionsLoadUrl,
   buildRevisionsTilesUrl,
   IDENTITY_BOOTSTRAP_SURFACES,
-} from "@/lib/protocol/endpoints";
-import { parseFramed } from "@/lib/protocol/framing";
-import { fail, ok, type Result, type RetrievalError, retrievalError } from "@/lib/retrieval/errors";
-import { type CancellationToken, runRetrieval } from "@/lib/retrieval/orchestrator";
-import type { ChunkFetcher, ChunkRequest } from "@/lib/retrieval/transport";
+} from "@/lib/core/protocol/endpoints";
+import { parseFramed } from "@/lib/core/protocol/framing";
+import {
+  fail,
+  ok,
+  type Result,
+  type RetrievalError,
+  retrievalError,
+} from "@/lib/core/retrieval/errors";
+import { type CancellationToken, runRetrieval } from "@/lib/core/retrieval/orchestrator";
+import type { ChunkFetcher, ChunkRequest } from "@/lib/core/retrieval/transport";
+import { createIdbStore } from "@/lib/platform/db";
+import { onMessage } from "@/lib/platform/messaging";
 import {
   beginStorageLease,
   endStorageLease,
@@ -64,12 +70,12 @@ import {
   runIfCurrentPendingDestructiveStorageClear,
   runIfCurrentPendingStorageMaintenance,
   STORAGE_LEASE_REFRESH_MS,
-} from "@/lib/settings";
+} from "@/lib/platform/settings";
 import {
   createStorageMaintenanceCoordinator,
   refreshCacheMeta,
   type StorageMaintenanceRequest,
-} from "@/lib/storage-maintenance";
+} from "@/lib/platform/storage-maintenance";
 
 export default defineBackground(() => {
   const store = createIdbStore();

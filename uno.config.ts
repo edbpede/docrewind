@@ -19,7 +19,7 @@
 // gives the page its quiet, legible character. Every value below is WCAG-AA verified.
 //
 // Dark mode is pinned EXPLICITLY to the class strategy (`.dark` on <html>), driven
-// by the Seam-E applier (lib/theme.ts + the page mounts). Motion suppression is
+// by the Seam-E applier (lib/core/theme.ts + the page mounts). Motion suppression is
 // declarative: a `prefers-reduced-motion` preflight neutralizes
 // timeline/scrubber/progress transitions at the CSS layer, and the App separately
 // caps the JS auto-advance cadence.

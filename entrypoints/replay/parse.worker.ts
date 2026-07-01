@@ -3,7 +3,7 @@
 // Replay-page parse Worker shell (plan §1.7 / PRD §10.9). A THIN transport
 // wrapper: it owns its OWN idb realm (a Worker is a separate module realm — no
 // shared connection with the background), READS rawChunks, runs the PURE
-// pipeline (lib/worker/pipeline.ts), and posts run-tagged derived data back to
+// pipeline (lib/core/worker/pipeline.ts), and posts run-tagged derived data back to
 // the replay page. The page owns derived writes after verifying the run tag, so
 // stale worker results from a retried run cannot publish derived data.
 //
@@ -12,18 +12,18 @@
 // the Slides pipeline (presentation model) and posts a `docKind`-tagged `done`
 // payload the page publishes accordingly.
 
-import { createIdbStore } from "@/lib/db";
-import { asDocId } from "@/lib/domain/ids";
-import { type DocumentKind, isDocumentKind } from "@/lib/domain/kind";
-import type { DecodedRevision, TimelineEvent } from "@/lib/domain/model";
-import type { SheetsDecodedRevision } from "@/lib/sheets-decoder/types";
-import type { SlidesDecodedRevision } from "@/lib/slides-decoder/types";
-import type { StoredGridSnapshot, StoredSlidesSnapshot, StoredSnapshot } from "@/lib/store";
+import { asDocId } from "@/lib/core/domain/ids";
+import { type DocumentKind, isDocumentKind } from "@/lib/core/domain/kind";
+import type { DecodedRevision, TimelineEvent } from "@/lib/core/domain/model";
+import type { SheetsDecodedRevision } from "@/lib/core/sheets/decoder/types";
+import type { SlidesDecodedRevision } from "@/lib/core/slides/decoder/types";
+import type { StoredGridSnapshot, StoredSlidesSnapshot, StoredSnapshot } from "@/lib/core/store";
 import {
   runPipelineOverBodies,
   runSheetsPipelineOverBodies,
   runSlidesPipelineOverBodies,
-} from "@/lib/worker/pipeline";
+} from "@/lib/core/worker/pipeline";
+import { createIdbStore } from "@/lib/platform/db";
 
 /** Request: decode + reconstruct the document with this id from its raw chunks. */
 interface ParseRequest {

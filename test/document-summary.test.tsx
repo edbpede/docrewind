@@ -7,13 +7,13 @@
 
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it } from "vitest";
-import DocumentSummary from "@/components/DocumentSummary";
-import type { Operation } from "@/lib/decoder/types";
-import { asRevisionId } from "@/lib/domain/ids";
-import type { DecodedRevision } from "@/lib/domain/model";
-import { formatHourLabel, strings } from "@/lib/i18n/strings";
-import { buildHourTicks } from "@/lib/summary/axis";
-import { deriveDocumentSummary } from "@/lib/summary/derive";
+import DocumentSummary from "@/components/summary/DocumentSummary";
+import type { Operation } from "@/lib/core/docs/decoder/types";
+import { asRevisionId } from "@/lib/core/domain/ids";
+import type { DecodedRevision } from "@/lib/core/domain/model";
+import { formatHourLabel, strings } from "@/lib/core/i18n/strings";
+import { buildHourTicks } from "@/lib/core/summary/axis";
+import { deriveDocumentSummary } from "@/lib/core/summary/derive";
 
 const HOUR = 3_600_000;
 const DAY = 86_400_000;

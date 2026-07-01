@@ -12,7 +12,7 @@
 // background via the existing typed `activateReplay` message. The background owns
 // the fetch; this script owns no network and no history load (PRD §9.2, §10.9).
 //
-// Two surfaces, two behaviours (see lib/docs-url/classroom.ts for the URL grammar):
+// Two surfaces, two behaviours (see lib/core/docs-url/classroom.ts for the URL grammar):
 //   • Grading view — the embedded doc resolves a `DocId`, so the button replays
 //     directly. It is shown ONLY when a `DocId` can be read, mirroring Classroom's
 //     own "educator can see this" gate (Google exposes the doc only to the authorized
@@ -27,13 +27,13 @@
 
 import { render } from "solid-js/web";
 import "virtual:uno.css";
-import ReplayAffordance from "@/components/ReplayAffordance";
-import { decideReconcile } from "@/lib/classroom/reconcile";
-import { parseDocsUrl } from "@/lib/docs-url";
-import { buildGradingPath, parseClassroomLocation } from "@/lib/docs-url/classroom";
-import type { DocId } from "@/lib/domain/ids";
-import type { DocumentKind } from "@/lib/domain/kind";
-import { sendMessage } from "@/lib/messaging";
+import ReplayAffordance from "@/components/replay/ReplayAffordance";
+import { decideReconcile } from "@/lib/core/classroom/reconcile";
+import { parseDocsUrl } from "@/lib/core/docs-url";
+import { buildGradingPath, parseClassroomLocation } from "@/lib/core/docs-url/classroom";
+import type { DocId } from "@/lib/core/domain/ids";
+import type { DocumentKind } from "@/lib/core/domain/kind";
+import { sendMessage } from "@/lib/platform/messaging";
 
 interface GradingDoc {
   readonly docId: DocId;

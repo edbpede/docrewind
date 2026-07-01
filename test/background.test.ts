@@ -11,11 +11,11 @@ import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fakeBrowser } from "wxt/testing";
 import background from "@/entrypoints/background";
-import { createIdbStore } from "@/lib/db";
-import { PARSER_VERSION } from "@/lib/decoder/version";
-import { asDocId, asRevisionId } from "@/lib/domain/ids";
-import type { RawPayload } from "@/lib/domain/model";
-import { removeAllListeners, sendMessage } from "@/lib/messaging";
+import { PARSER_VERSION } from "@/lib/core/docs/decoder/version";
+import { asDocId, asRevisionId } from "@/lib/core/domain/ids";
+import type { RawPayload } from "@/lib/core/domain/model";
+import { createIdbStore } from "@/lib/platform/db";
+import { removeAllListeners, sendMessage } from "@/lib/platform/messaging";
 import {
   beginStorageLease,
   createPendingDestructiveStorageClear,
@@ -24,7 +24,7 @@ import {
   getPendingStorageMaintenance,
   upsertPendingDestructiveStorageClear,
   upsertPendingStorageMaintenance,
-} from "@/lib/settings";
+} from "@/lib/platform/settings";
 
 function runBackground(): void {
   // defineBackground(fn) => { main: fn }.

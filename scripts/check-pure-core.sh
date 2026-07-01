@@ -20,8 +20,8 @@
 #     `entrypoints/background.ts`; the worker shell lives in `entrypoints/`.
 set -euo pipefail
 
-BASE_DIRS=(lib/decoder lib/reconstruction lib/timeline lib/domain lib/protocol lib/fixtures lib/summary lib/replay-core lib/sheets-decoder lib/sheets-reconstruction lib/slides-decoder lib/slides-reconstruction)
-EXTRA_DIRS=(lib/retrieval lib/worker lib/docs-url)
+BASE_DIRS=(lib/core/docs/decoder lib/core/docs/reconstruction lib/core/timeline lib/core/domain lib/core/protocol lib/core/fixtures lib/core/summary lib/core/replay-core lib/core/sheets/decoder lib/core/sheets/reconstruction lib/core/slides/decoder lib/core/slides/reconstruction)
+EXTRA_DIRS=(lib/core/retrieval lib/core/worker lib/core/docs-url)
 BASE_PATTERN='#imports|browser\.|wxt'
 EXTRA_PATTERN='\bfetch\(|new Worker|globalThis'
 
@@ -65,7 +65,7 @@ if [ ${#extra_scan[@]} -gt 0 ]; then
   if matches=$(grep -rnE --include='*.ts' "$EXTRA_PATTERN" "${extra_scan[@]}"); then
     echo "ERROR: live fetch/Worker/globalThis found in the pure orchestration dirs:" >&2
     echo "$matches" >&2
-    echo "lib/retrieval, lib/worker, and lib/docs-url must not call fetch(), construct a Worker, or use globalThis. The live adapter belongs in entrypoints/background.ts." >&2
+    echo "lib/core/retrieval, lib/core/worker, and lib/core/docs-url must not call fetch(), construct a Worker, or use globalThis. The live adapter belongs in entrypoints/background.ts." >&2
     fail=1
   fi
 fi

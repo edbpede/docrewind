@@ -16,19 +16,19 @@ exact = true
 # The threshold is enforced only when `--coverage` is passed, so `test:logic` (no flag)
 # is unaffected; `test:coverage` enforces the floor and exits non-zero on a real miss.
 # Sync requirement: the GATED tier is defined POSITIVELY by the path args of the
-# `test:coverage` script in package.json (currently `./lib/decoder ./lib/reconstruction
-# ./lib/replay-core ./lib/sheets-decoder ./lib/sheets-reconstruction ./lib/slides-decoder
-# ./lib/slides-reconstruction`)
+# `test:coverage` script in package.json (currently `./lib/core/docs/decoder ./lib/core/docs/reconstruction
+# ./lib/core/replay-core ./lib/core/sheets/decoder ./lib/core/sheets/reconstruction ./lib/core/slides/decoder
+# ./lib/core/slides/reconstruction`)
 # and NEGATIVELY by the ignore list below. Bun has no inclusion-side key, so when changing
 # the `test:coverage` paths, also decide here whether the affected tier is gated (leave it
 # out) or excluded (add it to coveragePathIgnorePatterns). Keep the two lists in agreement.
 # Enforced: scripts/check-coverage-gate-disjoint.sh (CI) fails if a gated dir is suppressed
 # WHOLESALE here (a `**/lib/<dir>/**` glob — a vacuous gate). Single-file exemptions (the
-# escape hatch below, e.g. `**/lib/decoder/thin-adapter.ts`) are permitted and do NOT trip it.
+# escape hatch below, e.g. `**/lib/core/docs/decoder/thin-adapter.ts`) are permitted and do NOT trip it.
 # The lists are NOT complements, so that disjointness — not complement-equality — is the
 # checkable invariant.
-# Failure modes & escape hatch: a NEW file added inside the gated tier (./lib/decoder or
-# ./lib/reconstruction) is subject to the per-file floor from its first commit — there is no
+# Failure modes & escape hatch: a NEW file added inside the gated tier (./lib/core/docs/decoder or
+# ./lib/core/docs/reconstruction) is subject to the per-file floor from its first commit — there is no
 # aggregate grace, so a partially-covered helper fails the build even when overall coverage is
 # well above 85%. Bun 1.3.14 has NO per-file threshold-override key (no coverageThresholdOverrides
 # or per-path map). To legitimately exempt a file that cannot meet the floor (thin adapter,
@@ -37,16 +37,16 @@ exact = true
 [test]
 coverageSkipTestFiles = true
 coveragePathIgnorePatterns = [
-  "**/lib/domain/**",
-  "**/lib/i18n/**",
-  "**/lib/protocol/**",
-  "**/lib/timeline/**",
-  # lib/summary is the shared summary core (the sibling of lib/timeline): both are
+  "**/lib/core/domain/**",
+  "**/lib/core/i18n/**",
+  "**/lib/core/protocol/**",
+  "**/lib/core/timeline/**",
+  # lib/core/summary is the shared summary core (the sibling of lib/core/timeline): both are
   # transitively imported by the gated reconstruction tiers via */derive.ts but are
   # NOT in the gated paths — they carry their own per-file floor under `test:logic`
-  # (`./lib/summary`, `./lib/timeline`). Ignored here for the same reason as timeline.
-  "**/lib/summary/**",
-  "**/lib/worker/**",
-  "**/lib/fixtures/**",
+  # (`./lib/core/summary`, `./lib/core/timeline`). Ignored here for the same reason as timeline.
+  "**/lib/core/summary/**",
+  "**/lib/core/worker/**",
+  "**/lib/core/fixtures/**",
 ]
 coverageThreshold = { lines = 0.85, functions = 0.85 }

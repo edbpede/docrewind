@@ -5,9 +5,9 @@
 // grid (virtualization / render cap, R7); SheetTabs switches tabs.
 import { fireEvent, render } from "@solidjs/testing-library";
 import { describe, expect, it, vi } from "vitest";
-import GridViewport from "@/components/GridViewport";
-import SheetTabs, { SHEET_GRID_PANEL_ID, sheetTabId } from "@/components/SheetTabs";
-import { asGid, type Gid } from "@/lib/sheets-decoder/types";
+import GridViewport from "@/components/sheets/GridViewport";
+import SheetTabs, { SHEET_GRID_PANEL_ID, sheetTabId } from "@/components/sheets/SheetTabs";
+import { asGid, type Gid } from "@/lib/core/sheets/decoder/types";
 import {
   type Cell,
   cellKey,
@@ -16,7 +16,7 @@ import {
   createSheet,
   type GridModel,
   type SheetGrid,
-} from "@/lib/sheets-reconstruction/model";
+} from "@/lib/core/sheets/reconstruction/model";
 
 function withCell(sheet: SheetGrid, row: number, col: number, patch: Partial<Cell>): void {
   sheet.cells.set(cellKey(row, col), { ...createCell(), ...patch });

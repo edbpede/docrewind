@@ -2,7 +2,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { type BrowserContext, test as base, chromium, type Route } from "@playwright/test";
-import { CAPTURED_SIMPLE_DOC } from "../lib/fixtures/captured";
+import { CAPTURED_SIMPLE_DOC } from "../lib/core/fixtures/captured";
 
 const fixturesDir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -41,7 +41,7 @@ export const expect = test.expect;
 // service-worker traffic from sanitized fixtures rather than seed idb. We reuse
 // the real §24 capture (`CAPTURED_SIMPLE_DOC`): four revisions (ids 1–4) whose
 // reconstruction equals the known final text — decode is already proven by
-// lib/decoder/captured-live.test.ts.
+// lib/core/docs/decoder/captured-live.test.ts.
 
 /** A valid `[A-Za-z0-9_-]+` doc id (asDocId) used by the smoke fixtures. */
 export const E2E_SMOKE_DOC = "docE2ESmoke";
@@ -63,7 +63,7 @@ const DISCOVERY_HTML = `<!doctype html><html><head><title>doc</title></head><bod
 // Revisions-load body. The live fetcher does `response.text()` and the pipeline
 // treats a string body as `)]}'`-framed wire text (stripGuard passes unframed
 // text through). MUST be the re-serialized envelope STRING — fulfilling with the
-// parsed `{ changelog }` object would bypass the real decode (the lib/fixtures
+// parsed `{ changelog }` object would bypass the real decode (the lib/core/fixtures
 // entry is post-deframe). content-type is application/json.
 const CHUNK_BODY = JSON.stringify(CAPTURED_SIMPLE_DOC.envelope);
 

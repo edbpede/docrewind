@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fakeBrowser } from "wxt/testing";
-import OptionsApp from "@/components/OptionsApp";
+import OptionsApp from "@/components/options/OptionsApp";
 
 const { sendMessageMock, storeMock } = vi.hoisted(() => ({
   sendMessageMock: vi.fn(async () => ({ status: "completed", reclaimedBytes: 0 })),
@@ -38,11 +38,11 @@ const { sendMessageMock, storeMock } = vi.hoisted(() => ({
   },
 }));
 
-vi.mock("@/lib/db", () => ({
+vi.mock("@/lib/platform/db", () => ({
   createIdbStore: () => storeMock,
 }));
 
-vi.mock("@/lib/messaging", () => ({
+vi.mock("@/lib/platform/messaging", () => ({
   sendMessage: sendMessageMock,
 }));
 
