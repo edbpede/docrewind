@@ -18,10 +18,12 @@ import {
   createResource,
   createSignal,
   ErrorBoundary,
+  Match,
   onCleanup,
   onMount,
   Show,
   Suspense,
+  Switch,
 } from "solid-js";
 import BrandMark from "@/components/BrandMark";
 import DocumentViewport from "@/components/DocumentViewport";
@@ -31,6 +33,8 @@ import PlaybackControls from "@/components/PlaybackControls";
 import PrivacyBanner from "@/components/PrivacyBanner";
 import ProgressView, { type ProgressPhase } from "@/components/ProgressView";
 import SheetTabs, { SHEET_GRID_PANEL_ID, sheetTabId } from "@/components/SheetTabs";
+import SlideStrip, { SLIDE_PANEL_ID, slideTabId } from "@/components/SlideStrip";
+import SlideViewport from "@/components/SlideViewport";
 import SummaryInsights from "@/components/SummaryInsights";
 import ThemeControl from "@/components/ThemeControl";
 import Timeline, { type TimelineMarker } from "@/components/Timeline";
@@ -58,13 +62,17 @@ import {
   loadReplayData,
   publishDerivedData,
   publishSheetsDerivedData,
+  publishSlidesDerivedData,
   type ReplayData,
   type ReplayDerivedData,
   type ReplayLoadResult,
   runPipelineSameThread,
   runSheetsPipelineSameThread,
+  runSlidesPipelineSameThread,
   type SheetReplayData,
   type SheetReplayDerivedData,
+  type SlideReplayData,
+  type SlideReplayDerivedData,
 } from "@/lib/replay/load";
 import type { RevisionMeta } from "@/lib/replay-core/meta";
 import { type RetrievalErrorCategory, retrievalError } from "@/lib/retrieval/errors";
@@ -81,6 +89,11 @@ import {
 import type { Gid } from "@/lib/sheets-decoder/types";
 import { hasFidelityNotice } from "@/lib/sheets-reconstruction/render";
 import { gridAtRevisionIndex } from "@/lib/sheets-reconstruction/snapshot";
+import {
+  renderSlides,
+  hasFidelityNotice as slidesHasFidelityNotice,
+} from "@/lib/slides-reconstruction/render";
+import { presentationAtRevisionIndex } from "@/lib/slides-reconstruction/snapshot";
 import type { RevisionStore } from "@/lib/store";
 
 export interface ReplayAppProps {
@@ -105,6 +118,13 @@ type WorkerDecodeMessage =
       readonly runId: number;
       readonly revisionCount: number;
     } & SheetReplayDerivedData)
+  | ({
+      readonly kind: "done";
+      readonly docKind: "slides";
+      readonly docId: string;
+      readonly runId: number;
+      readonly revisionCount: number;
+    } & SlideReplayDerivedData)
   | {
       readonly kind: "unsupported" | "empty" | "failed";
       readonly docId: string;
@@ -292,15 +312,17 @@ const MessageCard: Component<{
 
 type NonReplayState = "empty" | "unsupported" | "failed" | "missing-publication";
 
-/** Loaded replay data, discriminated by document kind (doc viewport vs grid). */
+/** Loaded replay data, discriminated by document kind (doc viewport / grid / deck). */
 type LoadedReplay =
   | { readonly kind: "doc"; readonly data: ReplayData }
-  | { readonly kind: "sheet"; readonly data: SheetReplayData };
+  | { readonly kind: "sheet"; readonly data: SheetReplayData }
+  | { readonly kind: "slides"; readonly data: SlideReplayData };
 
 /** Map a store load result into the kind-discriminated loaded wrapper, or null. */
 function toLoaded(result: ReplayLoadResult): LoadedReplay | null {
   if (result.kind === "ok") return { kind: "doc", data: result.data };
   if (result.kind === "ok-sheet") return { kind: "sheet", data: result.data };
+  if (result.kind === "ok-slides") return { kind: "slides", data: result.data };
   return null;
 }
 
@@ -497,15 +519,10 @@ const ReplaySurface: Component<{
     if (props.useWorker && typeof Worker !== "undefined") {
       return decodeInWorker(docId, runId, publicationId);
     }
-    return props.kind === "sheet"
-      ? runSheetsPipelineSameThread(props.store, docId, {
-          publicationId,
-          shouldPublish: () => isActiveRun(runId),
-        })
-      : runPipelineSameThread(props.store, docId, {
-          publicationId,
-          shouldPublish: () => isActiveRun(runId),
-        });
+    const options = { publicationId, shouldPublish: () => isActiveRun(runId) };
+    if (props.kind === "sheet") return runSheetsPipelineSameThread(props.store, docId, options);
+    if (props.kind === "slides") return runSlidesPipelineSameThread(props.store, docId, options);
+    return runPipelineSameThread(props.store, docId, options);
   }
 
   function decodeInWorker(
@@ -534,16 +551,13 @@ const ReplaySurface: Component<{
           resolve(message.kind === "done" ? { kind: "stale" } : { kind: message.kind });
           return;
         }
+        const publishOptions = { publicationId, shouldPublish: () => isActiveRun(runId) };
         const publish =
           message.docKind === "sheet"
-            ? publishSheetsDerivedData(props.store, docId, message, {
-                publicationId,
-                shouldPublish: () => isActiveRun(runId),
-              })
-            : publishDerivedData(props.store, docId, message, {
-                publicationId,
-                shouldPublish: () => isActiveRun(runId),
-              });
+            ? publishSheetsDerivedData(props.store, docId, message, publishOptions)
+            : message.docKind === "slides"
+              ? publishSlidesDerivedData(props.store, docId, message, publishOptions)
+              : publishDerivedData(props.store, docId, message, publishOptions);
         publish.then(
           (published) =>
             resolve(
@@ -612,6 +626,39 @@ const ReplaySurface: Component<{
     const gid = activeGid();
     return gid === null ? undefined : sheetTabId(gid);
   });
+
+  // ── Slides deck views (mirrors the Sheets grid views above) ─────────────────
+  // The reconstructed deck at the current frame, the selected slide, and the §9 notice.
+  const [selectedSlide, setSelectedSlide] = createSignal(0);
+  const currentPresentation = createMemo(() => {
+    const entry = loaded();
+    return entry === undefined || entry.kind !== "slides"
+      ? undefined
+      : presentationAtRevisionIndex(entry.data.replayIndex, currentIndex());
+  });
+  // Every slide projected for the current frame — feeds BOTH the filmstrip and the
+  // active-slide lookup, so the thumbnails and the hero always agree.
+  const deckSlides = createMemo(() => {
+    const presentation = currentPresentation();
+    return presentation === undefined ? [] : renderSlides(presentation);
+  });
+  // The slide to show: the user's selection when it still exists at this frame,
+  // else clamped to the last slide — e.g. scrubbing BACKWARD to an earlier revision
+  // that had fewer slides than the currently-selected index.
+  const activeSlideIndex = createMemo(() => {
+    const total = deckSlides().length;
+    return total === 0 ? 0 : Math.min(Math.max(0, selectedSlide()), total - 1);
+  });
+  const currentSlide = createMemo(() => deckSlides()[activeSlideIndex()]);
+  const slidesFidelityNotice = createMemo(() => {
+    const presentation = currentPresentation();
+    return presentation !== undefined && slidesHasFidelityNotice(presentation);
+  });
+  // Reverse link for the slide tabpanel: name it by the active thumbnail tab (the
+  // strip only renders when there is more than one slide).
+  const slidePanelLabelledBy = createMemo(() =>
+    deckSlides().length > 1 ? slideTabId(activeSlideIndex()) : undefined,
+  );
 
   // ── Authorship attribution (§9.7) ───────────────────────────────────────────
   // ONE shared author derivation feeds BOTH the colophon and the caret/highlight, so
@@ -996,7 +1043,9 @@ const ReplaySurface: Component<{
                         <div class="flex shrink-0 items-center gap-2.5">
                           <a
                             class="dr-summary-cta"
-                            href={`summary.html?doc=${encodeURIComponent(props.docId)}`}
+                            href={`summary.html?doc=${encodeURIComponent(props.docId)}${
+                              props.kind === "doc" ? "" : `&kind=${props.kind}`
+                            }`}
                           >
                             <IconChart size={18} />
                             <span>{strings.summary.title}</span>
@@ -1046,15 +1095,25 @@ const ReplaySurface: Component<{
                         under its transport, so the controls read as the margin of
                         the page they drive. The caret + highlight surface authorship:
                         who is writing now, and (on a colophon hover) who wrote what. */}
-                    <Show
-                      when={data().kind === "doc"}
-                      fallback={
-                        /* The grid is reconstructed and ready, but THIS frame may
-                           hold no sheets — the empty pre-history base at revision 0,
-                           before the first sheet is added (the analogue of an empty
-                           Docs page at revision 0). Show a calm "empty here" note,
-                           never a "not ready" message: stepping forward reveals the
-                           grid the instant the first sheet op applies. */
+                    <Switch>
+                      <Match when={data().kind === "doc"}>
+                        <DocumentViewport
+                          blocks={currentBlocks()}
+                          caret={caret()}
+                          highlight={highlight()}
+                          authorKeyByRevision={authorKeyByRevision()}
+                          follow={follow()}
+                          scrollBehavior={followBehavior()}
+                          onFollowOff={() => setFollow(false)}
+                          onFollowOn={() => setFollow(true)}
+                        />
+                      </Match>
+                      <Match when={data().kind === "sheet"}>
+                        {/* The grid is reconstructed and ready, but THIS frame may
+                            hold no sheets — the empty pre-history base at revision 0,
+                            before the first sheet is added. A calm "empty here" note,
+                            never a "not ready" message: stepping forward reveals the
+                            grid the instant the first sheet op applies. */}
                         <Show
                           when={currentSheet()}
                           fallback={
@@ -1089,19 +1148,58 @@ const ReplaySurface: Component<{
                             </div>
                           )}
                         </Show>
-                      }
-                    >
-                      <DocumentViewport
-                        blocks={currentBlocks()}
-                        caret={caret()}
-                        highlight={highlight()}
-                        authorKeyByRevision={authorKeyByRevision()}
-                        follow={follow()}
-                        scrollBehavior={followBehavior()}
-                        onFollowOff={() => setFollow(false)}
-                        onFollowOn={() => setFollow(true)}
-                      />
-                    </Show>
+                      </Match>
+                      <Match when={data().kind === "slides"}>
+                        {/* The deck is reconstructed, but THIS frame may hold no slides
+                            yet (the pre-history base, before the first slide op). A calm
+                            "empty here" note; stepping forward reveals the deck the
+                            instant the first slide applies. */}
+                        <Show
+                          when={currentSlide()}
+                          fallback={
+                            <div class="dr-card text-center">
+                              <p class="dr-subheading">{strings.slide.emptyFrameTitle}</p>
+                              <p class="dr-muted mt-1">{strings.slide.emptyFrameHint}</p>
+                            </div>
+                          }
+                        >
+                          {(slide) => (
+                            <div class="flex flex-col gap-3">
+                              <SlideStrip
+                                slides={deckSlides()}
+                                activeIndex={activeSlideIndex()}
+                                onSelect={setSelectedSlide}
+                              />
+                              {/* The tab semantics only apply when the filmstrip
+                                  (the tablist) renders — i.e. more than one slide.
+                                  A single-slide deck is a plain region, not an
+                                  orphaned, unnamed tabpanel. */}
+                              <Show
+                                when={deckSlides().length > 1}
+                                fallback={
+                                  <SlideViewport
+                                    slide={slide()}
+                                    showFidelityNotice={slidesFidelityNotice()}
+                                  />
+                                }
+                              >
+                                <div
+                                  role="tabpanel"
+                                  id={SLIDE_PANEL_ID}
+                                  aria-labelledby={slidePanelLabelledBy()}
+                                  tabindex="0"
+                                >
+                                  <SlideViewport
+                                    slide={slide()}
+                                    showFidelityNotice={slidesFidelityNotice()}
+                                  />
+                                </div>
+                              </Show>
+                            </div>
+                          )}
+                        </Show>
+                      </Match>
+                    </Switch>
 
                     {/* The colophon: content-free insights close the record. Foregrounding
                         a contributor here highlights their runs on the leaf above. */}
@@ -1140,7 +1238,9 @@ const App: Component<ReplayAppProps> = (props) => {
   const params = new URLSearchParams(window.location.search);
   const rawDoc = params.get("doc");
   const userIndex = parseUserIndex(params.get("u"));
-  const kind: DocumentKind = params.get("kind") === "sheet" ? "sheet" : "doc";
+  const kindParam = params.get("kind");
+  const kind: DocumentKind =
+    kindParam === "sheet" ? "sheet" : kindParam === "slides" ? "slides" : "doc";
 
   let docId: DocId | null = null;
   try {

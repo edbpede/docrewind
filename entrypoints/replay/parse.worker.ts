@@ -8,16 +8,22 @@
 // stale worker results from a retried run cannot publish derived data.
 //
 // Kind-aware (plan row 7): the request carries the document `kind` so the worker
-// runs the Docs pipeline (linear-text model) or the Sheets pipeline (grid model)
-// and posts a `docKind`-tagged `done` payload the page publishes accordingly.
+// runs the Docs pipeline (linear-text model), the Sheets pipeline (grid model) or
+// the Slides pipeline (presentation model) and posts a `docKind`-tagged `done`
+// payload the page publishes accordingly.
 
 import { createIdbStore } from "@/lib/db";
 import { asDocId } from "@/lib/domain/ids";
 import { type DocumentKind, isDocumentKind } from "@/lib/domain/kind";
 import type { DecodedRevision, TimelineEvent } from "@/lib/domain/model";
 import type { SheetsDecodedRevision } from "@/lib/sheets-decoder/types";
-import type { StoredGridSnapshot, StoredSnapshot } from "@/lib/store";
-import { runPipelineOverBodies, runSheetsPipelineOverBodies } from "@/lib/worker/pipeline";
+import type { SlidesDecodedRevision } from "@/lib/slides-decoder/types";
+import type { StoredGridSnapshot, StoredSlidesSnapshot, StoredSnapshot } from "@/lib/store";
+import {
+  runPipelineOverBodies,
+  runSheetsPipelineOverBodies,
+  runSlidesPipelineOverBodies,
+} from "@/lib/worker/pipeline";
 
 /** Request: decode + reconstruct the document with this id from its raw chunks. */
 interface ParseRequest {
@@ -46,6 +52,16 @@ type ParseResultMessage =
       readonly revisionCount: number;
       readonly revisions: readonly SheetsDecodedRevision[];
       readonly snapshots: readonly StoredGridSnapshot[];
+      readonly timeline: readonly TimelineEvent[];
+    }
+  | {
+      readonly kind: "done";
+      readonly docKind: "slides";
+      readonly docId: string;
+      readonly runId: number;
+      readonly revisionCount: number;
+      readonly revisions: readonly SlidesDecodedRevision[];
+      readonly snapshots: readonly StoredSlidesSnapshot[];
       readonly timeline: readonly TimelineEvent[];
     }
   | {
@@ -121,6 +137,28 @@ async function handleParse(request: ParseRequest): Promise<void> {
     post({
       kind: "done",
       docKind: "sheet",
+      docId: request.docId,
+      runId: request.runId,
+      revisionCount: result.revisions.length,
+      revisions: result.revisions,
+      snapshots,
+      timeline: result.timeline,
+    });
+    return;
+  }
+
+  if (request.kind === "slides") {
+    const result = runSlidesPipelineOverBodies(bodies);
+    if (result.kind === "unsupported") {
+      post({ kind: "unsupported", docId: request.docId, runId: request.runId, revisionCount: 0 });
+      return;
+    }
+    const snapshots: StoredSlidesSnapshot[] = [...result.replayIndex.snapshots.entries()].map(
+      ([appliedCount, model]) => ({ appliedCount, model }),
+    );
+    post({
+      kind: "done",
+      docKind: "slides",
       docId: request.docId,
       runId: request.runId,
       revisionCount: result.revisions.length,

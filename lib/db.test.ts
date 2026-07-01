@@ -42,18 +42,28 @@ let dbCounter = 0;
 function makeIdbHarness(): StoreHarness {
   const name = `docrewind-test-${dbCounter++}`;
   return {
-    store: createIdbStore({ name, parserVersion: 1, sheetsParserVersion: 1 }),
-    reopen: (parserVersion: number, sheetsParserVersion = 1) =>
-      createIdbStore({ name, parserVersion, sheetsParserVersion }),
+    store: createIdbStore({
+      name,
+      parserVersion: 1,
+      sheetsParserVersion: 1,
+      slidesParserVersion: 1,
+    }),
+    reopen: (parserVersion: number, sheetsParserVersion = 1, slidesParserVersion = 1) =>
+      createIdbStore({ name, parserVersion, sheetsParserVersion, slidesParserVersion }),
   };
 }
 
 function makeMemoryHarness(): StoreHarness {
   const backend = createMemoryBackend();
   return {
-    store: createMemoryStore({ backend, parserVersion: 1, sheetsParserVersion: 1 }),
-    reopen: (parserVersion: number, sheetsParserVersion = 1) =>
-      createMemoryStore({ backend, parserVersion, sheetsParserVersion }),
+    store: createMemoryStore({
+      backend,
+      parserVersion: 1,
+      sheetsParserVersion: 1,
+      slidesParserVersion: 1,
+    }),
+    reopen: (parserVersion: number, sheetsParserVersion = 1, slidesParserVersion = 1) =>
+      createMemoryStore({ backend, parserVersion, sheetsParserVersion, slidesParserVersion }),
   };
 }
 

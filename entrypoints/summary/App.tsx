@@ -18,11 +18,13 @@ import ThemeControl from "@/components/ThemeControl";
 import { useThemeSync } from "@/components/theme-sync";
 import { createIdbStore } from "@/lib/db";
 import { asDocId } from "@/lib/domain/ids";
+import type { DocumentKind } from "@/lib/domain/kind";
 import type { DocId } from "@/lib/domain/model";
 import { errorTitle, strings } from "@/lib/i18n/strings";
-import { loadReplayData } from "@/lib/replay/load";
+import { loadReplayData, type ReplayLoadResult } from "@/lib/replay/load";
 import { retrievalError } from "@/lib/retrieval/errors";
 import { deriveSheetsSummary } from "@/lib/sheets-reconstruction/derive";
+import { deriveSlidesSummary } from "@/lib/slides-reconstruction/derive";
 import type { RevisionStore } from "@/lib/store";
 import { deriveDocumentSummary } from "@/lib/summary/derive";
 
@@ -31,8 +33,22 @@ export interface SummaryAppProps {
   readonly store?: RevisionStore;
 }
 
-function replayHref(docId: DocId): string {
-  return `replay.html?doc=${encodeURIComponent(docId)}`;
+// The replay URL kind for the back-link. A resolved publication decides the kind
+// (Docs → "doc" keeps the URL bare; Sheets/Slides round-trip so the replay route
+// retries the right Google endpoint). While still loading or when no publication
+// exists, there is no resolved kind, so we preserve the incoming URL `kind` —
+// otherwise a Sheets/Slides missing-publication link would send replay back into
+// the Docs pipeline.
+function replayKind(result: ReplayLoadResult | undefined, fallback: DocumentKind): DocumentKind {
+  if (result?.kind === "ok-sheet") return "sheet";
+  if (result?.kind === "ok-slides") return "slides";
+  if (result?.kind === "ok") return "doc";
+  return fallback;
+}
+
+function replayHref(docId: DocId, kind: DocumentKind = "doc"): string {
+  const base = `replay.html?doc=${encodeURIComponent(docId)}`;
+  return kind === "doc" ? base : `${base}&kind=${kind}`;
 }
 
 /** A centered status card (loading / missing / error). Calm, plain-language, with
@@ -62,20 +78,25 @@ const StatusCard: Component<{
 );
 
 /** The summary surface for a validated document id. */
-const SummarySurface: Component<{ readonly docId: DocId; readonly store: RevisionStore }> = (
-  props,
-) => {
+const SummarySurface: Component<{
+  readonly docId: DocId;
+  readonly store: RevisionStore;
+  /** Incoming URL kind, used as the back-link fallback until a publication loads. */
+  readonly kind: DocumentKind;
+}> = (props) => {
   const [result] = createResource(
     () => props.docId,
     (docId) => loadReplayData(props.store, docId),
   );
   // Derive the content-free summary by kind: Docs count characters, Sheets count
-  // cell edits (both via the shared summary core). A miss / stub yields undefined.
+  // cell edits, Slides count text characters (all via the shared summary core). A
+  // miss / stub yields undefined.
   const summary = () => {
     const value = result();
     if (value === undefined) return undefined;
     if (value.kind === "ok") return deriveDocumentSummary(value.data.revisions);
     if (value.kind === "ok-sheet") return deriveSheetsSummary(value.data.revisions);
+    if (value.kind === "ok-slides") return deriveSlidesSummary(value.data.revisions);
     return undefined;
   };
 
@@ -83,7 +104,10 @@ const SummarySurface: Component<{ readonly docId: DocId; readonly store: Revisio
     <main class="mx-auto flex max-w-[64rem] flex-col gap-6 p-6 sm:p-8">
       <header class="dr-masthead">
         <div class="flex items-center justify-between gap-3">
-          <a class="dr-link inline-flex items-center gap-1.5" href={replayHref(props.docId)}>
+          <a
+            class="dr-link inline-flex items-center gap-1.5"
+            href={replayHref(props.docId, replayKind(result(), props.kind))}
+          >
             <IconArrowLeft size={16} />
             {strings.summary.backToReplay}
           </a>
@@ -124,7 +148,10 @@ const SummarySurface: Component<{ readonly docId: DocId; readonly store: Revisio
                 icon={IconHistory}
                 title={strings.summary.missingTitle}
                 body={strings.summary.missingHint}
-                action={{ label: strings.summary.openReplay, href: replayHref(props.docId) }}
+                action={{
+                  label: strings.summary.openReplay,
+                  href: replayHref(props.docId, replayKind(result(), props.kind)),
+                }}
               />
             }
           >
@@ -139,6 +166,11 @@ const SummarySurface: Component<{ readonly docId: DocId; readonly store: Revisio
 const App: Component<SummaryAppProps> = (props) => {
   const params = new URLSearchParams(window.location.search);
   const rawDoc = params.get("doc");
+  // Mirror the replay route's parse (entrypoints/replay/App.tsx) so a Sheets/Slides
+  // summary opened before its publication exists still round-trips its kind back.
+  const kindParam = params.get("kind");
+  const kind: DocumentKind =
+    kindParam === "sheet" ? "sheet" : kindParam === "slides" ? "slides" : "doc";
 
   let docId: DocId | null = null;
   try {
@@ -166,7 +198,7 @@ const App: Component<SummaryAppProps> = (props) => {
           </main>
         }
       >
-        {(id) => <SummarySurface docId={id()} store={store} />}
+        {(id) => <SummarySurface docId={id()} store={store} kind={kind} />}
       </Show>
     </div>
   );

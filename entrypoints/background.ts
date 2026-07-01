@@ -282,6 +282,8 @@ export default defineBackground(() => {
     // before any publication exists; "doc" is the default and is omitted.
     if (kind === "sheet") {
       params.set("kind", "sheet");
+    } else if (kind === "slides") {
+      params.set("kind", "slides");
     }
     return `?${params.toString()}`;
   };

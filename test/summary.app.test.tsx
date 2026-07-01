@@ -7,14 +7,23 @@ import { createMemoryStore } from "@/lib/db.memory";
 import type { Operation } from "@/lib/decoder/types";
 import { PARSER_VERSION } from "@/lib/decoder/version";
 import { asDocId, asRevisionId } from "@/lib/domain/ids";
+import type { DocumentKind } from "@/lib/domain/kind";
 import type { DecodedRevision } from "@/lib/domain/model";
 import { errorTitle, strings } from "@/lib/i18n/strings";
-import type { ReplayPublication, RevisionStore } from "@/lib/store";
+import { SHEETS_PARSER_VERSION } from "@/lib/sheets-decoder/version";
+import { SLIDES_PARSER_VERSION } from "@/lib/slides-decoder/version";
+import type {
+  ReplayPublication,
+  RevisionStore,
+  SheetReplayPublication,
+  SlideReplayPublication,
+} from "@/lib/store";
 
 const DOC = asDocId("docSummaryTest");
 
-function setSummaryUrl(doc = DOC): void {
-  window.history.replaceState(null, "", `/summary.html?doc=${doc}`);
+function setSummaryUrl(doc = DOC, kind: DocumentKind = "doc"): void {
+  const suffix = kind === "doc" ? "" : `&kind=${kind}`;
+  window.history.replaceState(null, "", `/summary.html?doc=${doc}${suffix}`);
 }
 
 function installMatchMedia(): void {
@@ -52,6 +61,34 @@ async function seed(store: RevisionStore, revisions: readonly DecodedRevision[])
   await store.setActiveReplayPublication(DOC, "pub-1");
 }
 
+async function seedSlides(store: RevisionStore): Promise<void> {
+  const pub: SlideReplayPublication = {
+    kind: "slides",
+    publicationId: "pub-1",
+    slidesParserVersion: SLIDES_PARSER_VERSION,
+    revisions: [],
+    snapshots: [],
+    timeline: [],
+    publishedAt: 1000,
+  };
+  await store.saveReplayPublication(DOC, pub);
+  await store.setActiveReplayPublication(DOC, "pub-1", "slides");
+}
+
+async function seedSheet(store: RevisionStore): Promise<void> {
+  const pub: SheetReplayPublication = {
+    kind: "sheet",
+    publicationId: "pub-1",
+    sheetsParserVersion: SHEETS_PARSER_VERSION,
+    revisions: [],
+    snapshots: [],
+    timeline: [],
+    publishedAt: 1000,
+  };
+  await store.saveReplayPublication(DOC, pub);
+  await store.setActiveReplayPublication(DOC, "pub-1", "sheet");
+}
+
 describe("Summary App", () => {
   beforeEach(() => {
     cleanup();
@@ -80,6 +117,24 @@ describe("Summary App", () => {
     expect(openReplay?.getAttribute("href")).toBe(`replay.html?doc=${DOC}`);
   });
 
+  it("preserves the URL kind=slides in the back-link when no publication exists yet", async () => {
+    setSummaryUrl(DOC, "slides");
+    const store = createMemoryStore();
+    render(() => <App store={store} />);
+    expect(await screen.findByText(strings.summary.missingTitle)).toBeTruthy();
+    const openReplay = screen.getByText(strings.summary.openReplay).closest("a");
+    expect(openReplay?.getAttribute("href")).toBe(`replay.html?doc=${DOC}&kind=slides`);
+  });
+
+  it("preserves the URL kind=sheet in the back-link when no publication exists yet", async () => {
+    setSummaryUrl(DOC, "sheet");
+    const store = createMemoryStore();
+    render(() => <App store={store} />);
+    expect(await screen.findByText(strings.summary.missingTitle)).toBeTruthy();
+    const openReplay = screen.getByText(strings.summary.openReplay).closest("a");
+    expect(openReplay?.getAttribute("href")).toBe(`replay.html?doc=${DOC}&kind=sheet`);
+  });
+
   it("renders both charts and the stat row for a timed publication", async () => {
     const store = createMemoryStore();
     await seed(store, [
@@ -106,6 +161,28 @@ describe("Summary App", () => {
     // Back-to-replay navigation is present.
     const back = screen.getByText(strings.summary.backToReplay).closest("a");
     expect(back?.getAttribute("href")).toBe(`replay.html?doc=${DOC}`);
+  });
+
+  it("back-to-replay carries kind=slides for a Slides publication", async () => {
+    const store = createMemoryStore();
+    await seedSlides(store);
+    render(() => <App store={store} />);
+    // The href starts bare while the publication loads, then resolves to carry the
+    // kind so the replay route retries against the /presentation/ endpoint.
+    await vi.waitFor(() => {
+      const back = screen.getByText(strings.summary.backToReplay).closest("a");
+      expect(back?.getAttribute("href")).toBe(`replay.html?doc=${DOC}&kind=slides`);
+    });
+  });
+
+  it("back-to-replay carries kind=sheet for a Sheets publication", async () => {
+    const store = createMemoryStore();
+    await seedSheet(store);
+    render(() => <App store={store} />);
+    await vi.waitFor(() => {
+      const back = screen.getByText(strings.summary.backToReplay).closest("a");
+      expect(back?.getAttribute("href")).toBe(`replay.html?doc=${DOC}&kind=sheet`);
+    });
   });
 
   it("shows a friendly empty state when timing is insufficient", async () => {

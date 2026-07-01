@@ -20,7 +20,7 @@
 #     `entrypoints/background.ts`; the worker shell lives in `entrypoints/`.
 set -euo pipefail
 
-BASE_DIRS=(lib/decoder lib/reconstruction lib/timeline lib/domain lib/protocol lib/fixtures lib/summary lib/replay-core lib/sheets-decoder lib/sheets-reconstruction)
+BASE_DIRS=(lib/decoder lib/reconstruction lib/timeline lib/domain lib/protocol lib/fixtures lib/summary lib/replay-core lib/sheets-decoder lib/sheets-reconstruction lib/slides-decoder lib/slides-reconstruction)
 EXTRA_DIRS=(lib/retrieval lib/worker lib/docs-url)
 BASE_PATTERN='#imports|browser\.|wxt'
 EXTRA_PATTERN='\bfetch\(|new Worker|globalThis'

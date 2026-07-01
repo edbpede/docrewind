@@ -82,7 +82,11 @@ async function harvestSelfIdentity(): Promise<void> {
 }
 
 export default defineContentScript({
-  matches: ["*://docs.google.com/document/*", "*://docs.google.com/spreadsheets/*"],
+  matches: [
+    "*://docs.google.com/document/*",
+    "*://docs.google.com/spreadsheets/*",
+    "*://docs.google.com/presentation/*",
+  ],
   cssInjectionMode: "ui",
   async main(ctx) {
     const info = parseDocsUrl(location.href);
@@ -119,7 +123,9 @@ export default defineContentScript({
       // version-history/comment icons.
       anchor: () => {
         if (document.querySelector(titlebarAnchor) !== null) return titlebarAnchor;
-        if (info.kind === "sheet" && Date.now() >= fallbackDeadline) return "body";
+        // Sheets AND Slides are served by this same script but may not expose the
+        // Docs titlebar selectors; both fall back to `body` after the grace window.
+        if (info.kind !== "doc" && Date.now() >= fallbackDeadline) return "body";
         return titlebarAnchor;
       },
       append: "first",
@@ -173,9 +179,9 @@ export default defineContentScript({
     // `stopAutoMount` internally) so a later mutation can't have autoMount mount
     // `body` a SECOND time onto our host — autoMount's own `mount()` is
     // unguarded. `remove()` is harmless while unmounted (no host attached, the
-    // dispose is skipped). Docs (`kind !== "sheet"`) never schedules this, so its
-    // path is byte-for-byte unchanged.
-    if (info.kind === "sheet") {
+    // dispose is skipped). Docs (`kind === "doc"`) never schedules this, so its
+    // path is byte-for-byte unchanged; sheets AND slides take the fallback.
+    if (info.kind !== "doc") {
       ctx.setTimeout(() => {
         if (ui.mounted == null) {
           ui.remove();

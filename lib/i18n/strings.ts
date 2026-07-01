@@ -124,6 +124,27 @@ export const strings = {
     chartPlaceholder: "Chart",
     imagePlaceholder: "Image",
   },
+  slide: {
+    // Slides (Punch) replay surface. Content-free labels only — never slide text.
+    stripLabel: "Slides",
+    canvasLabel: "Slide",
+    // The calm, non-blocking fidelity notice shown when some content could not be
+    // fully reconstructed (an unknown op or a model-version drift). Mirrors the
+    // Sheets notice — never a scary banner, never blocking the replay.
+    fidelityNotice: "Some content couldn't be fully reconstructed.",
+    // Neutral label-only placeholder for any embedded object (image/chart/table/
+    // video): DocRewind reconstructs the layout box but never fetches its bytes
+    // (local-first; §4). Neutral because the shape type can't reliably distinguish
+    // an image from a chart, so the box never mislabels a chart as "Image".
+    mediaPlaceholder: "Media",
+    // Shown only on a frame whose reconstructed deck holds no slides yet — the
+    // pre-history base state before the first slide op applies (the Slides analogue
+    // of an empty Docs page at revision 0). The replay IS built; this frame is
+    // simply empty, so the copy must NOT read as "not ready".
+    emptyFrameTitle: "No slides to show at this point",
+    emptyFrameHint:
+      "The presentation had no slides at this moment in its history. Press Play or step forward to watch it take shape.",
+  },
   progress: {
     discovering: "Discovering revisions…",
     fetching: "Fetching revisions",
@@ -257,6 +278,11 @@ export function errorTitle(category: RetrievalErrorCategory): string {
 /** Slider value-text, e.g. "Revision 12 of 340". */
 export function revisionOf(current: number, total: number): string {
   return `Revision ${current} of ${total}`;
+}
+
+/** Slide navigator label, e.g. "Slide 2 of 8" (1-indexed). */
+export function slideOf(current: number, total: number): string {
+  return `${strings.slide.canvasLabel} ${current} of ${total}`;
 }
 
 /**
