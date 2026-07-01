@@ -47,3 +47,26 @@ export function decideReconcile(state: ReconcileState): ReconcileAction {
   if (!state.mounted || !state.hostConnected || state.anchorChanged) return "mount";
   return "none";
 }
+
+/** Live state for the engagement gate — sampled before any DOM work is done. */
+export interface EngagementState {
+  /** Does the current URL parse to a grading/submission route at all? */
+  readonly routeApplicable: boolean;
+  /** Is our affordance currently up (mounted by us and not yet removed by us)? */
+  readonly uiUp: boolean;
+}
+
+/**
+ * Whether the reconcile machinery should be ENGAGED at all: run reconcile passes
+ * and keep the slow backstop interval armed.
+ *
+ * Engaged on any grading/submission route (the anchor may still be resolving, so
+ * passes must retry), and while our UI is up even after the route stopped applying
+ * (one more pass is owed to tear it down). On every other Classroom page —
+ * home, stream, class list, settings — the affordance can never apply, so no
+ * reconcile pass may run and no backstop may tick: the only permitted idle cost
+ * is the URL check that produced `routeApplicable`.
+ */
+export function isEngaged(state: EngagementState): boolean {
+  return state.routeApplicable || state.uiUp;
+}
