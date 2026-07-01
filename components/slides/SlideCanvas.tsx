@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
 // SlideCanvas — paints ONE reconstructed slide (a pure `RenderedSlide` from
-// `slides-reconstruction/render.ts`) as an absolutely-positioned shape canvas. The
+// `lib/core/slides/reconstruction/render.ts`) as an absolutely-positioned shape canvas. The
 // "structural layout + parity" compromise (the Slides analogue of GridViewport):
 // each shape sits at its transform-derived fractional box on a correctly-shaped
 // canvas, text is drawn at role-based sizes, and media becomes a labeled
