@@ -9,19 +9,26 @@ import { fakeBrowser } from "wxt/testing";
 import { asDocId } from "@/lib/core/domain/ids";
 import {
   activeStorageLeases,
+  advanceDurableIntentsDrainedSeq,
+  backgroundStartupMarker,
   beginStorageLease,
   createPendingDestructiveStorageClear,
   createPendingStorageMaintenanceRequest,
   DEFAULT_STORAGE_BUDGET,
+  durableIntentsDrainedSeq,
+  durableIntentsEnqueueSeq,
   endStorageLease,
+  getDurableIntentsEnqueueSeq,
   getPendingDestructiveStorageClears,
   getPendingStorageMaintenance,
   hasActiveStorageLease,
   isCurrentPendingDestructiveStorageClear,
   isCurrentPendingStorageMaintenance,
   keepRawData,
+  markLegacyIdentityKeyCleared,
   pendingDestructiveStorageClears,
   pendingStorageMaintenance,
+  readBackgroundStartupState,
   realIdentities,
   refreshStorageLease,
   removePendingDestructiveStorageClear,
@@ -231,6 +238,62 @@ describe("settings", () => {
 
       await removePendingDestructiveStorageClear(second);
       expect(await getPendingDestructiveStorageClears()).toEqual([]);
+    });
+
+    it("startup state defaults to work-pending (enqueueSeq !== drainedSeq) for an upgrading user", async () => {
+      const state = await readBackgroundStartupState();
+      expect(state.legacyIdentityKeyCleared).toBe(false);
+      expect(state.enqueueSeq).toBe(1);
+      expect(state.drainedSeq).toBe(0);
+      expect(state.enqueueSeq).not.toBe(state.drainedSeq);
+    });
+
+    it("marks the legacy identity cleanup done exactly once, independent of the drain counters", async () => {
+      await markLegacyIdentityKeyCleared();
+      await advanceDurableIntentsDrainedSeq(await getDurableIntentsEnqueueSeq());
+      const state = await readBackgroundStartupState();
+      expect(state.legacyIdentityKeyCleared).toBe(true);
+      // A full drain cleared the pending hint without touching the legacy flag.
+      expect(state.enqueueSeq).toBe(state.drainedSeq);
+    });
+
+    it("bumps the enqueue generation AFTER a maintenance upsert lands (never a false 'empty')", async () => {
+      // Simulate a prior full drain: drainedSeq caught up to enqueueSeq.
+      await advanceDurableIntentsDrainedSeq(await getDurableIntentsEnqueueSeq());
+      let state = await readBackgroundStartupState();
+      expect(state.enqueueSeq).toBe(state.drainedSeq);
+
+      await upsertPendingStorageMaintenance(
+        createPendingStorageMaintenanceRequest({
+          docId: null,
+          keepRawData: true,
+          budget: DEFAULT_STORAGE_BUDGET,
+          queuedAt: 1,
+        }),
+      );
+
+      state = await readBackgroundStartupState();
+      expect(state.enqueueSeq).not.toBe(state.drainedSeq);
+      expect(await getPendingStorageMaintenance()).toHaveLength(1);
+    });
+
+    it("bumps the enqueue generation AFTER a destructive-clear upsert lands", async () => {
+      await advanceDurableIntentsDrainedSeq(await getDurableIntentsEnqueueSeq());
+      const drainedBefore = await durableIntentsDrainedSeq.getValue();
+
+      await upsertPendingDestructiveStorageClear(
+        createPendingDestructiveStorageClear({ kind: "all", queuedAt: 1 }),
+      );
+
+      expect(await durableIntentsEnqueueSeq.getValue()).toBeGreaterThan(drainedBefore);
+      expect(await durableIntentsDrainedSeq.getValue()).toBe(drainedBefore);
+    });
+
+    it("skips the marker write when the legacy flag is already set (idempotent)", async () => {
+      await markLegacyIdentityKeyCleared();
+      const before = await backgroundStartupMarker.getValue();
+      await markLegacyIdentityKeyCleared();
+      expect(await backgroundStartupMarker.getValue()).toEqual(before);
     });
 
     it("does not let an old completion remove a newer same-id destructive clear", async () => {

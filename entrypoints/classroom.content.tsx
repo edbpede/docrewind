@@ -28,9 +28,13 @@
 import { render } from "solid-js/web";
 import "virtual:uno.css";
 import ReplayAffordance from "@/components/replay/ReplayAffordance";
-import { decideReconcile } from "@/lib/core/classroom/reconcile";
+import { decideReconcile, isEngaged } from "@/lib/core/classroom/reconcile";
 import { parseDocsUrl } from "@/lib/core/docs-url";
-import { buildGradingPath, parseClassroomLocation } from "@/lib/core/docs-url/classroom";
+import {
+  buildGradingPath,
+  type ClassroomLocation,
+  parseClassroomLocation,
+} from "@/lib/core/docs-url/classroom";
 import type { DocId } from "@/lib/core/domain/ids";
 import type { DocumentKind } from "@/lib/core/domain/kind";
 import { sendMessage } from "@/lib/platform/messaging";
@@ -166,6 +170,21 @@ export default defineContentScript({
   matches: ["*://classroom.google.com/*"],
   cssInjectionMode: "ui",
   async main(ctx) {
+    // Route parse cached on the exact URL string. Every signal below (mutation
+    // batches, location events, backstop ticks) needs the parsed location, and the
+    // parse is a pure function of the href — so repeated signals on an unchanged
+    // URL cost one string compare, not a URL parse + regex each. The cache can
+    // never go stale: it is keyed on `location.href` itself.
+    let cachedHref: string | null = null;
+    let cachedLoc: ClassroomLocation | null = null;
+    const currentLoc = (): ClassroomLocation | null => {
+      if (location.href !== cachedHref) {
+        cachedHref = location.href;
+        cachedLoc = parseClassroomLocation(cachedHref);
+      }
+      return cachedLoc;
+    };
+
     // Ask the background to open the replay surface for a resolved doc. The click is
     // the explicit user action (PRD §9.2); the content script owns neither the fetch
     // nor the surface (Seam A1) — fire-and-forget over typed messaging.
@@ -183,7 +202,7 @@ export default defineContentScript({
     // The single click handler, re-reading the live context each time so a stale
     // closure can never replay the wrong (or a previous) student's doc.
     const onActivate = (): void => {
-      const loc = parseClassroomLocation(location.href);
+      const loc = currentLoc();
       if (loc === null) return;
       if (loc.view === "grading") {
         const doc = detectGradingDoc();
@@ -208,7 +227,7 @@ export default defineContentScript({
     // After a deep-link from the submission view, fire the replay the educator already
     // asked for — once, for the matching student, only while the intent is fresh.
     const completePendingReplay = (): void => {
-      const loc = parseClassroomLocation(location.href);
+      const loc = currentLoc();
       if (loc === null || loc.view !== "grading") return;
       const intent = readIntent();
       if (intent === null) return;
@@ -226,7 +245,7 @@ export default defineContentScript({
     // The current mount anchor for whichever surface is showing — or null when there's
     // nothing to mount on (grading view shows the button ONLY once a DocId is readable).
     const currentAnchor = (): Element | null => {
-      const loc = parseClassroomLocation(location.href);
+      const loc = currentLoc();
       if (loc === null) return null;
       if (loc.view === "grading") {
         return detectGradingDoc() !== null ? findGradingActionGroup() : null;
@@ -247,7 +266,7 @@ export default defineContentScript({
       // the button itself uses the safelisted `btn-secondary`/`btn-secondary-compact`
       // shortcuts, so it stays styled inside the shadow root.
       append: (anchor, el) => {
-        const loc = parseClassroomLocation(location.href);
+        const loc = currentLoc();
         if (loc?.view === "submission") anchor.after(el);
         else anchor.prepend(el);
       },
@@ -272,7 +291,7 @@ export default defineContentScript({
     // grading/submission panels in place, so the anchor can blink out for a frame
     // without the view actually changing; we must not tear the button down for that.
     const affordanceApplies = (): boolean => {
-      const loc = parseClassroomLocation(location.href);
+      const loc = currentLoc();
       if (loc === null) return false;
       return loc.view === "grading" ? detectGradingDoc() !== null : loc.studentId !== null;
     };
@@ -284,8 +303,17 @@ export default defineContentScript({
     // `ui.mounted` — so a stale "mounted" is how the button vanished permanently.
     // Reconcile keys off our own host's connectivity (`ui.shadowHost`), not just the
     // anchor's, and only removes when the view itself stops applying. Runs on DOM and
-    // navigation changes, with a slow interval as a backstop for mutations we miss.
+    // navigation changes, with a slow interval as a backstop for mutations we miss —
+    // but that machinery ENGAGES only on the two applicable surfaces (see `schedule`
+    // and `syncBackstop` below): everywhere else on classroom.google.com the idle
+    // cost is a cached URL check and nothing more.
     let mountedAnchor: Element | null = null;
+    // Whether OUR affordance is up (we mounted it and have not removed it). This is
+    // deliberately our own ledger, not WXT's `ui.mounted` — Wiz pruning our host
+    // leaves `ui.mounted` stale (the very bug reconcile hardens against), and while
+    // pruned-but-not-removed the engagement gate must stay open so the teardown /
+    // remount pass still runs.
+    let uiUp = false;
     const reconcile = (): void => {
       if (!ctx.isValid) return;
       const anchor = currentAnchor();
@@ -299,22 +327,53 @@ export default defineContentScript({
       if (action === "remove") {
         ui.remove();
         mountedAnchor = null;
+        uiUp = false;
       } else if (action === "mount") {
         if (ui.mounted != null) ui.remove(); // dispose the old root before re-rooting
         ui.mount();
         mountedAnchor = anchor;
+        uiUp = true;
       }
       completePendingReplay();
+      syncBackstop();
     };
 
     let scheduled = false;
     const schedule = (): void => {
+      // Engagement gate BEFORE any frame or DOM work. On non-applicable views with
+      // nothing mounted, a mutation burst or location signal costs one cached-href
+      // string compare and returns — no rAF, no reconcile, no DOM reads. The
+      // `syncBackstop` call also lets a still-armed backstop disarm itself after a
+      // route change whose reconcile never ran (e.g. leaving a grading view whose
+      // anchor never resolved, so nothing was ever mounted).
+      if (!isEngaged({ routeApplicable: currentLoc() !== null, uiUp })) {
+        syncBackstop();
+        return;
+      }
       if (scheduled) return;
       scheduled = true;
       requestAnimationFrame(() => {
         scheduled = false;
         reconcile();
       });
+    };
+
+    // The 2 s reconcile backstop, armed ONLY while engaged (an applicable route, or
+    // a teardown still owed). Non-applicable Classroom views — home, stream, class
+    // list, settings — get ZERO timer wakeups; route entry re-arms it via the
+    // observer / location listeners below, whose signals always accompany a
+    // Classroom SPA transition. On the applicable surfaces its cadence is the same
+    // 2 s as it has always been, so worst-case recovery from a missed mutation is
+    // unchanged there.
+    let backstop: number | null = null;
+    const syncBackstop = (): void => {
+      const want = isEngaged({ routeApplicable: currentLoc() !== null, uiUp });
+      if (want && backstop === null) {
+        backstop = ctx.setInterval(schedule, 2000);
+      } else if (!want && backstop !== null) {
+        clearInterval(backstop);
+        backstop = null;
+      }
     };
 
     const observer = new MutationObserver(schedule);
@@ -326,9 +385,9 @@ export default defineContentScript({
     });
     ctx.addEventListener(window, "wxt:locationchange", schedule);
     ctx.addEventListener(window, "hashchange", schedule);
-    ctx.setInterval(schedule, 2000);
     ctx.onInvalidated(() => observer.disconnect());
 
     schedule();
+    syncBackstop();
   },
 });

@@ -82,10 +82,21 @@ async function harvestSelfIdentity(): Promise<void> {
 }
 
 export default defineContentScript({
+  // Only the ACTUAL document surfaces. `parseDocsUrl` (DOC_ID_PATH) recognizes
+  // exactly `/{kind}/d/{id}` and `/{kind}/u/{N}/d/{id}` pathnames, so every URL
+  // where main() gets past its early return matches one of these six patterns —
+  // while the home/recent-list/template pages (`/document/u/0/`, …) no longer
+  // pay a script injection just to early-return. The Classroom script must NOT
+  // be narrowed like this: it has to observe SPA navigation into grading/
+  // submission from ANY classroom.google.com page (its idle cost is gated by
+  // the engagement predicate instead).
   matches: [
-    "*://docs.google.com/document/*",
-    "*://docs.google.com/spreadsheets/*",
-    "*://docs.google.com/presentation/*",
+    "*://docs.google.com/document/d/*",
+    "*://docs.google.com/document/u/*/d/*",
+    "*://docs.google.com/spreadsheets/d/*",
+    "*://docs.google.com/spreadsheets/u/*/d/*",
+    "*://docs.google.com/presentation/d/*",
+    "*://docs.google.com/presentation/u/*/d/*",
   ],
   cssInjectionMode: "ui",
   async main(ctx) {

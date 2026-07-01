@@ -56,11 +56,15 @@ import type { ChunkFetcher, ChunkRequest } from "@/lib/core/retrieval/transport"
 import { createIdbStore } from "@/lib/platform/db";
 import { onMessage } from "@/lib/platform/messaging";
 import {
+  advanceDurableIntentsDrainedSeq,
   beginStorageLease,
   endStorageLease,
+  getDurableIntentsEnqueueSeq,
   getPendingDestructiveStorageClears,
   getPendingStorageMaintenance,
   hasActiveStorageLease,
+  markLegacyIdentityKeyCleared,
+  readBackgroundStartupState,
   realIdentities,
   refreshStorageLease,
   removePendingDestructiveStorageClear,
@@ -97,12 +101,30 @@ export default defineBackground(() => {
     .setAccessLevel?.({ accessLevel: "TRUSTED_AND_UNTRUSTED_CONTEXTS" })
     .catch(() => {});
 
-  // One-time cleanup: an earlier release cached resolved identities under
-  // `local:resolvedIdentities` (on disk). The cache is now session-scoped, so the
-  // legacy on-disk key is orphaned — drop it so resolved names don't outlive the
-  // session for users upgrading from that build. Best-effort and idempotent.
-  // WXT strips the area prefix, so the on-disk key is the bare `resolvedIdentities`.
-  void browser.storage.local.remove("resolvedIdentities").catch(() => {});
+  // Cold-start work, gated behind ONE cheap marker read (MV3 re-runs this whole
+  // body on every wake, so the steady-state wake must not pay a storage write +
+  // two queue reads to service a trivial message — see backgroundStartupMarker):
+  //
+  //  • One-time cleanup: an earlier release cached resolved identities under
+  //    `local:resolvedIdentities` (on disk). The cache is now session-scoped, so
+  //    the legacy on-disk key is orphaned — drop it once so resolved names don't
+  //    outlive the session for users upgrading from that build. Best-effort and
+  //    idempotent (a lost marker write merely re-runs the harmless remove). WXT
+  //    strips the area prefix, so the on-disk key is the bare `resolvedIdentities`.
+  //  • Durable-intent drain: only when the generation counters disagree
+  //    (enqueueSeq !== drainedSeq). enqueueSeq is bumped after each queue write
+  //    and drainedSeq advances only on a full drain, so a skipped drain is always
+  //    safe (see durableIntentsEnqueueSeq).
+  void (async () => {
+    const { legacyIdentityKeyCleared, enqueueSeq, drainedSeq } = await readBackgroundStartupState();
+    if (!legacyIdentityKeyCleared) {
+      await browser.storage.local.remove("resolvedIdentities").catch(() => {});
+      await markLegacyIdentityKeyCleared();
+    }
+    if (enqueueSeq !== drainedSeq) {
+      await drainPersistedRequests();
+    }
+  })().catch(() => {});
 
   // Per-document cancellation flags for in-flight retrievals.
   const cancelledDocs = new Set<string>();
@@ -231,10 +253,22 @@ export default defineBackground(() => {
   }
 
   async function drainPersistedRequests(): Promise<void> {
+    // Capture the enqueue generation BEFORE touching the queues. A concurrent
+    // enqueue during processing bumps it past this snapshot, so advancing
+    // drainedSeq to the snapshot at the end leaves the two unequal and the next
+    // wake re-drains. This is MV3-crash-survivable: the only durable "drained"
+    // write is the single terminal advance below, so a kill anywhere before it
+    // leaves drainedSeq stale (< enqueueSeq) and the hint stays pending (see
+    // durableIntentsEnqueueSeq).
+    const seqAtStart = await getDurableIntentsEnqueueSeq();
+    let leftovers = false;
+
     for (const request of await getPendingDestructiveStorageClears()) {
       const ack = await requestDestructiveClear(request);
       if (ack.status === "completed") {
         await removePendingDestructiveStorageClear(request);
+      } else {
+        leftovers = true;
       }
     }
 
@@ -242,11 +276,31 @@ export default defineBackground(() => {
       const ack = await requestStorageMaintenance(request);
       if (ack.status === "completed") {
         await removePendingStorageMaintenance(request.id, request.queuedAt);
+      } else {
+        leftovers = true;
       }
     }
+
+    // Deferred entries (blocked behind a lease) remain — leave drainedSeq stale
+    // so the hint stays pending and the next lease-release drain still runs.
+    if (leftovers) {
+      return;
+    }
+
+    // Full drain: commit the observed start generation as drained. Any enqueue
+    // that raced this drain bumped enqueueSeq past seqAtStart, so it stays
+    // pending; a false "nothing pending" is impossible because we commit the
+    // PRE-processing snapshot, never a re-read a concurrent enqueue could clobber.
+    await advanceDurableIntentsDrainedSeq(seqAtStart);
   }
 
-  void drainPersistedRequests();
+  /** Drain only when the generation counters disagree (the common case is "no"). */
+  async function drainPersistedRequestsIfHinted(): Promise<void> {
+    const { enqueueSeq, drainedSeq } = await readBackgroundStartupState();
+    if (enqueueSeq !== drainedSeq) {
+      await drainPersistedRequests();
+    }
+  }
 
   // ── LIVE §24 transport adapters ──────────────────────────────────────────
   const DOCS_ORIGIN = "https://docs.google.com";
@@ -560,7 +614,7 @@ export default defineBackground(() => {
   onMessage("endDecodeLease", async ({ data }) => {
     await endStorageLease(data.docId);
     const ack = await maintenance.endDecodeLease(data.docId);
-    await drainPersistedRequests();
+    await drainPersistedRequestsIfHinted();
     return ack;
   });
 
@@ -655,7 +709,7 @@ export default defineBackground(() => {
       clearInterval(leaseRefresh);
       await endStorageLease(data.docId);
       await maintenance.endDecodeLease(data.docId);
-      await drainPersistedRequests();
+      await drainPersistedRequestsIfHinted();
     }
   });
 

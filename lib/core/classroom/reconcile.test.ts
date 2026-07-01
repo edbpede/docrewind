@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { describe, expect, test } from "bun:test";
-import { decideReconcile, type ReconcileState } from "./reconcile";
+import { decideReconcile, isEngaged, type ReconcileState } from "./reconcile";
 
 // A correctly-mounted, stable affordance — the steady state. Spread + override per case.
 const STABLE: ReconcileState = {
@@ -54,5 +54,23 @@ describe("decideReconcile — re-anchor on student switch", () => {
 describe("decideReconcile — steady state", () => {
   test("does nothing when mounted, connected, anchored, and unchanged", () => {
     expect(decideReconcile(STABLE)).toBe("none");
+  });
+});
+
+describe("isEngaged — the idle gate", () => {
+  test("engaged on an applicable route even before anything mounted (anchor may resolve late)", () => {
+    expect(isEngaged({ routeApplicable: true, uiUp: false })).toBe(true);
+  });
+
+  test("engaged while the UI is still up after the route stopped applying (teardown owed)", () => {
+    expect(isEngaged({ routeApplicable: false, uiUp: true })).toBe(true);
+  });
+
+  test("engaged on an applicable route with the UI up (steady grading state)", () => {
+    expect(isEngaged({ routeApplicable: true, uiUp: true })).toBe(true);
+  });
+
+  test("disengaged on non-applicable views with nothing mounted — zero reconcile work allowed", () => {
+    expect(isEngaged({ routeApplicable: false, uiUp: false })).toBe(false);
   });
 });
