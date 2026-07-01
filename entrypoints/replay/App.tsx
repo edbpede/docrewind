@@ -979,10 +979,14 @@ const ReplaySurface: Component<{
   // Playback tick, managed by an effect so the cadence rebuilds when the
   // reduced-motion preference flips (calmer cadence = less animation, without
   // stopping the data stepping). A fractional accumulator honors sub-1× speeds.
-  // The interval callback reads playing/speed/currentIndex untracked, so only the
-  // reduced-motion read drives the effect — no per-frame effect churn.
+  // The effect tracks `playing()` and the reduced-motion read only: `speed`/
+  // `currentIndex` are read untracked inside the callback, so there is still no
+  // per-frame effect churn. Gating on `playing()` means NO interval spins while
+  // paused — it is created on play and torn down on pause/stop, so an open but
+  // idle replay tab does zero periodic work (idle-time cost).
   let accumulator = 0;
   createEffect(() => {
+    if (!playing()) return; // paused/stopped: no timer, no idle wakeups
     const interval = prefersReducedMotion() ? TICK_MS_REDUCED : TICK_MS;
     const timer = setInterval(() => {
       if (!playing()) {
