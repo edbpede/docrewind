@@ -212,12 +212,15 @@ export const activeStorageLeases = storage.defineItem<readonly ActiveStorageLeas
  * plus two queue reads even to service a trivial `getCheckpoint`.
  *
  * The pending hint is deliberately one-sided: enqueues RAISE it strictly AFTER
- * their queue write lands, and a drain LOWERS it strictly BEFORE reading the
- * queues (re-raising if entries were left deferred). So if a drain's lower ever
- * overwrites a concurrent enqueue's raise, that drain's queue read necessarily
- * happened after the enqueue's queue write and the entry is seen anyway — a
- * false "nothing pending" is impossible, while a stale "maybe pending" merely
- * costs the two queue reads every wake used to pay unconditionally.
+ * their queue write lands, and a drain LOWERS it only once it believes the
+ * queues are drained, strictly BEFORE a final confirming re-read — re-raising if
+ * a concurrent enqueue slipped in or entries were left deferred. So if a drain's
+ * lower ever overwrites a concurrent enqueue's raise, that drain's re-read
+ * necessarily happened after the enqueue's queue write and the entry is seen
+ * anyway — a false "nothing pending" is impossible, while a stale "maybe
+ * pending" merely costs the two queue reads every wake used to pay
+ * unconditionally. Because the drain never lowers the hint before doing its
+ * work, an MV3 kill mid-drain leaves the hint raised and the next wake re-drains.
  *
  * The fallback declares work pending, so a user upgrading from a build without
  * the marker still gets the legacy cleanup and a first drain.
@@ -236,17 +239,37 @@ export async function readBackgroundStartupMarker(): Promise<BackgroundStartupMa
   return backgroundStartupMarker.getValue();
 }
 
+// Serialize every backgroundStartupMarker read-modify-write through one queue.
+// The marker is a single JSON blob holding two independent fields, so a blind
+// last-write-wins patch (e.g. the one-shot legacy-cleanup mark) can otherwise
+// read a stale snapshot and clobber a concurrent raise/lower of the OTHER field.
+// This mirrors the per-item mutation queues below for the durable-intent arrays;
+// it serializes writers within a context (cross-context safety for the pending
+// field still rests on the raise-after-write / lower-before-read ordering).
+let backgroundStartupMarkerMutationQueue: Promise<void> = Promise.resolve();
+
+function enqueueBackgroundStartupMarkerMutation<T>(mutation: () => Promise<T>): Promise<T> {
+  const run = backgroundStartupMarkerMutationQueue.then(mutation, mutation);
+  backgroundStartupMarkerMutationQueue = run.then(
+    () => {},
+    () => {},
+  );
+  return run;
+}
+
 async function patchBackgroundStartupMarker(
   patch: Partial<BackgroundStartupMarker>,
 ): Promise<void> {
-  const current = await backgroundStartupMarker.getValue();
-  const next = { ...current, ...patch };
-  if (
-    next.legacyIdentityKeyCleared !== current.legacyIdentityKeyCleared ||
-    next.durableIntentsMaybePending !== current.durableIntentsMaybePending
-  ) {
-    await backgroundStartupMarker.setValue(next);
-  }
+  await enqueueBackgroundStartupMarkerMutation(async () => {
+    const current = await backgroundStartupMarker.getValue();
+    const next = { ...current, ...patch };
+    if (
+      next.legacyIdentityKeyCleared !== current.legacyIdentityKeyCleared ||
+      next.durableIntentsMaybePending !== current.durableIntentsMaybePending
+    ) {
+      await backgroundStartupMarker.setValue(next);
+    }
+  });
 }
 
 /** Record that the one-shot legacy `resolvedIdentities` on-disk cleanup ran. */
@@ -263,8 +286,11 @@ export async function markDurableIntentsMaybePending(): Promise<void> {
 }
 
 /**
- * Lower the durable-intent hint. Callers MUST lower BEFORE reading the queues
- * and re-raise if entries remain (the drain in entrypoints/background.ts does).
+ * Lower the durable-intent hint. Callers MUST process the queues FIRST and lower
+ * only once they believe the queues are drained, strictly before a final
+ * confirming re-read that re-raises if a concurrent enqueue slipped in (the drain
+ * in entrypoints/background.ts does). Never lower before doing the work, so an
+ * MV3 kill mid-drain leaves the hint raised.
  */
 export async function markDurableIntentsDrained(): Promise<void> {
   await patchBackgroundStartupMarker({ durableIntentsMaybePending: false });

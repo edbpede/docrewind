@@ -252,12 +252,11 @@ export default defineBackground(() => {
   }
 
   async function drainPersistedRequests(): Promise<void> {
-    // Lower the pending hint BEFORE reading the queues: a concurrent enqueue
-    // raises it again after its queue write, so either this pass already reads
-    // the new entry or the re-raised hint schedules a later drain. Entries left
-    // behind (deferred behind a lease) re-raise the hint below so the next
-    // lease-release drain still sees work.
-    await markDurableIntentsDrained();
+    // Process the durable queues BEFORE touching the pending hint. This is
+    // MV3-crash-survivable code: the worker can be killed at any await, so the
+    // hint must never be durably lowered while entries still remain. We only
+    // lower it once we believe both queues are drained; a kill anywhere in the
+    // processing below leaves the hint raised and the next wake re-drains.
     let leftovers = false;
 
     for (const request of await getPendingDestructiveStorageClears()) {
@@ -278,7 +277,24 @@ export default defineBackground(() => {
       }
     }
 
+    // Deferred entries (blocked behind a lease) remain — keep the hint raised so
+    // the next lease-release drain still sees work; never lower it here.
     if (leftovers) {
+      await markDurableIntentsMaybePending();
+      return;
+    }
+
+    // Believed drained: lower the hint, then re-read the queues to catch a
+    // concurrent enqueue that raised the hint after its queue write. Lowering
+    // strictly before this confirming re-read preserves the ordering that makes
+    // the hint safe (see backgroundStartupMarker): if our lower overwrote that
+    // raise, our re-read happened after the enqueue's queue write and sees the
+    // entry, so we re-raise and a false "nothing pending" is impossible.
+    await markDurableIntentsDrained();
+    const stillPending =
+      (await getPendingDestructiveStorageClears()).length > 0 ||
+      (await getPendingStorageMaintenance()).length > 0;
+    if (stillPending) {
       await markDurableIntentsMaybePending();
     }
   }
