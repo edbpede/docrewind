@@ -13,7 +13,7 @@
 // slide render is shown. SolidJS idioms: `<For>`, never destructure props.
 
 import type { Component } from "solid-js";
-import { For, Show } from "solid-js";
+import { Index, Show } from "solid-js";
 import SlideCanvas from "@/components/SlideCanvas";
 import { slideOf, strings } from "@/lib/i18n/strings";
 import type { RenderedSlide } from "@/lib/slides-reconstruction/render";
@@ -69,32 +69,39 @@ const SlideStrip: Component<SlideStripProps> = (props) => {
         class="flex gap-2.5 overflow-x-auto pb-1"
         onKeyDown={onKeyDown}
       >
-        <For each={props.slides}>
+        {/* `<Index>`, not `<For>`: `props.slides` is a fresh array of freshly
+            projected slides on every replay frame, so reference-keyed `<For>`
+            would rebuild every thumbnail button each revision — the flicker, and
+            the reason a click so often landed on a node that was about to be
+            destroyed. `<Index>` keys by position: the buttons persist and only
+            their inner canvas updates, so selection is stable and clickable while
+            playback runs. */}
+        <Index each={props.slides}>
           {(slide, index) => (
             <button
               type="button"
               role="tab"
-              id={slideTabId(index())}
-              aria-selected={index() === props.activeIndex}
+              id={slideTabId(index)}
+              aria-selected={index === props.activeIndex}
               aria-controls={SLIDE_PANEL_ID}
-              aria-label={slideOf(index() + 1, props.slides.length)}
-              tabindex={index() === props.activeIndex ? 0 : -1}
+              aria-label={slideOf(index + 1, props.slides.length)}
+              tabindex={index === props.activeIndex ? 0 : -1}
               class="group relative shrink-0 rounded-lg outline-none ring-1 ring-hairline transition focus-visible:ring-2 focus-visible:ring-accent"
               classList={{
-                "ring-2 ring-accent": index() === props.activeIndex,
-                "opacity-70 hover:opacity-100": index() !== props.activeIndex,
+                "ring-2 ring-accent": index === props.activeIndex,
+                "opacity-70 hover:opacity-100": index !== props.activeIndex,
               }}
-              onClick={() => props.onSelect(index())}
+              onClick={() => props.onSelect(index)}
             >
               <div class="w-36 overflow-hidden rounded-lg bg-surface">
-                <SlideCanvas slide={slide} />
+                <SlideCanvas slide={slide()} />
               </div>
               <span class="absolute left-1 top-1 rounded bg-ink/70 px-1.5 text-[0.6875rem] font-medium tabular-nums text-canvas">
-                {index() + 1}
+                {index + 1}
               </span>
             </button>
           )}
-        </For>
+        </Index>
       </div>
     </Show>
   );

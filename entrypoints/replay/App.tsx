@@ -89,6 +89,7 @@ import {
 import type { Gid } from "@/lib/sheets-decoder/types";
 import { hasFidelityNotice } from "@/lib/sheets-reconstruction/render";
 import { gridAtRevisionIndex } from "@/lib/sheets-reconstruction/snapshot";
+import { slideIndexOfRevision } from "@/lib/slides-reconstruction/attribution";
 import {
   renderSlides,
   hasFidelityNotice as slidesHasFidelityNotice,
@@ -642,14 +643,53 @@ const ReplaySurface: Component<{
     const presentation = currentPresentation();
     return presentation === undefined ? [] : renderSlides(presentation);
   });
-  // The slide to show: the user's selection when it still exists at this frame,
-  // else clamped to the last slide — e.g. scrubbing BACKWARD to an earlier revision
-  // that had fewer slides than the currently-selected index.
+  // Which slide the CURRENT revision edits — the "follow edits" target for a deck
+  // (the Slides analogue of the Docs follow-caret). `currentIndex` is an applied
+  // count, so the frame's revision is `revisions[currentIndex - 1]`; index 0 is the
+  // blank pre-history page. Resolved against the POST-frame presentation so a shape
+  // (or slide) born in this very revision maps correctly. Null when the revision
+  // touches no user-visible slide (a template/layout op).
+  const followedSlideIndex = createMemo<number | null>(() => {
+    const entry = loaded();
+    const presentation = currentPresentation();
+    const index = currentIndex();
+    if (
+      entry === undefined ||
+      entry.kind !== "slides" ||
+      presentation === undefined ||
+      index <= 0
+    ) {
+      return null;
+    }
+    const revision = entry.data.revisions[index - 1];
+    return revision === undefined ? null : slideIndexOfRevision(presentation, revision);
+  });
+  // The slide to show. While "Follow edits" is on we track the slide the current
+  // revision edits, so playback walks the deck; otherwise we honour the user's pick.
+  // Either target is clamped to this frame's slide count — e.g. scrubbing BACKWARD
+  // to a revision that had fewer slides than the selected index. Follow falling back
+  // to the selection (when the current revision touches no slide) keeps the view put
+  // on a "no-slide" frame instead of snapping to slide 1.
   const activeSlideIndex = createMemo(() => {
     const total = deckSlides().length;
-    return total === 0 ? 0 : Math.min(Math.max(0, selectedSlide()), total - 1);
+    if (total === 0) return 0;
+    const followed = follow() ? followedSlideIndex() : null;
+    const target = followed ?? selectedSlide();
+    return Math.min(Math.max(0, target), total - 1);
   });
   const currentSlide = createMemo(() => deckSlides()[activeSlideIndex()]);
+  // Mirror the followed slide into the selection WHILE following, so turning
+  // "Follow edits" off leaves you on the slide you were watching (not snapped back
+  // to a stale manual pick). A manual thumbnail pick disengages follow (the strip's
+  // onSelect below), so this never fights the user. Slides-only and follow-only: the
+  // early returns keep the effect a true no-op (no per-frame reruns) for Docs/Sheets
+  // and while follow is off, holding no subscription to the edited slide until it
+  // actually drives selection.
+  createEffect(() => {
+    if (loaded()?.kind !== "slides" || !follow()) return;
+    const followed = followedSlideIndex();
+    if (followed !== null) setSelectedSlide(followed);
+  });
   const slidesFidelityNotice = createMemo(() => {
     const presentation = currentPresentation();
     return presentation !== undefined && slidesHasFidelityNotice(presentation);
@@ -1168,7 +1208,15 @@ const ReplaySurface: Component<{
                               <SlideStrip
                                 slides={deckSlides()}
                                 activeIndex={activeSlideIndex()}
-                                onSelect={setSelectedSlide}
+                                onSelect={(index) => {
+                                  // A manual slide pick is "let me look here" — it
+                                  // disengages follow so the choice sticks (the
+                                  // Slides mirror of a manual scroll disengaging the
+                                  // Docs follow-caret). The toggle or a scrub
+                                  // re-engages follow.
+                                  setSelectedSlide(index);
+                                  setFollow(false);
+                                }}
                               />
                               {/* The tab semantics only apply when the filmstrip
                                   (the tablist) renders — i.e. more than one slide.
