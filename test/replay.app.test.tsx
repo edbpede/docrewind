@@ -95,6 +95,11 @@ describe("Replay App run gating", () => {
     cleanup();
     fakeBrowser.reset();
     sendMessageMock.mockReset();
+    // A promise-returning default even after reset: the real sendMessage always
+    // returns a Promise, and a previous test's still-draining async teardown
+    // (lease release / maintenance) may call it after this reset — a bare mock's
+    // `undefined` would make the app's `.catch(...)` throw an unhandled rejection.
+    sendMessageMock.mockResolvedValue(undefined);
     setReplayUrl();
     installMatchMedia();
     vi.useFakeTimers();
