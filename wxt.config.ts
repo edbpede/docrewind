@@ -27,6 +27,12 @@ export default defineConfig({
   // is pure noise. Drop precisely this message via Rollup's onwarn and forward
   // everything else untouched; this only affects production builds.
   vite: () => ({
+    // ES output for bundled Web Workers so the per-kind dynamic imports in
+    // entrypoints/replay/parse.worker.ts actually code-split (the default iife
+    // worker format cannot code-split and would inline all three editor cores
+    // back into one bundle). The worker is already `type: "module"`, so both
+    // engines' support floors are unchanged by this.
+    worker: { format: "es" as const },
     build: {
       rollupOptions: {
         onwarn(warning, defaultHandler) {

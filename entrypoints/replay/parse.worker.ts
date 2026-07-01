@@ -18,12 +18,15 @@ import type { DecodedRevision, TimelineEvent } from "@/lib/core/domain/model";
 import type { SheetsDecodedRevision } from "@/lib/core/sheets/decoder/types";
 import type { SlidesDecodedRevision } from "@/lib/core/slides/decoder/types";
 import type { StoredGridSnapshot, StoredSlidesSnapshot, StoredSnapshot } from "@/lib/core/store";
-import {
-  runPipelineOverBodies,
-  runSheetsPipelineOverBodies,
-  runSlidesPipelineOverBodies,
-} from "@/lib/core/worker/pipeline";
 import { createIdbStore } from "@/lib/platform/db";
+
+// The editor cores are dynamic-imported BY KIND (see handleParse): the request
+// tells us which grammar this document speaks, so a Doc replay's worker never
+// fetches/parses the Sheets + Slides decode/reconstruction chunks and vice
+// versa. Requires the ES worker output format (wxt.config.ts `worker.format`);
+// dynamic import in module workers is supported by both target engines
+// (Chromium, and Firefox ≥ 114 — the same floor as `type: "module"` workers,
+// which this worker has always required).
 
 /** Request: decode + reconstruct the document with this id from its raw chunks. */
 interface ParseRequest {
@@ -126,6 +129,7 @@ async function handleParse(request: ParseRequest): Promise<void> {
   const bodies = chunks.map((chunk) => chunk.body);
 
   if (request.kind === "sheet") {
+    const { runSheetsPipelineOverBodies } = await import("@/lib/core/worker/pipeline-sheets");
     const result = runSheetsPipelineOverBodies(bodies);
     if (result.kind === "unsupported") {
       post({ kind: "unsupported", docId: request.docId, runId: request.runId, revisionCount: 0 });
@@ -148,6 +152,7 @@ async function handleParse(request: ParseRequest): Promise<void> {
   }
 
   if (request.kind === "slides") {
+    const { runSlidesPipelineOverBodies } = await import("@/lib/core/worker/pipeline-slides");
     const result = runSlidesPipelineOverBodies(bodies);
     if (result.kind === "unsupported") {
       post({ kind: "unsupported", docId: request.docId, runId: request.runId, revisionCount: 0 });
@@ -169,6 +174,7 @@ async function handleParse(request: ParseRequest): Promise<void> {
     return;
   }
 
+  const { runPipelineOverBodies } = await import("@/lib/core/worker/pipeline-docs");
   const result = runPipelineOverBodies(bodies);
   if (result.kind === "unsupported") {
     post({ kind: "unsupported", docId: request.docId, runId: request.runId, revisionCount: 0 });
