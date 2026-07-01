@@ -5,7 +5,7 @@
 # (Decision D1), enforcing the ONE static invariant that keeps the gate honest.
 #
 # The gated tier is defined POSITIVELY by the path args of the `test:coverage`
-# script in package.json (currently `./lib/decoder ./lib/reconstruction`) and the
+# script in package.json (currently `./lib/core/docs/decoder ./lib/core/docs/reconstruction`) and the
 # per-file floor is shaped NEGATIVELY by `coveragePathIgnorePatterns` in
 # bunfig.toml (which drops transitively-loaded non-gated modules from the report).
 # These two lists are NOT complements of each other — the ignore list mirrors the
@@ -22,7 +22,7 @@
 # mode; this guard catches it.
 #
 # Granularity: only WHOLE-DIRECTORY suppression globs (`**/lib/<dir>/**`) count as
-# gating violations. A SINGLE-FILE exemption (`**/lib/decoder/thin-adapter.ts`) is
+# gating violations. A SINGLE-FILE exemption (`**/lib/core/docs/decoder/thin-adapter.ts`) is
 # the sanctioned iter3 escape hatch — it exempts one file inside a gated tier that
 # cannot meet the per-file floor while the rest of the tier stays measured — so it
 # is explicitly PERMITTED and never trips this guard, even though its path contains
@@ -52,7 +52,7 @@ fi
 # Ignore-list dirs: ONLY the whole-directory suppression globs `**/lib/<dir>/**`
 # from bunfig.toml's coveragePathIgnorePatterns, normalized to the bare `lib/<dir>`
 # form. We deliberately anchor extraction on a trailing `/**` so that single-file
-# exemptions (the iter3 escape hatch — e.g. `**/lib/decoder/thin-adapter.ts`, which
+# exemptions (the iter3 escape hatch — e.g. `**/lib/core/docs/decoder/thin-adapter.ts`, which
 # ends in a specific filename) are NOT treated as gating their parent dir. A
 # single-file exemption inside a gated tier is sanctioned: it exempts one file that
 # cannot meet the per-file floor while the rest of the tier stays gated, so it must
@@ -64,11 +64,13 @@ import re, tomllib
 with open("bunfig.toml", "rb") as fh:
     cfg = tomllib.load(fh)
 for pat in cfg.get("test", {}).get("coveragePathIgnorePatterns", []):
-    # Match only whole-directory suppression: pattern ends in `/lib/<dir>/**`.
+    # Match only whole-directory suppression: pattern ends in `/lib/<path>/**`.
+    # Captures the FULL nested lib path (e.g. `lib/core/domain`), so it matches the
+    # gated paths, which are also full nested dirs (e.g. `lib/core/docs/decoder`).
     # Single-file globs (ending in a `*.ts`/`*.tsx` filename) are intentionally skipped.
-    m = re.search(r'lib/([^/*]+)/\*\*$', pat)
+    m = re.search(r'(lib/[^*]+?)/\*\*$', pat)
     if m:
-        print("lib/" + m.group(1))
+        print(m.group(1))
 PY
 )
 

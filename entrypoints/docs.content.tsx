@@ -10,11 +10,11 @@
 
 import { render } from "solid-js/web";
 import "virtual:uno.css";
-import ReplayAffordance from "@/components/ReplayAffordance";
-import { parseDocsUrl } from "@/lib/docs-url";
-import { parseOwnGaia, resolveSelfIdentity, withSelfIdentity } from "@/lib/identity/resolve";
-import { sendMessage } from "@/lib/messaging";
-import { realIdentities, resolvedIdentities } from "@/lib/settings";
+import ReplayAffordance from "@/components/replay/ReplayAffordance";
+import { parseDocsUrl } from "@/lib/core/docs-url";
+import { parseOwnGaia, resolveSelfIdentity, withSelfIdentity } from "@/lib/core/identity/resolve";
+import { sendMessage } from "@/lib/platform/messaging";
+import { realIdentities, resolvedIdentities } from "@/lib/platform/settings";
 
 // Read the signed-in account label from the OneGoogle bar already on the page —
 // e.g. `"Google Account: Ada Lovelace\n(ada@example.com)"`. Prefer the account

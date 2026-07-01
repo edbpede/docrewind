@@ -123,7 +123,7 @@ test("replay renders the document as paragraph blocks and preserves the text", a
         `  actual:   ${JSON.stringify(columnText)}`,
         `  equal:    ${columnText === E2E_EXPECTED_FINAL_TEXT}`,
         "Pure-logic adversarial cases (consecutive newlines, struck paragraph mark, embed",
-        "boundary, snapshot-path==linear-path) are covered in lib/reconstruction/blocks.test.ts.",
+        "boundary, snapshot-path==linear-path) are covered in lib/core/docs/reconstruction/blocks.test.ts.",
         "",
       ].join("\n"),
     );

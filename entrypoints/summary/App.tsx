@@ -10,23 +10,23 @@
 
 import type { Component } from "solid-js";
 import { createResource, ErrorBoundary, Show, Suspense } from "solid-js";
-import BrandMark from "@/components/BrandMark";
-import DocumentSummary from "@/components/DocumentSummary";
-import { IconArrowLeft, IconChart, IconHistory } from "@/components/icons";
-import PrivacyBanner from "@/components/PrivacyBanner";
-import ThemeControl from "@/components/ThemeControl";
-import { useThemeSync } from "@/components/theme-sync";
-import { createIdbStore } from "@/lib/db";
-import { asDocId } from "@/lib/domain/ids";
-import type { DocumentKind } from "@/lib/domain/kind";
-import type { DocId } from "@/lib/domain/model";
-import { errorTitle, strings } from "@/lib/i18n/strings";
-import { loadReplayData, type ReplayLoadResult } from "@/lib/replay/load";
-import { retrievalError } from "@/lib/retrieval/errors";
-import { deriveSheetsSummary } from "@/lib/sheets-reconstruction/derive";
-import { deriveSlidesSummary } from "@/lib/slides-reconstruction/derive";
-import type { RevisionStore } from "@/lib/store";
-import { deriveDocumentSummary } from "@/lib/summary/derive";
+import BrandMark from "@/components/common/BrandMark";
+import { IconArrowLeft, IconChart, IconHistory } from "@/components/common/icons";
+import PrivacyBanner from "@/components/common/PrivacyBanner";
+import ThemeControl from "@/components/common/ThemeControl";
+import { useThemeSync } from "@/components/common/theme-sync";
+import DocumentSummary from "@/components/summary/DocumentSummary";
+import { asDocId } from "@/lib/core/domain/ids";
+import type { DocumentKind } from "@/lib/core/domain/kind";
+import type { DocId } from "@/lib/core/domain/model";
+import { errorTitle, strings } from "@/lib/core/i18n/strings";
+import { loadReplayData, type ReplayLoadResult } from "@/lib/core/replay/load";
+import { retrievalError } from "@/lib/core/retrieval/errors";
+import { deriveSheetsSummary } from "@/lib/core/sheets/reconstruction/derive";
+import { deriveSlidesSummary } from "@/lib/core/slides/reconstruction/derive";
+import type { RevisionStore } from "@/lib/core/store";
+import { deriveDocumentSummary } from "@/lib/core/summary/derive";
+import { createIdbStore } from "@/lib/platform/db";
 
 export interface SummaryAppProps {
   /** Bulk store (page realm). Injected in tests; defaults to the idb backend. */

@@ -7,21 +7,21 @@ import { cleanup, render, screen } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fakeBrowser } from "wxt/testing";
 import App from "@/entrypoints/replay/App";
-import { createMemoryStore } from "@/lib/db.memory";
-import { asDocId } from "@/lib/domain/ids";
-import { theme } from "@/lib/settings";
-import { asGid } from "@/lib/sheets-decoder/types";
-import { SHEETS_PARSER_VERSION } from "@/lib/sheets-decoder/version";
+import { asDocId } from "@/lib/core/domain/ids";
+import { asGid } from "@/lib/core/sheets/decoder/types";
+import { SHEETS_PARSER_VERSION } from "@/lib/core/sheets/decoder/version";
 import {
   cellKey,
   createCell,
   createModel,
   createSheet,
   type GridModel,
-} from "@/lib/sheets-reconstruction/model";
+} from "@/lib/core/sheets/reconstruction/model";
+import { createMemoryStore } from "@/lib/platform/db.memory";
+import { theme } from "@/lib/platform/settings";
 
 const { sendMessageMock } = vi.hoisted(() => ({ sendMessageMock: vi.fn() }));
-vi.mock("@/lib/messaging", () => ({ sendMessage: sendMessageMock }));
+vi.mock("@/lib/platform/messaging", () => ({ sendMessage: sendMessageMock }));
 
 const DOC = asDocId("sheetReplayDoc");
 

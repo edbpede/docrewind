@@ -8,7 +8,7 @@
 
 import { render } from "solid-js/web";
 import "virtual:uno.css";
-import PopupApp from "@/components/PopupApp";
+import PopupApp from "@/components/popup/PopupApp";
 
 const root = document.getElementById("app");
 if (!root) {

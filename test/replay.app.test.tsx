@@ -3,21 +3,21 @@ import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fakeBrowser } from "wxt/testing";
 import App, { parseUserIndex } from "@/entrypoints/replay/App";
-import { createMemoryStore } from "@/lib/db.memory";
-import { PARSER_VERSION } from "@/lib/decoder/version";
-import { asDocId, asRevisionId } from "@/lib/domain/ids";
-import type { DecodedRevision, RawPayload } from "@/lib/domain/model";
-import { strings } from "@/lib/i18n/strings";
-import type { RetrievalAck } from "@/lib/messaging";
-import { createModel } from "@/lib/reconstruction/model";
-import { retrievalError } from "@/lib/retrieval/errors";
-import { keepRawData, theme } from "@/lib/settings";
+import { PARSER_VERSION } from "@/lib/core/docs/decoder/version";
+import { createModel } from "@/lib/core/docs/reconstruction/model";
+import { asDocId, asRevisionId } from "@/lib/core/domain/ids";
+import type { DecodedRevision, RawPayload } from "@/lib/core/domain/model";
+import { strings } from "@/lib/core/i18n/strings";
+import { retrievalError } from "@/lib/core/retrieval/errors";
+import { createMemoryStore } from "@/lib/platform/db.memory";
+import type { RetrievalAck } from "@/lib/platform/messaging";
+import { keepRawData, theme } from "@/lib/platform/settings";
 
 const { sendMessageMock } = vi.hoisted(() => ({
   sendMessageMock: vi.fn(),
 }));
 
-vi.mock("@/lib/messaging", () => ({
+vi.mock("@/lib/platform/messaging", () => ({
   sendMessage: sendMessageMock,
 }));
 

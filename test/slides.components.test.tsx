@@ -10,8 +10,8 @@
 import { fireEvent, render } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { describe, expect, it, vi } from "vitest";
-import SlideStrip, { SLIDE_PANEL_ID, slideTabId } from "@/components/SlideStrip";
-import type { RenderedShape, RenderedSlide } from "@/lib/slides-reconstruction/render";
+import SlideStrip, { SLIDE_PANEL_ID, slideTabId } from "@/components/slides/SlideStrip";
+import type { RenderedShape, RenderedSlide } from "@/lib/core/slides/reconstruction/render";
 
 function textShape(text: string): RenderedShape {
   return {

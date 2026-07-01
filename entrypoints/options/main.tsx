@@ -6,7 +6,7 @@
 
 import { render } from "solid-js/web";
 import "virtual:uno.css";
-import OptionsApp from "@/components/OptionsApp";
+import OptionsApp from "@/components/options/OptionsApp";
 
 const root = document.getElementById("app");
 if (!root) {

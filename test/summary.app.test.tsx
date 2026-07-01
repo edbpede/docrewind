@@ -3,21 +3,21 @@ import { cleanup, render, screen } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fakeBrowser } from "wxt/testing";
 import App from "@/entrypoints/summary/App";
-import { createMemoryStore } from "@/lib/db.memory";
-import type { Operation } from "@/lib/decoder/types";
-import { PARSER_VERSION } from "@/lib/decoder/version";
-import { asDocId, asRevisionId } from "@/lib/domain/ids";
-import type { DocumentKind } from "@/lib/domain/kind";
-import type { DecodedRevision } from "@/lib/domain/model";
-import { errorTitle, strings } from "@/lib/i18n/strings";
-import { SHEETS_PARSER_VERSION } from "@/lib/sheets-decoder/version";
-import { SLIDES_PARSER_VERSION } from "@/lib/slides-decoder/version";
+import type { Operation } from "@/lib/core/docs/decoder/types";
+import { PARSER_VERSION } from "@/lib/core/docs/decoder/version";
+import { asDocId, asRevisionId } from "@/lib/core/domain/ids";
+import type { DocumentKind } from "@/lib/core/domain/kind";
+import type { DecodedRevision } from "@/lib/core/domain/model";
+import { errorTitle, strings } from "@/lib/core/i18n/strings";
+import { SHEETS_PARSER_VERSION } from "@/lib/core/sheets/decoder/version";
+import { SLIDES_PARSER_VERSION } from "@/lib/core/slides/decoder/version";
 import type {
   ReplayPublication,
   RevisionStore,
   SheetReplayPublication,
   SlideReplayPublication,
-} from "@/lib/store";
+} from "@/lib/core/store";
+import { createMemoryStore } from "@/lib/platform/db.memory";
 
 const DOC = asDocId("docSummaryTest");
 

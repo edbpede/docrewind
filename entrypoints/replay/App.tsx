@@ -25,25 +25,26 @@ import {
   Suspense,
   Switch,
 } from "solid-js";
-import BrandMark from "@/components/BrandMark";
-import DocumentViewport from "@/components/DocumentViewport";
-import GridViewport from "@/components/GridViewport";
-import { IconAlert, IconChart, IconSettings } from "@/components/icons";
-import PlaybackControls from "@/components/PlaybackControls";
-import PrivacyBanner from "@/components/PrivacyBanner";
-import ProgressView, { type ProgressPhase } from "@/components/ProgressView";
-import SheetTabs, { SHEET_GRID_PANEL_ID, sheetTabId } from "@/components/SheetTabs";
-import SlideStrip, { SLIDE_PANEL_ID, slideTabId } from "@/components/SlideStrip";
-import SlideViewport from "@/components/SlideViewport";
-import SummaryInsights from "@/components/SummaryInsights";
-import ThemeControl from "@/components/ThemeControl";
-import Timeline, { type TimelineMarker } from "@/components/Timeline";
-import TimelineLegend from "@/components/TimelineLegend";
-import { useThemeSync } from "@/components/theme-sync";
-import { createIdbStore } from "@/lib/db";
-import { asDocId } from "@/lib/domain/ids";
-import type { DocumentKind } from "@/lib/domain/kind";
-import type { DocId, TimelineEvent } from "@/lib/domain/model";
+import BrandMark from "@/components/common/BrandMark";
+import { IconAlert, IconChart, IconSettings } from "@/components/common/icons";
+import PrivacyBanner from "@/components/common/PrivacyBanner";
+import ThemeControl from "@/components/common/ThemeControl";
+import { useThemeSync } from "@/components/common/theme-sync";
+import DocumentViewport from "@/components/replay/DocumentViewport";
+import PlaybackControls from "@/components/replay/PlaybackControls";
+import ProgressView, { type ProgressPhase } from "@/components/replay/ProgressView";
+import SummaryInsights from "@/components/replay/SummaryInsights";
+import Timeline, { type TimelineMarker } from "@/components/replay/Timeline";
+import TimelineLegend from "@/components/replay/TimelineLegend";
+import GridViewport from "@/components/sheets/GridViewport";
+import SheetTabs, { SHEET_GRID_PANEL_ID, sheetTabId } from "@/components/sheets/SheetTabs";
+import SlideStrip, { SLIDE_PANEL_ID, slideTabId } from "@/components/slides/SlideStrip";
+import SlideViewport from "@/components/slides/SlideViewport";
+import { blocksAt } from "@/lib/core/docs/reconstruction/blocks";
+import { modelAtRevisionIndex } from "@/lib/core/docs/reconstruction/snapshot";
+import { asDocId } from "@/lib/core/domain/ids";
+import type { DocumentKind } from "@/lib/core/domain/kind";
+import type { DocId, TimelineEvent } from "@/lib/core/domain/model";
 import {
   type EditUnit,
   errorTitle,
@@ -52,11 +53,8 @@ import {
   revisionOf,
   sessionDetail,
   strings,
-} from "@/lib/i18n/strings";
-import { deriveAuthors } from "@/lib/identity/authors";
-import { sendMessage } from "@/lib/messaging";
-import { blocksAt } from "@/lib/reconstruction/blocks";
-import { modelAtRevisionIndex } from "@/lib/reconstruction/snapshot";
+} from "@/lib/core/i18n/strings";
+import { deriveAuthors } from "@/lib/core/identity/authors";
 import {
   type DecodeOutcome,
   loadReplayData,
@@ -73,9 +71,21 @@ import {
   type SheetReplayDerivedData,
   type SlideReplayData,
   type SlideReplayDerivedData,
-} from "@/lib/replay/load";
-import type { RevisionMeta } from "@/lib/replay-core/meta";
-import { type RetrievalErrorCategory, retrievalError } from "@/lib/retrieval/errors";
+} from "@/lib/core/replay/load";
+import type { RevisionMeta } from "@/lib/core/replay-core/meta";
+import { type RetrievalErrorCategory, retrievalError } from "@/lib/core/retrieval/errors";
+import type { Gid } from "@/lib/core/sheets/decoder/types";
+import { hasFidelityNotice } from "@/lib/core/sheets/reconstruction/render";
+import { gridAtRevisionIndex } from "@/lib/core/sheets/reconstruction/snapshot";
+import { slideIndexOfRevision } from "@/lib/core/slides/reconstruction/attribution";
+import {
+  renderSlides,
+  hasFidelityNotice as slidesHasFidelityNotice,
+} from "@/lib/core/slides/reconstruction/render";
+import { presentationAtRevisionIndex } from "@/lib/core/slides/reconstruction/snapshot";
+import type { RevisionStore } from "@/lib/core/store";
+import { createIdbStore } from "@/lib/platform/db";
+import { sendMessage } from "@/lib/platform/messaging";
 import {
   createPendingStorageMaintenanceRequest,
   keepRawData,
@@ -85,17 +95,7 @@ import {
   STORAGE_LEASE_REFRESH_MS,
   storageBudget,
   upsertPendingStorageMaintenance,
-} from "@/lib/settings";
-import type { Gid } from "@/lib/sheets-decoder/types";
-import { hasFidelityNotice } from "@/lib/sheets-reconstruction/render";
-import { gridAtRevisionIndex } from "@/lib/sheets-reconstruction/snapshot";
-import { slideIndexOfRevision } from "@/lib/slides-reconstruction/attribution";
-import {
-  renderSlides,
-  hasFidelityNotice as slidesHasFidelityNotice,
-} from "@/lib/slides-reconstruction/render";
-import { presentationAtRevisionIndex } from "@/lib/slides-reconstruction/snapshot";
-import type { RevisionStore } from "@/lib/store";
+} from "@/lib/platform/settings";
 
 export interface ReplayAppProps {
   /** Bulk store (page realm). Injected in tests; defaults to the idb backend. */

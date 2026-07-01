@@ -2,13 +2,13 @@
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import DocumentViewport from "@/components/DocumentViewport";
-import PlaybackControls from "@/components/PlaybackControls";
-import SummaryInsights from "@/components/SummaryInsights";
-import Timeline, { clusterMarkers, type TimelineMarker } from "@/components/Timeline";
-import TimelineLegend from "@/components/TimelineLegend";
-import type { Block } from "@/lib/reconstruction/blocks";
-import type { Segment } from "@/lib/reconstruction/render";
+import DocumentViewport from "@/components/replay/DocumentViewport";
+import PlaybackControls from "@/components/replay/PlaybackControls";
+import SummaryInsights from "@/components/replay/SummaryInsights";
+import Timeline, { clusterMarkers, type TimelineMarker } from "@/components/replay/Timeline";
+import TimelineLegend from "@/components/replay/TimelineLegend";
+import type { Block } from "@/lib/core/docs/reconstruction/blocks";
+import type { Segment } from "@/lib/core/docs/reconstruction/render";
 
 // jsdom ships no ResizeObserver, and the Timeline only stacks colliding seals
 // once it has a measured width. This mock reports a fixed 600px track and fires
@@ -26,8 +26,8 @@ class ResizeObserverMock {
   disconnect(): void {}
 }
 
-import { asRevisionId, asUserId } from "@/lib/domain/ids";
-import type { DecodedRevision } from "@/lib/domain/model";
+import { asRevisionId, asUserId } from "@/lib/core/domain/ids";
+import type { DecodedRevision } from "@/lib/core/domain/model";
 
 function revision(
   id: number,

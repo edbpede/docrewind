@@ -2,9 +2,9 @@
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fakeBrowser } from "wxt/testing";
-import PopupApp from "@/components/PopupApp";
-import { strings } from "@/lib/i18n/strings";
-import { theme } from "@/lib/settings";
+import PopupApp from "@/components/popup/PopupApp";
+import { strings } from "@/lib/core/i18n/strings";
+import { theme } from "@/lib/platform/settings";
 
 // useThemeSync reads window.matchMedia on mount; jsdom omits it.
 function installMatchMedia(): void {

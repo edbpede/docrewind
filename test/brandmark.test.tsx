@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { cleanup, render } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it } from "vitest";
-import BrandMark from "@/components/BrandMark";
+import BrandMark from "@/components/common/BrandMark";
 
 afterEach(cleanup);
 

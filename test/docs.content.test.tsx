@@ -2,15 +2,15 @@
 //
 // Content-script affordance tests (plan §1.6, Vitest tier). Covers explicit-
 // activation-only behavior, shadow-root isolation, and the typed-messaging
-// trigger. Doc detection / id extraction is bun-tested in lib/docs-url.
+// trigger. Doc detection / id extraction is bun-tested in lib/core/docs-url.
 
 import { fireEvent, render as renderTL } from "@solidjs/testing-library";
 import { render } from "solid-js/web";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fakeBrowser } from "wxt/testing";
-import ReplayAffordance from "@/components/ReplayAffordance";
-import { asDocId } from "@/lib/domain/ids";
-import { onMessage, removeAllListeners, sendMessage } from "@/lib/messaging";
+import ReplayAffordance from "@/components/replay/ReplayAffordance";
+import { asDocId } from "@/lib/core/domain/ids";
+import { onMessage, removeAllListeners, sendMessage } from "@/lib/platform/messaging";
 
 describe("ReplayAffordance", () => {
   it("renders a button and does NOT activate on mount", () => {
