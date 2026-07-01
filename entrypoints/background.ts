@@ -56,15 +56,15 @@ import type { ChunkFetcher, ChunkRequest } from "@/lib/core/retrieval/transport"
 import { createIdbStore } from "@/lib/platform/db";
 import { onMessage } from "@/lib/platform/messaging";
 import {
+  advanceDurableIntentsDrainedSeq,
   beginStorageLease,
   endStorageLease,
+  getDurableIntentsEnqueueSeq,
   getPendingDestructiveStorageClears,
   getPendingStorageMaintenance,
   hasActiveStorageLease,
-  markDurableIntentsDrained,
-  markDurableIntentsMaybePending,
   markLegacyIdentityKeyCleared,
-  readBackgroundStartupMarker,
+  readBackgroundStartupState,
   realIdentities,
   refreshStorageLease,
   removePendingDestructiveStorageClear,
@@ -111,16 +111,17 @@ export default defineBackground(() => {
   //    outlive the session for users upgrading from that build. Best-effort and
   //    idempotent (a lost marker write merely re-runs the harmless remove). WXT
   //    strips the area prefix, so the on-disk key is the bare `resolvedIdentities`.
-  //  • Durable-intent drain: only when the hint says entries may exist. The hint
-  //    can never falsely say "empty" (enqueues raise it after their queue write),
-  //    so a skipped drain is always safe.
+  //  • Durable-intent drain: only when the generation counters disagree
+  //    (enqueueSeq !== drainedSeq). enqueueSeq is bumped after each queue write
+  //    and drainedSeq advances only on a full drain, so a skipped drain is always
+  //    safe (see durableIntentsEnqueueSeq).
   void (async () => {
-    const marker = await readBackgroundStartupMarker();
-    if (!marker.legacyIdentityKeyCleared) {
+    const { legacyIdentityKeyCleared, enqueueSeq, drainedSeq } = await readBackgroundStartupState();
+    if (!legacyIdentityKeyCleared) {
       await browser.storage.local.remove("resolvedIdentities").catch(() => {});
       await markLegacyIdentityKeyCleared();
     }
-    if (marker.durableIntentsMaybePending) {
+    if (enqueueSeq !== drainedSeq) {
       await drainPersistedRequests();
     }
   })().catch(() => {});
@@ -252,11 +253,14 @@ export default defineBackground(() => {
   }
 
   async function drainPersistedRequests(): Promise<void> {
-    // Process the durable queues BEFORE touching the pending hint. This is
-    // MV3-crash-survivable code: the worker can be killed at any await, so the
-    // hint must never be durably lowered while entries still remain. We only
-    // lower it once we believe both queues are drained; a kill anywhere in the
-    // processing below leaves the hint raised and the next wake re-drains.
+    // Capture the enqueue generation BEFORE touching the queues. A concurrent
+    // enqueue during processing bumps it past this snapshot, so advancing
+    // drainedSeq to the snapshot at the end leaves the two unequal and the next
+    // wake re-drains. This is MV3-crash-survivable: the only durable "drained"
+    // write is the single terminal advance below, so a kill anywhere before it
+    // leaves drainedSeq stale (< enqueueSeq) and the hint stays pending (see
+    // durableIntentsEnqueueSeq).
+    const seqAtStart = await getDurableIntentsEnqueueSeq();
     let leftovers = false;
 
     for (const request of await getPendingDestructiveStorageClears()) {
@@ -277,31 +281,23 @@ export default defineBackground(() => {
       }
     }
 
-    // Deferred entries (blocked behind a lease) remain — keep the hint raised so
-    // the next lease-release drain still sees work; never lower it here.
+    // Deferred entries (blocked behind a lease) remain — leave drainedSeq stale
+    // so the hint stays pending and the next lease-release drain still runs.
     if (leftovers) {
-      await markDurableIntentsMaybePending();
       return;
     }
 
-    // Believed drained: lower the hint, then re-read the queues to catch a
-    // concurrent enqueue that raised the hint after its queue write. Lowering
-    // strictly before this confirming re-read preserves the ordering that makes
-    // the hint safe (see backgroundStartupMarker): if our lower overwrote that
-    // raise, our re-read happened after the enqueue's queue write and sees the
-    // entry, so we re-raise and a false "nothing pending" is impossible.
-    await markDurableIntentsDrained();
-    const stillPending =
-      (await getPendingDestructiveStorageClears()).length > 0 ||
-      (await getPendingStorageMaintenance()).length > 0;
-    if (stillPending) {
-      await markDurableIntentsMaybePending();
-    }
+    // Full drain: commit the observed start generation as drained. Any enqueue
+    // that raced this drain bumped enqueueSeq past seqAtStart, so it stays
+    // pending; a false "nothing pending" is impossible because we commit the
+    // PRE-processing snapshot, never a re-read a concurrent enqueue could clobber.
+    await advanceDurableIntentsDrainedSeq(seqAtStart);
   }
 
-  /** Drain only when the one-read hint says entries may exist (the common case is "no"). */
+  /** Drain only when the generation counters disagree (the common case is "no"). */
   async function drainPersistedRequestsIfHinted(): Promise<void> {
-    if ((await readBackgroundStartupMarker()).durableIntentsMaybePending) {
+    const { enqueueSeq, drainedSeq } = await readBackgroundStartupState();
+    if (enqueueSeq !== drainedSeq) {
       await drainPersistedRequests();
     }
   }

@@ -9,23 +9,26 @@ import { fakeBrowser } from "wxt/testing";
 import { asDocId } from "@/lib/core/domain/ids";
 import {
   activeStorageLeases,
+  advanceDurableIntentsDrainedSeq,
   backgroundStartupMarker,
   beginStorageLease,
   createPendingDestructiveStorageClear,
   createPendingStorageMaintenanceRequest,
   DEFAULT_STORAGE_BUDGET,
+  durableIntentsDrainedSeq,
+  durableIntentsEnqueueSeq,
   endStorageLease,
+  getDurableIntentsEnqueueSeq,
   getPendingDestructiveStorageClears,
   getPendingStorageMaintenance,
   hasActiveStorageLease,
   isCurrentPendingDestructiveStorageClear,
   isCurrentPendingStorageMaintenance,
   keepRawData,
-  markDurableIntentsDrained,
   markLegacyIdentityKeyCleared,
   pendingDestructiveStorageClears,
   pendingStorageMaintenance,
-  readBackgroundStartupMarker,
+  readBackgroundStartupState,
   realIdentities,
   refreshStorageLease,
   removePendingDestructiveStorageClear,
@@ -237,25 +240,28 @@ describe("settings", () => {
       expect(await getPendingDestructiveStorageClears()).toEqual([]);
     });
 
-    it("startup marker defaults to work-pending so an upgrading user gets cleanup + a first drain", async () => {
-      expect(await readBackgroundStartupMarker()).toEqual({
-        legacyIdentityKeyCleared: false,
-        durableIntentsMaybePending: true,
-      });
+    it("startup state defaults to work-pending (enqueueSeq !== drainedSeq) for an upgrading user", async () => {
+      const state = await readBackgroundStartupState();
+      expect(state.legacyIdentityKeyCleared).toBe(false);
+      expect(state.enqueueSeq).toBe(1);
+      expect(state.drainedSeq).toBe(0);
+      expect(state.enqueueSeq).not.toBe(state.drainedSeq);
     });
 
-    it("marks the legacy identity cleanup done exactly once, surviving a drain's lower", async () => {
+    it("marks the legacy identity cleanup done exactly once, independent of the drain counters", async () => {
       await markLegacyIdentityKeyCleared();
-      await markDurableIntentsDrained();
-      expect(await readBackgroundStartupMarker()).toEqual({
-        legacyIdentityKeyCleared: true,
-        durableIntentsMaybePending: false,
-      });
+      await advanceDurableIntentsDrainedSeq(await getDurableIntentsEnqueueSeq());
+      const state = await readBackgroundStartupState();
+      expect(state.legacyIdentityKeyCleared).toBe(true);
+      // A full drain cleared the pending hint without touching the legacy flag.
+      expect(state.enqueueSeq).toBe(state.drainedSeq);
     });
 
-    it("raises the durable-intent hint AFTER a maintenance upsert lands (never a false 'empty')", async () => {
-      await markDurableIntentsDrained();
-      expect((await readBackgroundStartupMarker()).durableIntentsMaybePending).toBe(false);
+    it("bumps the enqueue generation AFTER a maintenance upsert lands (never a false 'empty')", async () => {
+      // Simulate a prior full drain: drainedSeq caught up to enqueueSeq.
+      await advanceDurableIntentsDrainedSeq(await getDurableIntentsEnqueueSeq());
+      let state = await readBackgroundStartupState();
+      expect(state.enqueueSeq).toBe(state.drainedSeq);
 
       await upsertPendingStorageMaintenance(
         createPendingStorageMaintenanceRequest({
@@ -266,24 +272,27 @@ describe("settings", () => {
         }),
       );
 
-      expect((await readBackgroundStartupMarker()).durableIntentsMaybePending).toBe(true);
+      state = await readBackgroundStartupState();
+      expect(state.enqueueSeq).not.toBe(state.drainedSeq);
       expect(await getPendingStorageMaintenance()).toHaveLength(1);
     });
 
-    it("raises the durable-intent hint AFTER a destructive-clear upsert lands", async () => {
-      await markDurableIntentsDrained();
+    it("bumps the enqueue generation AFTER a destructive-clear upsert lands", async () => {
+      await advanceDurableIntentsDrainedSeq(await getDurableIntentsEnqueueSeq());
+      const drainedBefore = await durableIntentsDrainedSeq.getValue();
 
       await upsertPendingDestructiveStorageClear(
         createPendingDestructiveStorageClear({ kind: "all", queuedAt: 1 }),
       );
 
-      expect((await readBackgroundStartupMarker()).durableIntentsMaybePending).toBe(true);
+      expect(await durableIntentsEnqueueSeq.getValue()).toBeGreaterThan(drainedBefore);
+      expect(await durableIntentsDrainedSeq.getValue()).toBe(drainedBefore);
     });
 
-    it("skips the marker write when nothing changed (idempotent lower)", async () => {
-      await markDurableIntentsDrained();
+    it("skips the marker write when the legacy flag is already set (idempotent)", async () => {
+      await markLegacyIdentityKeyCleared();
       const before = await backgroundStartupMarker.getValue();
-      await markDurableIntentsDrained();
+      await markLegacyIdentityKeyCleared();
       expect(await backgroundStartupMarker.getValue()).toEqual(before);
     });
 

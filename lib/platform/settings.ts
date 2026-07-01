@@ -206,46 +206,99 @@ export const activeStorageLeases = storage.defineItem<readonly ActiveStorageLeas
 /**
  * Cold-start work marker (background wake cost). MV3 re-executes the whole
  * background body on EVERY wake, so the wake path must learn from ONE cheap read
- * whether any startup work exists at all: the one-shot legacy on-disk
- * `resolvedIdentities` cleanup, and whether the durable-intent queues above may
- * hold entries. Without it every wake paid one storage write (the legacy remove)
- * plus two queue reads even to service a trivial `getCheckpoint`.
+ * whether any startup work exists at all. This marker carries the one-shot
+ * legacy on-disk `resolvedIdentities` cleanup flag; the durable-intent drain
+ * hint is tracked SEPARATELY by the {@link durableIntentsEnqueueSeq} /
+ * {@link durableIntentsDrainedSeq} generation counters (see there). Both are
+ * batched into a SINGLE `storage.getItems` read at wake (see
+ * {@link readBackgroundStartupState}), so the steady-state wake still pays one
+ * round-trip, never a storage write plus two queue reads to service a trivial
+ * `getCheckpoint`.
  *
- * The pending hint is deliberately one-sided: enqueues RAISE it strictly AFTER
- * their queue write lands, and a drain LOWERS it only once it believes the
- * queues are drained, strictly BEFORE a final confirming re-read — re-raising if
- * a concurrent enqueue slipped in or entries were left deferred. So if a drain's
- * lower ever overwrites a concurrent enqueue's raise, that drain's re-read
- * necessarily happened after the enqueue's queue write and the entry is seen
- * anyway — a false "nothing pending" is impossible, while a stale "maybe
- * pending" merely costs the two queue reads every wake used to pay
- * unconditionally. Because the drain never lowers the hint before doing its
- * work, an MV3 kill mid-drain leaves the hint raised and the next wake re-drains.
- *
- * The fallback declares work pending, so a user upgrading from a build without
- * the marker still gets the legacy cleanup and a first drain.
+ * The `legacyIdentityKeyCleared` fallback is `false`, so a user upgrading from a
+ * build without the marker still gets the one-time cleanup.
  */
 export interface BackgroundStartupMarker {
   readonly legacyIdentityKeyCleared: boolean;
-  readonly durableIntentsMaybePending: boolean;
 }
 
 export const backgroundStartupMarker = storage.defineItem<BackgroundStartupMarker>(
   "local:backgroundStartupMarker",
-  { fallback: { legacyIdentityKeyCleared: false, durableIntentsMaybePending: true } },
+  { fallback: { legacyIdentityKeyCleared: false } },
+);
+
+/**
+ * Durable-intent drain hint, held as a pair of monotonic generation counters in
+ * TWO separate single-purpose keys. Pending ⟺ `enqueueSeq !== drainedSeq`.
+ *
+ *  • `durableIntentsEnqueueSeq` — bumped by the queue upserts below, strictly
+ *    AFTER their durable-queue write lands (see {@link bumpDurableIntentsEnqueueSeq}).
+ *  • `durableIntentsDrainedSeq` — advanced ONLY by the background drain, to the
+ *    enqueueSeq value it observed AT DRAIN START, and ONLY on a full drain.
+ *
+ * Why two keys and not one boolean blob: the drain and enqueue paths must never
+ * read-modify-write a SHARED value, or a drain's stale snapshot could clobber a
+ * concurrent enqueue's raise (the bug this scheme replaces). Each key has ONE
+ * writer role — enqueue only ever increments enqueueSeq; drain only ever sets
+ * drainedSeq to a value it captured BEFORE processing anything, never a re-read.
+ * So the two interleave without a lost signal:
+ *
+ *  • A concurrent enqueue during a drain bumps enqueueSeq past the drain's start
+ *    snapshot, so after the drain sets drainedSeq to that snapshot the two stay
+ *    unequal → the next wake re-drains. The drain's write cannot catch up to the
+ *    enqueue because it commits an OLD (pre-processing) value.
+ *  • An MV3 kill anywhere before the drain's single terminal drainedSeq write
+ *    leaves drainedSeq stale (still < enqueueSeq) → pending stays true → the next
+ *    wake re-drains. The crash always leaves the hint in the SAFE direction.
+ *  • enqueueSeq only ever rises, so even a lost cross-realm increment is safe: a
+ *    queue entry the drain didn't see was enqueued after the drain's snapshot, so
+ *    its bump still left enqueueSeq strictly above that snapshot.
+ *
+ * The fallbacks are unequal (1 ≠ 0), so a fresh or upgrading user drains once on
+ * first wake, mirroring the old work-pending default.
+ */
+export const durableIntentsEnqueueSeq = storage.defineItem<number>(
+  "local:durableIntentsEnqueueSeq",
+  { fallback: 1 },
+);
+
+export const durableIntentsDrainedSeq = storage.defineItem<number>(
+  "local:durableIntentsDrainedSeq",
+  { fallback: 0 },
 );
 
 export async function readBackgroundStartupMarker(): Promise<BackgroundStartupMarker> {
   return backgroundStartupMarker.getValue();
 }
 
-// Serialize every backgroundStartupMarker read-modify-write through one queue.
-// The marker is a single JSON blob holding two independent fields, so a blind
-// last-write-wins patch (e.g. the one-shot legacy-cleanup mark) can otherwise
-// read a stale snapshot and clobber a concurrent raise/lower of the OTHER field.
-// This mirrors the per-item mutation queues below for the durable-intent arrays;
-// it serializes writers within a context (cross-context safety for the pending
-// field still rests on the raise-after-write / lower-before-read ordering).
+/** Combined cold-start / wake state, fetched in ONE `storage.local` round-trip. */
+export interface BackgroundStartupState {
+  readonly legacyIdentityKeyCleared: boolean;
+  readonly enqueueSeq: number;
+  readonly drainedSeq: number;
+}
+
+export async function readBackgroundStartupState(): Promise<BackgroundStartupState> {
+  const results = await storage.getItems([
+    backgroundStartupMarker,
+    durableIntentsEnqueueSeq,
+    durableIntentsDrainedSeq,
+  ]);
+  const marker = results[0]?.value as BackgroundStartupMarker | undefined;
+  const enqueueSeq = results[1]?.value as number | undefined;
+  const drainedSeq = results[2]?.value as number | undefined;
+  // Fall back to the item defaults if a result is somehow absent — these mirror
+  // the `defineItem` fallbacks, keeping pending TRUE (1 ≠ 0) when unset.
+  return {
+    legacyIdentityKeyCleared: marker?.legacyIdentityKeyCleared ?? false,
+    enqueueSeq: enqueueSeq ?? 1,
+    drainedSeq: drainedSeq ?? 0,
+  };
+}
+
+// Serialize backgroundStartupMarker read-modify-writes through one queue so the
+// one-shot legacy-cleanup mark can't race a concurrent RMW of the blob. (The
+// durable-intent counters use their own single-writer keys, below.)
 let backgroundStartupMarkerMutationQueue: Promise<void> = Promise.resolve();
 
 function enqueueBackgroundStartupMarkerMutation<T>(mutation: () => Promise<T>): Promise<T> {
@@ -263,10 +316,7 @@ async function patchBackgroundStartupMarker(
   await enqueueBackgroundStartupMarkerMutation(async () => {
     const current = await backgroundStartupMarker.getValue();
     const next = { ...current, ...patch };
-    if (
-      next.legacyIdentityKeyCleared !== current.legacyIdentityKeyCleared ||
-      next.durableIntentsMaybePending !== current.durableIntentsMaybePending
-    ) {
+    if (next.legacyIdentityKeyCleared !== current.legacyIdentityKeyCleared) {
       await backgroundStartupMarker.setValue(next);
     }
   });
@@ -277,23 +327,45 @@ export async function markLegacyIdentityKeyCleared(): Promise<void> {
   await patchBackgroundStartupMarker({ legacyIdentityKeyCleared: true });
 }
 
-/**
- * Raise the durable-intent hint. Called by the queue upserts below AFTER their
- * queue write (see the ordering contract on {@link backgroundStartupMarker}).
- */
-export async function markDurableIntentsMaybePending(): Promise<void> {
-  await patchBackgroundStartupMarker({ durableIntentsMaybePending: true });
+// Serialize the enqueueSeq read-modify-write within a realm so two same-realm
+// upserts (a maintenance and a destructive clear can be in flight at once) never
+// lose a bump. Cross-realm bumps are NOT serialized, but a lost cross-realm
+// increment is still safe — see the safety argument on {@link durableIntentsEnqueueSeq}.
+let enqueueSeqMutationQueue: Promise<void> = Promise.resolve();
+
+function enqueueEnqueueSeqMutation<T>(mutation: () => Promise<T>): Promise<T> {
+  const run = enqueueSeqMutationQueue.then(mutation, mutation);
+  enqueueSeqMutationQueue = run.then(
+    () => {},
+    () => {},
+  );
+  return run;
 }
 
 /**
- * Lower the durable-intent hint. Callers MUST process the queues FIRST and lower
- * only once they believe the queues are drained, strictly before a final
- * confirming re-read that re-raises if a concurrent enqueue slipped in (the drain
- * in entrypoints/background.ts does). Never lower before doing the work, so an
- * MV3 kill mid-drain leaves the hint raised.
+ * Bump the enqueue generation. Called by the queue upserts below AFTER their
+ * durable-queue write lands — the ordering that keeps the drain hint safe (see
+ * {@link durableIntentsEnqueueSeq}).
  */
-export async function markDurableIntentsDrained(): Promise<void> {
-  await patchBackgroundStartupMarker({ durableIntentsMaybePending: false });
+export async function bumpDurableIntentsEnqueueSeq(): Promise<void> {
+  await enqueueEnqueueSeqMutation(async () => {
+    const current = await durableIntentsEnqueueSeq.getValue();
+    await durableIntentsEnqueueSeq.setValue(current + 1);
+  });
+}
+
+/** The enqueue generation, captured by the drain as its `seqAtStart`. */
+export async function getDurableIntentsEnqueueSeq(): Promise<number> {
+  return durableIntentsEnqueueSeq.getValue();
+}
+
+/**
+ * Advance the drained generation to the value {@link getDurableIntentsEnqueueSeq}
+ * returned at drain start. The drain's SINGLE terminal write, made only on a full
+ * drain; a kill before it leaves the hint pending (see {@link durableIntentsEnqueueSeq}).
+ */
+export async function advanceDurableIntentsDrainedSeq(seq: number): Promise<void> {
+  await durableIntentsDrainedSeq.setValue(seq);
 }
 
 let storageLeaseMutationQueue: Promise<void> = Promise.resolve();
@@ -484,9 +556,9 @@ export async function upsertPendingStorageMaintenance(
       ...current.filter((item) => pendingMaintenanceScopeKey(item) !== scope),
       request,
     ]);
-    // Raise strictly AFTER the queue write — the ordering that makes the
-    // startup-marker hint safe (see backgroundStartupMarker).
-    await markDurableIntentsMaybePending();
+    // Bump the enqueue generation strictly AFTER the queue write — the ordering
+    // that keeps the drain hint safe (see durableIntentsEnqueueSeq).
+    await bumpDurableIntentsEnqueueSeq();
   });
 }
 
@@ -587,9 +659,9 @@ export async function upsertPendingDestructiveStorageClear(
       ...current.filter((item) => item.id !== request.id),
       request,
     ]);
-    // Raise strictly AFTER the queue write — the ordering that makes the
-    // startup-marker hint safe (see backgroundStartupMarker).
-    await markDurableIntentsMaybePending();
+    // Bump the enqueue generation strictly AFTER the queue write — the ordering
+    // that keeps the drain hint safe (see durableIntentsEnqueueSeq).
+    await bumpDurableIntentsEnqueueSeq();
   });
 }
 

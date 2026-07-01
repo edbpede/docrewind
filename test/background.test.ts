@@ -20,8 +20,11 @@ import {
   beginStorageLease,
   createPendingDestructiveStorageClear,
   createPendingStorageMaintenanceRequest,
+  durableIntentsDrainedSeq,
+  durableIntentsEnqueueSeq,
   getPendingDestructiveStorageClears,
   getPendingStorageMaintenance,
+  pendingStorageMaintenance,
   readBackgroundStartupMarker,
   upsertPendingDestructiveStorageClear,
   upsertPendingStorageMaintenance,
@@ -819,6 +822,193 @@ describe("background retrieval wiring", () => {
       expect(await store.getRawChunks(durableDoc)).toEqual([]);
       expect(await store.getRawChunks(memoryDoc)).toEqual([]);
       expect(await getPendingDestructiveStorageClears()).toEqual([]);
+    });
+  });
+
+  it("skips the startup drain when the generation counters agree", async () => {
+    const docId = asDocId("docFullDrainSkipBG");
+    const store = createIdbStore();
+    await saveCompleteRawDocument(store, docId, "raw-body", 1);
+    const request = createPendingStorageMaintenanceRequest({
+      docId,
+      keepRawData: false,
+      budget: { perDocumentBytes: 1, globalCapBytes: 1 },
+      reconstructionStatus: "complete",
+      queuedAt: 1,
+    });
+    await upsertPendingStorageMaintenance(request);
+
+    runBackground();
+
+    // First wake: a full drain clears the raw and advances drainedSeq to match.
+    await vi.waitFor(async () => {
+      expect(await store.getRawChunks(docId)).toEqual([]);
+      expect(await getPendingStorageMaintenance()).toEqual([]);
+    });
+    expect(await durableIntentsEnqueueSeq.getValue()).toBe(
+      await durableIntentsDrainedSeq.getValue(),
+    );
+
+    // Plant a queue entry WITHOUT bumping enqueueSeq — the hint still says
+    // "nothing pending", so the next wake must NOT drain (a wrongly-run drain
+    // would complete-and-remove this entry).
+    const planted = createPendingStorageMaintenanceRequest({
+      docId: asDocId("docPlantedSkipBG"),
+      keepRawData: false,
+      budget: { perDocumentBytes: 1, globalCapBytes: 1 },
+      reconstructionStatus: "complete",
+      queuedAt: 2,
+    });
+    await pendingStorageMaintenance.setValue([planted]);
+
+    removeAllListeners();
+    runBackground();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(await getPendingStorageMaintenance()).toEqual([planted]);
+  });
+
+  it("leaves drainedSeq stale when a lease blocks the startup drain (stays pending)", async () => {
+    const docId = asDocId("docLeftoverPendingBG");
+    const store = createIdbStore();
+    await saveCompleteRawDocument(store, docId);
+    const request = createPendingStorageMaintenanceRequest({
+      docId,
+      keepRawData: false,
+      budget: { perDocumentBytes: 1, globalCapBytes: 1 },
+      reconstructionStatus: "complete",
+      queuedAt: 1,
+    });
+    await upsertPendingStorageMaintenance(request);
+    await beginStorageLease(docId, Date.now());
+
+    runBackground();
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    // Deferred behind the durable lease → drainedSeq NOT advanced → still pending.
+    expect(await store.getRawChunks(docId)).toHaveLength(1);
+    expect(await getPendingStorageMaintenance()).toEqual([request]);
+    expect(await durableIntentsDrainedSeq.getValue()).toBe(0);
+    expect(await durableIntentsEnqueueSeq.getValue()).not.toBe(
+      await durableIntentsDrainedSeq.getValue(),
+    );
+  });
+
+  it("re-drains an enqueue that raced the drain's final drainedSeq write", async () => {
+    const drainedDoc = asDocId("docRaceDrainedBG");
+    const racingDoc = asDocId("docRaceRacingBG");
+    const store = createIdbStore();
+    await saveCompleteRawDocument(store, drainedDoc, "drained-raw", 1);
+    await saveCompleteRawDocument(store, racingDoc, "racing-raw", 2);
+    await upsertPendingStorageMaintenance(
+      createPendingStorageMaintenanceRequest({
+        docId: drainedDoc,
+        keepRawData: false,
+        budget: { perDocumentBytes: 1, globalCapBytes: 1 },
+        reconstructionStatus: "complete",
+        queuedAt: 1,
+      }),
+    );
+
+    const racingRequest = createPendingStorageMaintenanceRequest({
+      docId: racingDoc,
+      keepRawData: false,
+      budget: { perDocumentBytes: 1, globalCapBytes: 1 },
+      reconstructionStatus: "complete",
+      queuedAt: 2,
+    });
+
+    // Inject a concurrent enqueue at the exact moment the drain commits its final
+    // drainedSeq write: it bumps enqueueSeq past the drain's captured seqAtStart,
+    // so drainedSeq lands BELOW enqueueSeq and the racing entry stays pending.
+    const originalSet = fakeBrowser.storage.local.set.bind(fakeBrowser.storage.local);
+    let injected = false;
+    vi.spyOn(fakeBrowser.storage.local, "set").mockImplementation(
+      async (items: Record<string, unknown>) => {
+        if (!injected && Object.hasOwn(items, "durableIntentsDrainedSeq")) {
+          injected = true;
+          await upsertPendingStorageMaintenance(racingRequest);
+        }
+        await originalSet(items);
+      },
+    );
+
+    runBackground();
+
+    // The drained doc's raw is cleared and drainedSeq advances to the pre-race
+    // snapshot, but the racing entry survives with enqueueSeq strictly higher.
+    await vi.waitFor(async () => {
+      expect(await store.getRawChunks(drainedDoc)).toEqual([]);
+      expect(injected).toBe(true);
+    });
+    expect(await durableIntentsEnqueueSeq.getValue()).toBeGreaterThan(
+      await durableIntentsDrainedSeq.getValue(),
+    );
+    expect(await getPendingStorageMaintenance()).toEqual([racingRequest]);
+    expect(await store.getRawChunks(racingDoc)).toHaveLength(1);
+
+    // A fresh wake sees the counters disagree and drains the racing entry.
+    vi.restoreAllMocks();
+    removeAllListeners();
+    runBackground();
+    await vi.waitFor(async () => {
+      expect(await store.getRawChunks(racingDoc)).toEqual([]);
+      expect(await getPendingStorageMaintenance()).toEqual([]);
+      expect(await durableIntentsEnqueueSeq.getValue()).toBe(
+        await durableIntentsDrainedSeq.getValue(),
+      );
+    });
+  });
+
+  it("re-drains after an MV3 kill before the drainedSeq write lands", async () => {
+    const docId = asDocId("docKillBeforeDrainedBG");
+    const store = createIdbStore();
+    await saveCompleteRawDocument(store, docId);
+    await upsertPendingStorageMaintenance(
+      createPendingStorageMaintenanceRequest({
+        docId,
+        keepRawData: false,
+        budget: { perDocumentBytes: 1, globalCapBytes: 1 },
+        reconstructionStatus: "complete",
+        queuedAt: 1,
+      }),
+    );
+
+    // Simulate a worker kill exactly at the drain's terminal drainedSeq write.
+    const originalSet = fakeBrowser.storage.local.set.bind(fakeBrowser.storage.local);
+    let killed = false;
+    vi.spyOn(fakeBrowser.storage.local, "set").mockImplementation(
+      async (items: Record<string, unknown>) => {
+        if (!killed && Object.hasOwn(items, "durableIntentsDrainedSeq")) {
+          killed = true;
+          throw new Error("simulated MV3 kill before drainedSeq write");
+        }
+        await originalSet(items);
+      },
+    );
+
+    runBackground();
+
+    // The drain processed the entry, but the drainedSeq write was killed, so the
+    // hint stays pending (drainedSeq stale at 0, below enqueueSeq).
+    await vi.waitFor(async () => {
+      expect(killed).toBe(true);
+      expect(await store.getRawChunks(docId)).toEqual([]);
+    });
+    expect(await durableIntentsDrainedSeq.getValue()).toBe(0);
+    expect(await durableIntentsEnqueueSeq.getValue()).not.toBe(
+      await durableIntentsDrainedSeq.getValue(),
+    );
+
+    // The next wake heals: it sees the counters disagree, re-runs the drain
+    // (queue already empty), and advances drainedSeq to match.
+    vi.restoreAllMocks();
+    removeAllListeners();
+    runBackground();
+    await vi.waitFor(async () => {
+      expect(await durableIntentsEnqueueSeq.getValue()).toBe(
+        await durableIntentsDrainedSeq.getValue(),
+      );
     });
   });
 });
