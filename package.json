@@ -34,7 +34,7 @@
     "@solidjs/testing-library": "0.8.10",
     "@types/bun": "1.3.14",
     "@types/chrome": "0.1.43",
-    "@types/node": "25.9.3",
+    "@types/node": "25.9.5",
     "@unocss/preset-wind4": "66.7.0",
     "@wxt-dev/module-solid": "1.1.4",
     "@wxt-dev/storage": "1.2.8",
