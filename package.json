@@ -43,7 +43,7 @@
     "jsdom": "29.1.1",
     "typescript": "6.0.3",
     "unocss": "66.7.0",
-    "vite-plugin-solid": "2.11.12",
+    "vite-plugin-solid": "2.11.14",
     "vitest": "4.1.10",
     "web-ext": "10.4.0",
     "wxt": "0.20.26"
