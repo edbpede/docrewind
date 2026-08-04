@@ -41,7 +41,7 @@
     "@wxt-dev/storage": "1.2.9",
     "@wxt-dev/unocss": "1.0.1",
     "fake-indexeddb": "6.2.5",
-    "jsdom": "29.1.1",
+    "jsdom": "30.0.1",
     "typescript": "6.0.3",
     "unocss": "66.7.5",
     "vite-plugin-solid": "2.11.14",
