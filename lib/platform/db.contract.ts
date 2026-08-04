@@ -518,9 +518,14 @@ export function runRevisionStoreContract(
       await store.saveReplayPublication(docA, replayPublication("pub-isolated"));
       const loaded = await store.getReplayPublication(docA, "pub-isolated");
       expect(loaded).not.toBeNull();
+      // Narrow for TypeScript, which cannot see through the expect above. The
+      // previous `(loaded?.revisions as T[]).push(...)` only satisfied tsc — at
+      // runtime a null `loaded` would still throw on `.push`, which is what
+      // Biome's noUnsafeOptionalChaining flags.
+      if (loaded === null) throw new Error("expected a stored replay publication");
 
-      (loaded?.revisions as DecodedRevision[]).push(decodedRev(99));
-      (loaded?.snapshots as StoredSnapshot[]).push(snapshot(99));
+      (loaded.revisions as DecodedRevision[]).push(decodedRev(99));
+      (loaded.snapshots as StoredSnapshot[]).push(snapshot(99));
 
       const reread = await store.getReplayPublication(docA, "pub-isolated");
       expect(reread?.revisions).toHaveLength(1);

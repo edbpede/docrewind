@@ -1,5 +1,5 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.4.16/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.5.6/schema.json",
   "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
   "files": {
     "includes": [
@@ -11,7 +11,8 @@
       "!**/test-results",
       "!**/playwright-report",
       "!**/.omc",
-      "!**/.omx"
+      "!**/.omx",
+      "!public/icon/**/*.svg"
     ]
   },
   "formatter": {
@@ -20,11 +21,11 @@
     "indentWidth": 2,
     "lineWidth": 100
   },
-  "assist": { "enabled": true, "actions": { "source": { "recommended": true } } },
+  "assist": { "enabled": true, "actions": { "source": { "preset": "recommended" } } },
   "linter": {
     "enabled": true,
     "rules": {
-      "recommended": true,
+      "preset": "recommended",
       "suspicious": { "noExplicitAny": "error" },
       "complexity": { "noForEach": "off" }
     }

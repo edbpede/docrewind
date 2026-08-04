@@ -18,15 +18,12 @@ describe("asDocId", () => {
     expect(() => asDocId("")).toThrow(TypeError);
   });
 
-  test.each([
-    "has space",
-    "slash/here",
-    "dot.here",
-    "bang!",
-    "uni€ode",
-  ])("rejects malformed id %p", (bad) => {
-    expect(() => asDocId(bad)).toThrow(TypeError);
-  });
+  test.each(["has space", "slash/here", "dot.here", "bang!", "uni€ode"])(
+    "rejects malformed id %p",
+    (bad) => {
+      expect(() => asDocId(bad)).toThrow(TypeError);
+    },
+  );
 });
 
 describe("asRevisionId", () => {
@@ -35,16 +32,12 @@ describe("asRevisionId", () => {
     expect(asRevisionId(9999)).toBe(9999 as ReturnType<typeof asRevisionId>);
   });
 
-  test.each([
-    0,
-    -1,
-    -100,
-    1.5,
-    Number.NaN,
-    Number.POSITIVE_INFINITY,
-  ])("rejects non-positive / non-integer %p", (bad) => {
-    expect(() => asRevisionId(bad)).toThrow(TypeError);
-  });
+  test.each([0, -1, -100, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
+    "rejects non-positive / non-integer %p",
+    (bad) => {
+      expect(() => asRevisionId(bad)).toThrow(TypeError);
+    },
+  );
 });
 
 describe("asSessionId / asUserId", () => {
