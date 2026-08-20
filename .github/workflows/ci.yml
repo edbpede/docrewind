@@ -103,7 +103,7 @@ jobs:
           # On a Renovate PR this picks up the migration commit pushed above.
           ref: ${{ github.head_ref || github.ref }}
 
-      # Pin Bun to the version the project targets (.augment/rules + @types/bun),
+      # Pin Bun to the version the project targets (.agents/rules + @types/bun),
       # read from the committed `packageManager` field.
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
