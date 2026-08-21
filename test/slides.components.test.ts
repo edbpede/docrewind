@@ -2,15 +2,15 @@
 //
 // Vitest (jsdom) tests for the Slides replay filmstrip. The regression these guard
 // is the "blink": every replay frame hands SlideStrip a BRAND-NEW array of freshly
-// projected slides, and the strip must update those thumbnails IN PLACE (`<Index>`)
-// rather than tear down and rebuild every button (`<For>`). A rebuild each revision
-// is what flickered the deck and destroyed the button mid-click. We assert the
-// button DOM nodes survive an array-reference swap, that content still updates, and
-// that selection still fires.
-import { fireEvent, render } from "@solidjs/testing-library";
-import { createSignal } from "solid-js";
+// projected slides, and the strip must update those thumbnails IN PLACE (a KEYLESS
+// `{#each}`, the equivalent of Solid's `<Index>`) rather than tear down and rebuild
+// every button (a KEYED `{#each}`, the equivalent of `<For>`). A rebuild each
+// revision is what flickered the deck and destroyed the button mid-click. We assert
+// the button DOM nodes survive an array-reference swap, that content still updates,
+// and that selection still fires.
+import { fireEvent, render } from "@testing-library/svelte";
 import { describe, expect, it, vi } from "vitest";
-import SlideStrip, { SLIDE_PANEL_ID, slideTabId } from "@/components/slides/SlideStrip";
+import SlideStrip, { SLIDE_PANEL_ID, slideTabId } from "@/components/slides/SlideStrip.svelte";
 import type { RenderedShape, RenderedSlide } from "@/lib/core/slides/reconstruction/render";
 
 function textShape(text: string): RenderedShape {
@@ -42,9 +42,9 @@ function deck(tag: string): RenderedSlide[] {
 
 describe("SlideStrip", () => {
   it("renders one tab per slide with roving tabindex on the active tab", () => {
-    const { container } = render(() => (
-      <SlideStrip slides={deck("a")} activeIndex={1} onSelect={() => {}} />
-    ));
+    const { container } = render(SlideStrip, {
+      props: { slides: deck("a"), activeIndex: 1, onSelect: () => {} },
+    });
     const tabs = container.querySelectorAll<HTMLButtonElement>('[role="tab"]');
     expect(tabs.length).toBe(2);
     expect(tabs[0]?.getAttribute("aria-selected")).toBe("false");
@@ -54,9 +54,9 @@ describe("SlideStrip", () => {
   });
 
   it("links each tab to the shared slide panel and carries a stable id", () => {
-    const { container } = render(() => (
-      <SlideStrip slides={deck("a")} activeIndex={0} onSelect={() => {}} />
-    ));
+    const { container } = render(SlideStrip, {
+      props: { slides: deck("a"), activeIndex: 0, onSelect: () => {} },
+    });
     const tabs = container.querySelectorAll<HTMLButtonElement>('[role="tab"]');
     tabs.forEach((tab, index) => {
       expect(tab.getAttribute("aria-controls")).toBe(SLIDE_PANEL_ID);
@@ -64,30 +64,30 @@ describe("SlideStrip", () => {
     });
   });
 
-  it("fires onSelect with the clicked slide index", () => {
+  it("fires onSelect with the clicked slide index", async () => {
     const onSelect = vi.fn();
-    const { container } = render(() => (
-      <SlideStrip slides={deck("a")} activeIndex={0} onSelect={onSelect} />
-    ));
+    const { container } = render(SlideStrip, {
+      props: { slides: deck("a"), activeIndex: 0, onSelect },
+    });
     const tabs = container.querySelectorAll<HTMLButtonElement>('[role="tab"]');
-    fireEvent.click(tabs[1] as HTMLButtonElement);
+    await fireEvent.click(tabs[1] as HTMLButtonElement);
     expect(onSelect).toHaveBeenCalledWith(1);
   });
 
-  it("preserves thumbnail DOM across a new-reference slides array (no blink)", () => {
-    const [slides, setSlides] = createSignal<RenderedSlide[]>(deck("a"));
-    const { container } = render(() => (
-      <SlideStrip slides={slides()} activeIndex={0} onSelect={() => {}} />
-    ));
+  it("preserves thumbnail DOM across a new-reference slides array (no blink)", async () => {
+    const { container, rerender } = render(SlideStrip, {
+      props: { slides: deck("a") as readonly RenderedSlide[], activeIndex: 0, onSelect: () => {} },
+    });
 
     const before = container.querySelectorAll<HTMLButtonElement>('[role="tab"]');
     const firstBefore = before[0];
     const secondBefore = before[1];
     expect(container.textContent).toContain("slide 1 a");
 
-    // A new replay frame: a fresh array of fresh slide objects (same length). With
-    // `<For>` these new references would rebuild every button; `<Index>` keeps them.
-    setSlides(deck("b"));
+    // A new replay frame: a fresh array of fresh slide objects (same length). With a
+    // KEYED `{#each}` these new references would rebuild every button; a KEYLESS
+    // one keeps them.
+    await rerender({ slides: deck("b") as readonly RenderedSlide[] });
 
     const after = container.querySelectorAll<HTMLButtonElement>('[role="tab"]');
     expect(after.length).toBe(2);
@@ -99,41 +99,45 @@ describe("SlideStrip", () => {
   });
 
   it("is hidden for a single-slide deck (a lone slide is not a tablist)", () => {
-    const { container } = render(() => (
-      <SlideStrip slides={[deck("a")[0] as RenderedSlide]} activeIndex={0} onSelect={() => {}} />
-    ));
+    const { container } = render(SlideStrip, {
+      props: {
+        slides: [deck("a")[0] as RenderedSlide],
+        activeIndex: 0,
+        onSelect: () => {},
+      },
+    });
     expect(container.querySelector('[role="tablist"]')).toBeNull();
   });
 
-  it("selects the next slide on ArrowRight (focus follows selection)", () => {
+  it("selects the next slide on ArrowRight (focus follows selection)", async () => {
     const onSelect = vi.fn();
-    const { container, getByRole } = render(() => (
-      <SlideStrip slides={deck("a")} activeIndex={0} onSelect={onSelect} />
-    ));
-    fireEvent.keyDown(getByRole("tablist"), { key: "ArrowRight" });
+    const { container, getByRole } = render(SlideStrip, {
+      props: { slides: deck("a"), activeIndex: 0, onSelect },
+    });
+    await fireEvent.keyDown(getByRole("tablist"), { key: "ArrowRight" });
     expect(onSelect).toHaveBeenCalledWith(1);
     const tabs = container.querySelectorAll<HTMLButtonElement>('[role="tab"]');
     expect(document.activeElement).toBe(tabs[1]);
   });
 
-  it("wraps to the last slide on ArrowLeft from the first", () => {
+  it("wraps to the last slide on ArrowLeft from the first", async () => {
     const onSelect = vi.fn();
-    const { getByRole } = render(() => (
-      <SlideStrip slides={deck("a")} activeIndex={0} onSelect={onSelect} />
-    ));
-    fireEvent.keyDown(getByRole("tablist"), { key: "ArrowLeft" });
+    const { getByRole } = render(SlideStrip, {
+      props: { slides: deck("a"), activeIndex: 0, onSelect },
+    });
+    await fireEvent.keyDown(getByRole("tablist"), { key: "ArrowLeft" });
     expect(onSelect).toHaveBeenCalledWith(1);
   });
 
-  it("jumps to the first slide on Home and the last on End", () => {
+  it("jumps to the first slide on Home and the last on End", async () => {
     const onSelect = vi.fn();
-    const { getByRole } = render(() => (
-      <SlideStrip slides={deck("a")} activeIndex={1} onSelect={onSelect} />
-    ));
+    const { getByRole } = render(SlideStrip, {
+      props: { slides: deck("a"), activeIndex: 1, onSelect },
+    });
     const tablist = getByRole("tablist");
-    fireEvent.keyDown(tablist, { key: "Home" });
+    await fireEvent.keyDown(tablist, { key: "Home" });
     expect(onSelect).toHaveBeenLastCalledWith(0);
-    fireEvent.keyDown(tablist, { key: "End" });
+    await fireEvent.keyDown(tablist, { key: "End" });
     expect(onSelect).toHaveBeenLastCalledWith(1);
   });
 });
