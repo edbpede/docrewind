@@ -3,10 +3,10 @@
 // Vitest (jsdom) tests for the Sheets replay UI: GridViewport renders
 // values/formulas/styles + the fidelity-notice row and stays bounded for a large
 // grid (virtualization / render cap, R7); SheetTabs switches tabs.
-import { fireEvent, render } from "@solidjs/testing-library";
+import { fireEvent, render } from "@testing-library/svelte";
 import { describe, expect, it, vi } from "vitest";
-import GridViewport from "@/components/sheets/GridViewport";
-import SheetTabs, { SHEET_GRID_PANEL_ID, sheetTabId } from "@/components/sheets/SheetTabs";
+import GridViewport from "@/components/sheets/GridViewport.svelte";
+import SheetTabs, { SHEET_GRID_PANEL_ID, sheetTabId } from "@/components/sheets/SheetTabs.svelte";
 import { asGid, type Gid } from "@/lib/core/sheets/decoder/types";
 import {
   type Cell,
@@ -35,29 +35,29 @@ function sampleSheet(): SheetGrid {
 
 describe("GridViewport", () => {
   it("renders cell values, a formatted number, and a formula as text", () => {
-    const { getByText } = render(() => (
-      <GridViewport sheet={sampleSheet()} showFidelityNotice={false} />
-    ));
+    const { getByText } = render(GridViewport, {
+      props: { sheet: sampleSheet(), showFidelityNotice: false },
+    });
     expect(getByText("12,345")).toBeTruthy(); // number-format pattern applied
     expect(getByText("hello")).toBeTruthy();
     expect(getByText("=SUM(A1:A2)")).toBeTruthy(); // formula shown as text
   });
 
   it("applies the bold visual style to a cell", () => {
-    const { getByText } = render(() => (
-      <GridViewport sheet={sampleSheet()} showFidelityNotice={false} />
-    ));
+    const { getByText } = render(GridViewport, {
+      props: { sheet: sampleSheet(), showFidelityNotice: false },
+    });
     expect(getByText("bold").classList.contains("font-bold")).toBe(true);
   });
 
   it("renders the fidelity-notice row only when requested", () => {
-    const withoutNotice = render(() => (
-      <GridViewport sheet={sampleSheet()} showFidelityNotice={false} />
-    ));
+    const withoutNotice = render(GridViewport, {
+      props: { sheet: sampleSheet(), showFidelityNotice: false },
+    });
     expect(withoutNotice.queryByRole("status")).toBeNull();
-    const withNotice = render(() => (
-      <GridViewport sheet={sampleSheet()} showFidelityNotice={true} />
-    ));
+    const withNotice = render(GridViewport, {
+      props: { sheet: sampleSheet(), showFidelityNotice: true },
+    });
     expect(withNotice.getByRole("status").textContent).toContain("couldn't be fully reconstructed");
   });
 
@@ -68,7 +68,9 @@ describe("GridViewport", () => {
     withCell(big, 0, 0, { value: 1 });
     big.rowCount = 10_000;
     big.colCount = 40;
-    const { container } = render(() => <GridViewport sheet={big} showFidelityNotice={false} />);
+    const { container } = render(GridViewport, {
+      props: { sheet: big, showFidelityNotice: false },
+    });
     const cells = container.querySelectorAll("td");
     // Far fewer than 10k*40 — only the visible window + overscan is in the DOM.
     expect(cells.length).toBeGreaterThan(0);
@@ -86,9 +88,9 @@ describe("GridViewport — merges + placeholders", () => {
   }
 
   it("renders a merged anchor as one colSpan cell and blanks the absorbed cells (§0)", () => {
-    const { getByText, queryByText } = render(() => (
-      <GridViewport sheet={mergedSheet()} showFidelityNotice={false} />
-    ));
+    const { getByText, queryByText } = render(GridViewport, {
+      props: { sheet: mergedSheet(), showFidelityNotice: false },
+    });
     const anchor = getByText("title");
     expect(anchor.tagName).toBe("TD");
     expect(anchor.getAttribute("colspan")).toBe("3");
@@ -101,7 +103,9 @@ describe("GridViewport — merges + placeholders", () => {
     sheet.placeholders.push({ kind: "chart", row: 0, col: 0 });
     sheet.rowCount = 1;
     sheet.colCount = 1;
-    const { getByText } = render(() => <GridViewport sheet={sheet} showFidelityNotice={false} />);
+    const { getByText } = render(GridViewport, {
+      props: { sheet, showFidelityNotice: false },
+    });
     expect(getByText("Chart")).toBeTruthy();
   });
 
@@ -110,7 +114,9 @@ describe("GridViewport — merges + placeholders", () => {
     sheet.placeholders.push({ kind: "image", row: 0, col: 0 });
     sheet.rowCount = 1;
     sheet.colCount = 1;
-    const { getByText } = render(() => <GridViewport sheet={sheet} showFidelityNotice={false} />);
+    const { getByText } = render(GridViewport, {
+      props: { sheet, showFidelityNotice: false },
+    });
     expect(getByText("Image")).toBeTruthy();
   });
 });
@@ -128,61 +134,61 @@ function twoSheetModel(): GridModel {
 describe("SheetTabs", () => {
   it("renders one tab per sheet in order, marking the active one", () => {
     const model = twoSheetModel();
-    const { getByText } = render(() => (
-      <SheetTabs model={model} activeGid={asGid("0")} onSelect={() => {}} />
-    ));
+    const { getByText } = render(SheetTabs, {
+      props: { model, activeGid: asGid("0"), onSelect: () => {} },
+    });
     const active = getByText("Data");
     const other = getByText("Summary");
     expect(active.getAttribute("aria-selected")).toBe("true");
     expect(other.getAttribute("aria-selected")).toBe("false");
   });
 
-  it("calls onSelect with the gid of a clicked tab", () => {
+  it("calls onSelect with the gid of a clicked tab", async () => {
     const model = twoSheetModel();
     const onSelect = vi.fn<(gid: Gid) => void>();
-    const { getByText } = render(() => (
-      <SheetTabs model={model} activeGid={asGid("0")} onSelect={onSelect} />
-    ));
-    fireEvent.click(getByText("Summary"));
+    const { getByText } = render(SheetTabs, {
+      props: { model, activeGid: asGid("0"), onSelect },
+    });
+    await fireEvent.click(getByText("Summary"));
     expect(onSelect).toHaveBeenCalledWith(asGid("849076485"));
   });
 
   it("keeps only the active tab in the page Tab order (roving tabindex)", () => {
     const model = twoSheetModel();
-    const { getByText } = render(() => (
-      <SheetTabs model={model} activeGid={asGid("0")} onSelect={() => {}} />
-    ));
+    const { getByText } = render(SheetTabs, {
+      props: { model, activeGid: asGid("0"), onSelect: () => {} },
+    });
     expect(getByText("Data").getAttribute("tabindex")).toBe("0");
     expect(getByText("Summary").getAttribute("tabindex")).toBe("-1");
   });
 
   it("links each tab to the grid panel and carries a stable id", () => {
     const model = twoSheetModel();
-    const { getByText } = render(() => (
-      <SheetTabs model={model} activeGid={asGid("0")} onSelect={() => {}} />
-    ));
+    const { getByText } = render(SheetTabs, {
+      props: { model, activeGid: asGid("0"), onSelect: () => {} },
+    });
     const data = getByText("Data");
     expect(data.getAttribute("aria-controls")).toBe(SHEET_GRID_PANEL_ID);
     expect(data.getAttribute("id")).toBe(sheetTabId(asGid("0")));
   });
 
-  it("selects the next sheet on ArrowRight (focus follows selection)", () => {
+  it("selects the next sheet on ArrowRight (focus follows selection)", async () => {
     const model = twoSheetModel();
     const onSelect = vi.fn<(gid: Gid) => void>();
-    const { getByRole } = render(() => (
-      <SheetTabs model={model} activeGid={asGid("0")} onSelect={onSelect} />
-    ));
-    fireEvent.keyDown(getByRole("tablist"), { key: "ArrowRight" });
+    const { getByRole } = render(SheetTabs, {
+      props: { model, activeGid: asGid("0"), onSelect },
+    });
+    await fireEvent.keyDown(getByRole("tablist"), { key: "ArrowRight" });
     expect(onSelect).toHaveBeenCalledWith(asGid("849076485"));
   });
 
-  it("wraps to the last sheet on ArrowLeft from the first", () => {
+  it("wraps to the last sheet on ArrowLeft from the first", async () => {
     const model = twoSheetModel();
     const onSelect = vi.fn<(gid: Gid) => void>();
-    const { getByRole } = render(() => (
-      <SheetTabs model={model} activeGid={asGid("0")} onSelect={onSelect} />
-    ));
-    fireEvent.keyDown(getByRole("tablist"), { key: "ArrowLeft" });
+    const { getByRole } = render(SheetTabs, {
+      props: { model, activeGid: asGid("0"), onSelect },
+    });
+    await fireEvent.keyDown(getByRole("tablist"), { key: "ArrowLeft" });
     expect(onSelect).toHaveBeenCalledWith(asGid("849076485"));
   });
 });
