@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-import solid from "vite-plugin-solid";
+import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { configDefaults, defineConfig } from "vitest/config";
 import { WxtVitest } from "wxt/testing";
 
 // WxtVitest() wires WXT globals, the fake browser, #imports, and tsconfig paths,
-// but it does NOT include the vite-plugin-solid that @wxt-dev/module-solid adds at
-// build time — so Solid JSX in tests must be transformed by adding solid() here.
-// resolve.conditions is Solid's documented requirement for correct dev/browser
-// export resolution under Vitest.
+// but it does NOT include the @sveltejs/vite-plugin-svelte that @wxt-dev/module-svelte
+// adds at build time — so .svelte components in tests must be compiled by adding
+// svelte() here. resolve.conditions pins the browser export condition, which
+// @testing-library/svelte needs for correct resolution under Vitest.
 export default defineConfig({
-  plugins: [solid(), WxtVitest()],
-  resolve: { conditions: ["development", "browser"] },
+  plugins: [svelte(), WxtVitest()],
+  resolve: { conditions: ["browser"] },
   test: {
     environment: "jsdom",
     globals: true,

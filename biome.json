@@ -12,7 +12,8 @@
       "!**/playwright-report",
       "!**/.omc",
       "!**/.omx",
-      "!public/icon/**/*.svg"
+      "!public/icon/**/*.svg",
+      "!**/*.svelte"
     ]
   },
   "formatter": {

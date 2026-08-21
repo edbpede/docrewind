@@ -11,7 +11,7 @@ import { defineConfig } from "wxt";
 // uno.config.ts via a `post` SourceCodeTransformer — it must run before Vite
 // hashes the CSS asset, which a Vite plugin here cannot do. See uno.config.ts.
 export default defineConfig({
-  modules: ["@wxt-dev/module-solid", "@wxt-dev/unocss"],
+  modules: ["@wxt-dev/module-svelte", "@wxt-dev/unocss"],
   // Silence ONE known-benign UnoCSS build warning, nothing else.
   //
   // @unocss/vite global build mode resolves the `uno` layer the first time
