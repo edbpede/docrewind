@@ -13,7 +13,7 @@
     "zip": "wxt zip",
     "zip:firefox": "wxt zip -b firefox",
     "lint:firefox": "web-ext lint --source-dir .output/firefox-mv3",
-    "compile": "tsc --noEmit",
+    "compile": "svelte-check --tsconfig ./tsconfig.json && tsc --noEmit",
     "test": "vitest",
     "test:run": "vitest run",
     "test:logic": "bun test ./lib/core/docs/decoder ./lib/core/docs/reconstruction ./lib/core/timeline ./lib/core/domain ./lib/core/protocol ./lib/core/retrieval ./lib/core/worker ./lib/core/docs-url ./lib/core/replay ./lib/core/replay-core ./lib/core/sheets/decoder ./lib/core/sheets/reconstruction ./lib/core/slides/decoder ./lib/core/slides/reconstruction ./lib/core/i18n ./lib/core/identity ./lib/core/classroom ./lib/core/summary ./lib/core/theme.test.ts",
@@ -27,24 +27,25 @@
   "dependencies": {
     "@webext-core/messaging": "3.0.3",
     "idb": "8.0.3",
-    "solid-js": "1.9.13"
+    "svelte": "5.56.3"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.7",
     "@playwright/test": "1.60.0",
-    "@solidjs/testing-library": "0.8.10",
+    "@sveltejs/vite-plugin-svelte": "7.0.0",
+    "@testing-library/svelte": "5.4.2",
     "@types/bun": "1.3.14",
     "@types/chrome": "0.1.43",
     "@types/node": "26.1.2",
     "@unocss/preset-wind4": "66.7.5",
-    "@wxt-dev/module-solid": "1.1.4",
+    "@wxt-dev/module-svelte": "2.0.5",
     "@wxt-dev/storage": "1.2.9",
     "@wxt-dev/unocss": "1.0.1",
     "fake-indexeddb": "6.2.5",
     "jsdom": "30.0.1",
+    "svelte-check": "4.7.6",
     "typescript": "6.0.3",
     "unocss": "66.7.5",
-    "vite-plugin-solid": "2.11.14",
     "vitest": "4.1.10",
     "web-ext": "10.4.0",
     "wxt": "0.20.26"
