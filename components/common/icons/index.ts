@@ -25,7 +25,6 @@
 //   Marker / structure glyphs (intuitive, replacing scholarly § ⌃ ⌄ ‖) —
 //               Pencil, Plus, Minus, PauseBars, Image, Table, List, Comment, File
 
-export type { IconProps } from "./Icon.svelte";
 export { default as IconAlert } from "./IconAlert.svelte";
 export { default as IconArrowLeft } from "./IconArrowLeft.svelte";
 export { default as IconChart } from "./IconChart.svelte";
@@ -52,3 +51,4 @@ export { default as IconSettings } from "./IconSettings.svelte";
 export { default as IconShield } from "./IconShield.svelte";
 export { default as IconTable } from "./IconTable.svelte";
 export { default as IconTrash } from "./IconTrash.svelte";
+export type { IconProps } from "./types";

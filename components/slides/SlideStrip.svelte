@@ -13,11 +13,9 @@
   // Content-free chrome (slide NUMBERS, never a caption); only the reconstructed
   // slide render is shown. Svelte idioms: `{#each}` with runes.
 
-  /** DOM id of the slide `role="tabpanel"` the strip controls (set on the panel in App). */
-  export const SLIDE_PANEL_ID = "dr-slide-panel";
+  import { SLIDE_PANEL_ID, slideTabId } from "./slide-strip";
 
-  /** Stable DOM id for a thumbnail tab, so the panel can name itself via `aria-labelledby`. */
-  export const slideTabId = (index: number): string => `dr-slide-tab-${index}`;
+  export { SLIDE_PANEL_ID, slideTabId };
 </script>
 
 <script lang="ts">

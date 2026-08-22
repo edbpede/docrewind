@@ -25,9 +25,9 @@
 // All `browser.*`/DOM access stays inside `main(ctx)`; the only imported logic is the
 // PURE URL parsing from lib (no DOM/fetch there).
 
-import { render } from "solid-js/web";
+import { mount, unmount } from "svelte";
 import "virtual:uno.css";
-import ReplayAffordance from "@/components/replay/ReplayAffordance";
+import ClassroomAffordance from "@/components/replay/ClassroomAffordance.svelte";
 import { decideReconcile, isEngaged } from "@/lib/core/classroom/reconcile";
 import { parseDocsUrl } from "@/lib/core/docs-url";
 import {
@@ -261,10 +261,10 @@ export default defineContentScript({
       // sit inline, in the open space left of "Return", on its single button row —
       // the group is a flex row, so a sibling-before would instead drop us onto a
       // SECOND row above it (its shared parent is a block), which a fixed-height
-      // toolbar then clips. Submission: after the attachment card. Inline styles
-      // only (no UnoCSS utility classes, which the shared-chunk dedup can drop) —
-      // the button itself uses the safelisted `btn-secondary`/`btn-secondary-compact`
-      // shortcuts, so it stays styled inside the shadow root.
+      // toolbar then clips. Submission: after the attachment card. The spacing box
+      // that seats the button on that row is the mounted `ClassroomAffordance`
+      // component, which also documents why it is styled inline rather than with
+      // UnoCSS utility classes.
       append: (anchor, el) => {
         const loc = currentLoc();
         if (loc?.view === "submission") anchor.after(el);
@@ -272,17 +272,22 @@ export default defineContentScript({
       },
       // Keep page shortcuts from leaking into our control and vice versa.
       isolateEvents: ["keydown", "keyup", "click", "wheel"],
+      // WXT hands back to `onRemove` whatever `onMount` returned, so the pair below
+      // is a single contract: `mount()` returns the component INSTANCE, and its
+      // teardown is `unmount(instance)`. `mount()` also takes a COMPONENT, not
+      // markup — hence `ClassroomAffordance`, which is the spacing box above as a
+      // component: same DOM, node for node, rather than folding its styles onto the
+      // WXT container and losing a node in the action row that clips.
       onMount: (container) =>
-        render(
-          () => (
-            <div style={{ display: "inline-flex", "align-items": "center", margin: "0 0.5rem" }}>
-              <ReplayAffordance onActivate={onActivate} compact />
-            </div>
-          ),
-          container,
-        ),
-      onRemove: (dispose) => {
-        if (typeof dispose === "function") dispose();
+        mount(ClassroomAffordance, { target: container, props: { onActivate } }),
+      // `unmount()` returns a promise (it awaits outro transitions) — VOID it, do
+      // not make this async. WXT invokes `onRemove` synchronously from `remove()`,
+      // and `reconcile()` below does `ui.remove(); ui.mount();` back to back when
+      // re-rooting, so teardown has to have happened by the time `remove()` returns.
+      // There are no transitions on this component, so the DOM is detached
+      // synchronously regardless and the promise carries nothing we need to wait for.
+      onRemove: (app) => {
+        if (app) void unmount(app);
       },
     });
 

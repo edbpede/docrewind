@@ -3,7 +3,8 @@
   //
   // A clock-with-rewind — the "revision history / replay" mark.
 
-  import Icon, { type IconProps } from "./Icon.svelte";
+  import Icon from "./Icon.svelte";
+  import type { IconProps } from "./types";
 
   let { size, class: klass, stroke }: IconProps = $props();
 </script>

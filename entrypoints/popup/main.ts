@@ -4,15 +4,15 @@
 // to the generated manifest (no permission needed — `action` is permission-free,
 // so the privacy invariant holds). Imports the UnoCSS virtual stylesheet ONCE
 // (which also carries the preflight reset that zeroes the popup body margin) and
-// renders the Solid <PopupApp/> into #app.
+// renders the Svelte <PopupApp/> into #app.
 
-import { render } from "solid-js/web";
+import { mount } from "svelte";
 import "virtual:uno.css";
-import PopupApp from "@/components/popup/PopupApp";
+import PopupApp from "@/components/popup/PopupApp.svelte";
 
 const root = document.getElementById("app");
 if (!root) {
   throw new Error("Missing #app mount point in popup/index.html.");
 }
 
-render(() => <PopupApp />, root);
+mount(PopupApp, { target: root });
