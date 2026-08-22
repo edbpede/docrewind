@@ -8,7 +8,7 @@
 // caret + segment highlighting), so BOTH read the same opaque author keys, the
 // same "Author N" numbering, and the same colours — never the raw Gaia token.
 //
-// PURE by design (no Solid, no DOM): the reactive wrappers (`createMemo`) live in
+// PURE by design (no framework, no DOM): the reactive wrappers (`$derived`) live in
 // the components; this module is the testable derivation they both call.
 
 import { authorLabel } from "@/lib/core/i18n/strings";
