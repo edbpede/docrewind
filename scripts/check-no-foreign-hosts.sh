@@ -6,7 +6,7 @@
 # audit proves isolation for the exercised flow; this lint proves no source line
 # even NAMES a non-Google network target or reaches for a non-fetch network API.
 #
-# Greps lib/ + entrypoints/ (production .ts/.tsx, excluding tests/specs/fixtures)
+# Greps lib/ + entrypoints/ (production .ts/.svelte, excluding tests/specs/fixtures)
 # for:
 #   1. absolute http(s):// URLs in CODE (comment lines are exempt — the codebase
 #      cites third-party repos like github.com/harvard-vpal/gdocrevisions in
