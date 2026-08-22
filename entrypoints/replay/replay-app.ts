@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
-// Pure helpers and shared types for the replay page orchestrator. These all lived
-// at module scope in the Solid `App.tsx`; the Svelte port lifts them out because a
-// `.svelte` file has no named exports outside `<script module>`, they are shared by
-// `App.svelte` and `ReplaySurface.svelte`, and `parseUserIndex` is imported
-// directly by `test/replay.app.test.ts` for its own unit assertions.
+// Pure helpers and shared types for the replay page orchestrator. They live in a
+// plain `.ts` rather than a `<script module>` because a `.svelte` file has no named
+// exports outside one, they are shared by `App.svelte` and `ReplaySurface.svelte`,
+// and `parseUserIndex` is imported directly by `test/replay.app.test.ts` for its
+// own unit assertions.
 //
 // Nothing here touches the DOM or the reactive graph — it is the framework-free
 // half of the orchestrator.

@@ -5,8 +5,7 @@
   // a brand row for orientation, the privacy reassurance, then a plain-language error
   // with one clear recovery action.
   //
-  // Its own file because Svelte is one component per file; it was a sibling
-  // `const MessageCard` inside the Solid `entrypoints/replay/App.tsx`.
+  // Its own file because Svelte is one component per file.
 
   import BrandMark from "@/components/common/BrandMark.svelte";
   import { IconAlert } from "@/components/common/icons";

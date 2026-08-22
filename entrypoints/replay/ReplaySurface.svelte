@@ -6,8 +6,7 @@
   // (Principle 4): it asks the background to start retrieval, drives the parse worker
   // (with a same-thread fallback), polls the persisted checkpoint for content-free
   // progress + stall detection, then composes the surface from thin views over pure
-  // `lib/*` data. Its own file because Svelte is one component per file; it was a
-  // sibling `const ReplaySurface` inside the Solid `entrypoints/replay/App.tsx`.
+  // `lib/*` data. Its own file because Svelte is one component per file.
   //
   // Scale-safety: `currentIndex` is an APPLIED-COUNT. `modelAtRevisionIndex` does
   // ALL time-travel; `segmentsAt` is SINGLE-ARG over that already-time-traveled
