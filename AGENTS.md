@@ -3,7 +3,7 @@
 This file provides guidance to AI coding agents when working with code in this
 repository.
 
-DocRewind is a Bun-only, WXT + SolidJS MV3 browser extension that reconstructs
+DocRewind is a Bun-only, WXT + Svelte 5 MV3 browser extension that reconstructs
 Google Docs/Sheets/Slides revision history locally. No backend, no telemetry.
 
 ## Setup
@@ -29,11 +29,11 @@ Single test:
 
 ```sh
 bun test lib/core/domain/kind.test.ts -t "case name"     # pure core
-bunx vitest run test/popup.test.tsx -t "case name"       # component/platform
+bunx vitest run test/popup.test.ts -t "case name"        # component/platform
 bunx playwright test e2e/replay-smoke.spec.ts            # e2e (needs a build)
 ```
 
-Never run bare `bun test` at the repo root: it globs `test/*.test.tsx`, which
+Never run bare `bun test` at the repo root: it globs `test/*.test.ts`, which
 import `vitest` and fail. Use `bun run test:logic` or an explicit path.
 
 ## Three test tiers
@@ -81,7 +81,7 @@ lint list.
 
 - `lib/core/**` — pure, browser-free logic. `lib/platform/**` — the only place
   browser APIs live (idb, `browser.storage`, messaging). `entrypoints/**` — WXT
-  entrypoints. `components/**` — Solid UI, at the repo root, not under `lib/`.
+  entrypoints. `components/**` — Svelte UI, at the repo root, not under `lib/`.
 - Each editor has its own closed-world core: `lib/core/{docs,sheets,slides}/
   {decoder,reconstruction}`. Shared machinery lives in `lib/core/replay-core`
   (snapshot/replay spine), `lib/core/timeline`, `lib/core/summary`.
