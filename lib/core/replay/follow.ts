@@ -8,7 +8,7 @@
 // twitches on every keystroke-sized edit; it recenters only when the caret
 // crosses an edge. All decisions are computed from plain numbers here so the
 // hysteresis is unit-testable without a layout engine — the DOM read and the
-// `window.scrollTo` call live in `components/DocumentViewport.tsx`.
+// `window.scrollTo` call live in `components/replay/DocumentViewport.svelte`.
 
 /** The comfortable reading band + recenter anchor, as fractions of viewport
  *  height. A caret between {@link BAND_TOP} and {@link BAND_BOTTOM} sits still;

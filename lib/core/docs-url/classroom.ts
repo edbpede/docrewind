@@ -5,7 +5,7 @@
 // surfaces an educator uses to view a student's submitted Doc, and builds the
 // path-relative deep link from one to the other. No browser / fetch / DOM here —
 // the DOM scraping that finds the embedded doc's `DocId` lives in the content
-// script (entrypoints/classroom.content.tsx); this module only parses strings.
+// script (entrypoints/classroom.content.ts); this module only parses strings.
 //
 // The two surfaces (LIVE-CONFIRMED against an educator account, 2026-06-19):
 //   • Submission-status view — the assignment's per-student list/detail:
