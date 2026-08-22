@@ -11,7 +11,7 @@
 // the spine's injected deps to the Docs `DocumentModel` operations and KEEPS the
 // historical public signatures (`buildReplayIndex(revisions, cadence?, baseOps?)`
 // / `modelAtRevisionIndex(index, n)` / `textAtRevisionIndex(index, n)`) so every
-// shipped call site (`App.tsx`, `replay/load.ts`) stays untouched.
+// shipped call site (`replay/ReplaySurface.svelte`, `replay/load.ts`) stays untouched.
 // `snapshot.test.ts` pins the output byte-identical — the regression gate for
 // the spine extraction.
 
