@@ -14,16 +14,14 @@
   // tab contract: roving `tabindex` (only the active tab sits in the page Tab
   // order), arrow-key navigation (Left/Right/Home/End, focus follows selection),
   // and an `aria-controls`/`role="tabpanel"` link to the grid panel (the panel side
-  // is wired in the replay page via SHEET_GRID_PANEL_ID + sheetTabId). Svelte
+  // is wired in the replay page via SHEET_GRID_PANEL_ID + sheetTabId, both in
+  // `./sheet-tabs.ts`). Svelte
   // idioms: `{#each}` with runes.
 
   import type { Gid } from "@/lib/core/sheets/decoder/types";
+  import { SHEET_GRID_PANEL_ID, sheetTabId } from "./sheet-tabs";
 
-  /** DOM id of the grid `role="tabpanel"` the tabs control (set on the panel in App). */
-  export const SHEET_GRID_PANEL_ID = "dr-sheet-grid-panel";
-
-  /** Stable DOM id for a tab, so the panel can name itself via `aria-labelledby`. */
-  export const sheetTabId = (gid: Gid): string => `dr-sheet-tab-${gid}`;
+  export { SHEET_GRID_PANEL_ID, sheetTabId };
 </script>
 
 <script lang="ts">

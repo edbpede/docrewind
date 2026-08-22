@@ -10,7 +10,8 @@
 // and that selection still fires.
 import { fireEvent, render } from "@testing-library/svelte";
 import { describe, expect, it, vi } from "vitest";
-import SlideStrip, { SLIDE_PANEL_ID, slideTabId } from "@/components/slides/SlideStrip.svelte";
+import SlideStrip from "@/components/slides/SlideStrip.svelte";
+import { SLIDE_PANEL_ID, slideTabId } from "@/components/slides/slide-strip";
 import type { RenderedShape, RenderedSlide } from "@/lib/core/slides/reconstruction/render";
 
 function textShape(text: string): RenderedShape {

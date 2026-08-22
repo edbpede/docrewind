@@ -2,15 +2,15 @@
 //
 // Options page mount (plan Phase 5 Step 8). WXT auto-detects this entrypoint and
 // adds `options_ui` to the generated manifest (no permission needed). Imports the
-// UnoCSS virtual stylesheet ONCE and renders the Solid <OptionsApp/> into #app.
+// UnoCSS virtual stylesheet ONCE and renders the Svelte <OptionsApp/> into #app.
 
-import { render } from "solid-js/web";
+import { mount } from "svelte";
 import "virtual:uno.css";
-import OptionsApp from "@/components/options/OptionsApp";
+import OptionsApp from "@/components/options/OptionsApp.svelte";
 
 const root = document.getElementById("app");
 if (!root) {
   throw new Error("Missing #app mount point in options/index.html.");
 }
 
-render(() => <OptionsApp />, root);
+mount(OptionsApp, { target: root });

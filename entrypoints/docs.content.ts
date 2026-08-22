@@ -8,9 +8,9 @@
 // does NOT own the fetch — clicking asks the background to start retrieval via
 // typed messaging. All `browser.*`/DOM access stays inside `main(ctx)`.
 
-import { render } from "solid-js/web";
+import { mount, unmount } from "svelte";
 import "virtual:uno.css";
-import ReplayAffordance from "@/components/replay/ReplayAffordance";
+import ReplayAffordance from "@/components/replay/ReplayAffordance.svelte";
 import { parseDocsUrl } from "@/lib/core/docs-url";
 import { parseOwnGaia, resolveSelfIdentity, withSelfIdentity } from "@/lib/core/identity/resolve";
 import { sendMessage } from "@/lib/platform/messaging";
@@ -142,38 +142,45 @@ export default defineContentScript({
       append: "first",
       // Keep page shortcuts from leaking into our control and vice versa.
       isolateEvents: ["keydown", "keyup", "click", "wheel"],
+      // WXT hands back to `onRemove` whatever `onMount` returned, so the pair below
+      // is a single contract: `mount()` returns the component INSTANCE, and its
+      // teardown is `unmount(instance)`.
       onMount: (container) =>
-        render(
-          () => (
-            <ReplayAffordance
-              onActivate={() => {
-                // Explicit user action only (PRD §9.2). The content script does
-                // not own the fetch or the surface (PRD §10.9, Seam A1) — it asks
-                // the background to OPEN the replay tab, which then owns the full
-                // load lifecycle (validates the id, drives the worker, starts
-                // retrieval itself). Fire-and-forget over typed messaging.
-                void sendMessage("activateReplay", {
-                  docId: info.docId,
-                  userIndex: info.userIndex,
-                  kind: info.kind,
-                }).catch(() => {
-                  // Best-effort: the background SW may be restarting or the page
-                  // navigating away (MV3 idle termination). Swallow the rejection
-                  // so it doesn't surface as an unhandled promise rejection; the
-                  // user can simply re-activate.
-                });
-                // Identity resolution rides on the same explicit action: harvest the
-                // viewer's self identity off this page (unless the user opted out) so
-                // the replay surface can label their own edits by name immediately.
-                // Best-effort and independent of the activation message above.
-                void harvestSelfIdentity().catch(() => {});
-              }}
-            />
-          ),
-          container,
-        ),
-      onRemove: (dispose) => {
-        if (typeof dispose === "function") dispose();
+        mount(ReplayAffordance, {
+          target: container,
+          props: {
+            onActivate: () => {
+              // Explicit user action only (PRD §9.2). The content script does
+              // not own the fetch or the surface (PRD §10.9, Seam A1) — it asks
+              // the background to OPEN the replay tab, which then owns the full
+              // load lifecycle (validates the id, drives the worker, starts
+              // retrieval itself). Fire-and-forget over typed messaging.
+              void sendMessage("activateReplay", {
+                docId: info.docId,
+                userIndex: info.userIndex,
+                kind: info.kind,
+              }).catch(() => {
+                // Best-effort: the background SW may be restarting or the page
+                // navigating away (MV3 idle termination). Swallow the rejection
+                // so it doesn't surface as an unhandled promise rejection; the
+                // user can simply re-activate.
+              });
+              // Identity resolution rides on the same explicit action: harvest the
+              // viewer's self identity off this page (unless the user opted out) so
+              // the replay surface can label their own edits by name immediately.
+              // Best-effort and independent of the activation message above.
+              void harvestSelfIdentity().catch(() => {});
+            },
+          },
+        }),
+      // `unmount()` returns a promise (it awaits outro transitions) — VOID it, do
+      // not make this async. WXT invokes `onRemove` synchronously from `remove()`,
+      // and the timer backstop below does `ui.remove(); ui.mount();` back to back,
+      // so teardown has to have happened by the time `remove()` returns. There are
+      // no transitions on this component, so the DOM is detached synchronously
+      // regardless and the promise carries nothing we need to wait for.
+      onRemove: (app) => {
+        if (app) void unmount(app);
       },
     });
     // Auto-mount: the Docs toolbar mounts after the content script runs, so

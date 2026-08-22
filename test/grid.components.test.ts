@@ -6,7 +6,8 @@
 import { fireEvent, render } from "@testing-library/svelte";
 import { describe, expect, it, vi } from "vitest";
 import GridViewport from "@/components/sheets/GridViewport.svelte";
-import SheetTabs, { SHEET_GRID_PANEL_ID, sheetTabId } from "@/components/sheets/SheetTabs.svelte";
+import SheetTabs from "@/components/sheets/SheetTabs.svelte";
+import { SHEET_GRID_PANEL_ID, sheetTabId } from "@/components/sheets/sheet-tabs";
 import { asGid, type Gid } from "@/lib/core/sheets/decoder/types";
 import {
   type Cell,

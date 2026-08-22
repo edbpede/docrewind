@@ -3,7 +3,8 @@
   //
   // A bar chart — the "document summary / writing insights" mark.
 
-  import Icon, { type IconProps } from "./Icon.svelte";
+  import Icon from "./Icon.svelte";
+  import type { IconProps } from "./types";
 
   let { size, class: klass, stroke }: IconProps = $props();
 </script>
