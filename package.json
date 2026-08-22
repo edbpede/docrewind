@@ -46,7 +46,7 @@
     "svelte-check": "4.7.6",
     "typescript": "6.0.3",
     "unocss": "66.8.1",
-    "vite": "8.0.16",
+    "vite": "8.2.2",
     "vitest": "4.1.11",
     "web-ext": "10.6.0",
     "wxt": "0.21.4"
