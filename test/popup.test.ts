@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fakeBrowser } from "wxt/testing";
+import { fakeBrowser } from "wxt/testing/fake-browser";
 import PopupApp from "@/components/popup/PopupApp.svelte";
 import { strings } from "@/lib/core/i18n/strings";
 import { theme } from "@/lib/platform/settings";

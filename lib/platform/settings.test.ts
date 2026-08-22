@@ -5,7 +5,7 @@
 // deterministic.
 
 import { beforeEach, describe, expect, it } from "vitest";
-import { fakeBrowser } from "wxt/testing";
+import { fakeBrowser } from "wxt/testing/fake-browser";
 import { asDocId } from "@/lib/core/domain/ids";
 import {
   activeStorageLeases,

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { configDefaults, defineConfig } from "vitest/config";
-import { WxtVitest } from "wxt/testing";
+import { WxtVitest } from "wxt/testing/vitest-plugin";
 
 // WxtVitest() wires WXT globals, the fake browser, #imports, and tsconfig paths,
 // but it does NOT include the @sveltejs/vite-plugin-svelte that @wxt-dev/module-svelte
@@ -14,6 +14,9 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
+    // Merged with WXT's own `virtual:wxt-setup`, not a replacement for it.
+    // See the file header for why the extension-API globals need re-asserting.
+    setupFiles: ["./test/setup.extension-api.ts"],
     // The pure-core tiers (decoder/reconstruction/timeline/domain/protocol/fixtures)
     // run under Bun (`test:logic`) and import `bun:test`, which Vitest cannot resolve.
     // Keep them out of Vitest; Phase 4/5 storage/messaging tests (e.g. lib/platform/db.test.ts)

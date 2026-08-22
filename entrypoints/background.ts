@@ -93,13 +93,23 @@ export default defineBackground(() => {
   // strictly an enrichment path — if the API is unavailable the content-script write
   // simply no-ops and the background tiles harvest (a trusted context) still fills
   // the cache, so the call is best-effort and never gates anything.
-  void (
-    browser.storage.session as unknown as {
-      setAccessLevel?: (opts: { accessLevel: string }) => Promise<void>;
-    }
-  )
-    .setAccessLevel?.({ accessLevel: "TRUSTED_AND_UNTRUSTED_CONTEXTS" })
-    .catch(() => {});
+  //
+  // "Best-effort" has to cover all three failure shapes. `?.` only covers the
+  // one where the method is absent (Firefox). An engine that exposes it can also
+  // THROW SYNCHRONOUSLY rather than reject — Chrome does that for an access level
+  // it will not grant, and @webext-core/fake-browser's unimplemented stub does it
+  // under test — which no `.catch()` on the return value can ever observe.
+  try {
+    void (
+      browser.storage.session as unknown as {
+        setAccessLevel?: (opts: { accessLevel: string }) => Promise<void>;
+      }
+    )
+      .setAccessLevel?.({ accessLevel: "TRUSTED_AND_UNTRUSTED_CONTEXTS" })
+      .catch(() => {});
+  } catch {
+    // Enrichment only; the trusted-context harvest still fills the cache.
+  }
 
   // Cold-start work, gated behind ONE cheap marker read (MV3 re-runs this whole
   // body on every wake, so the steady-state wake must not pay a storage write +
