@@ -176,6 +176,16 @@
   async function loadRun(runId: number): Promise<void> {
     const publicationId = publicationIdForRun(runId);
     let reconstructionStatus: "partial" | "complete" = "partial";
+    // `createResource` discarded a SUPERSEDED fetcher's result wholesale: clearing
+    // its source (`setRetrievalDoneRunId(null)`, which `failRun`/`startFlow`/
+    // `onCancel` each do) nulled the pending promise, so a late resolution was
+    // dropped rather than written. A plain async function has no such guard, and
+    // an ungated write lets a stale run overwrite the active run's surface — or
+    // wipe a terminal error screen back to the progress view. Gate every `loaded`
+    // write the same way the `nonReplayState` writes below are already gated.
+    const setLoaded = (next: LoadedReplay | undefined): void => {
+      if (isActiveRun(runId)) loaded = next;
+    };
     try {
       const outcome = await decode(docId, runId, publicationId);
       if (outcome.kind !== "published") {
@@ -183,14 +193,14 @@
           const existing = toLoaded(await loadReplayData(store, docId));
           if (existing !== null) {
             reconstructionStatus = "complete";
-            loaded = existing;
+            setLoaded(existing);
             return;
           }
         }
         if (outcome.kind !== "stale" && isActiveRun(runId)) {
           nonReplayState = outcome.kind;
         }
-        loaded = undefined;
+        setLoaded(undefined);
         return;
       }
       const result = toLoaded(await loadReplayData(store, docId, publicationId));
@@ -198,16 +208,16 @@
         if (isActiveRun(runId)) {
           nonReplayState = "missing-publication";
         }
-        loaded = undefined;
+        setLoaded(undefined);
         return;
       }
       reconstructionStatus = "complete";
-      loaded = result;
+      setLoaded(result);
     } catch {
       if (isActiveRun(runId)) {
         nonReplayState = "failed";
       }
-      loaded = undefined;
+      setLoaded(undefined);
     } finally {
       if (isActiveRun(runId)) {
         await finishRunMaintenance(runId, reconstructionStatus);

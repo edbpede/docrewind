@@ -274,10 +274,18 @@
   onpointercancel={endPointer}
 >
   <div class="tl-fill" style:left="{EDGE_INSET_PX}px" style:width={fillWidth}></div>
-  <!-- Clusters partition a position-sorted list, so the joined member-id string is
-       distinct per cluster and safe as a key. (The MEMBER ids inside a cluster are
-       NOT — see the panel list below.) -->
-  {#each clusters as cluster (cluster.id)}
+  <!-- Keyed by INDEX, not by `cluster.id`. A cluster's id is its member ids joined
+       with "|", so a SINGLETON cluster's id is just one raw marker id — and those
+       are explicitly not unique (`${kind}-${anchor}`; see the doc comment on
+       `TimelineMarker.id`). `clusterMarkers` emits all-singleton clusters whenever
+       it cannot measure, and `trackWidth` starts at 0, so that is every first
+       render. Keying by the id there throws `each_key_duplicate`, which is a hard
+       crash, on any document with two same-kind events at one revision. Solid's
+       `<For>` keyed by reference and could not fail this way, so an id key would
+       be a new crash surface rather than a faithful port. `clusters` is rebuilt
+       wholesale by `$derived` and never reorders in place, so an index key is
+       exactly as correct and cannot throw. DO NOT change this to `(cluster.id)`. -->
+  {#each clusters as cluster, i (i)}
     {@const single = cluster.members.length === 1 ? cluster.members[0] : undefined}
     {@const ariaLabel = clusterAriaLabel(cluster, max)}
     {@const count = cluster.members.length}
