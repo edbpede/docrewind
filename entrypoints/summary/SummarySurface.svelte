@@ -83,10 +83,12 @@
   // Solid's non-suspending `result()`: undefined while in flight or after a failure.
   const result = $derived(load.status === "ok" ? load.value : undefined);
 
-  // Mirrors `createResource(() => props.docId, (id) => loadReplayData(props.store, id))`:
-  // the effect's dependencies are the resource's SOURCE, so a change to either would
-  // re-enter the pending state and refetch, as the resource did. (In practice App
-  // computes both once from the URL and they never change.)
+  // Replaces `createResource(() => props.docId, (id) => loadReplayData(props.store, id))`.
+  // The resource's SOURCE was `docId` alone; this effect also reads `store`, so it
+  // tracks one dependency more than the resource did and would additionally refetch
+  // if the store were swapped. Unreachable in practice — App resolves the store once
+  // and computes docId once from the URL, and neither ever changes — but the tracking
+  // sets are not identical, so do not treat this as a like-for-like translation.
   $effect(() => {
     const currentStore = store;
     const id = docId;
