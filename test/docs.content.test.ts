@@ -7,7 +7,7 @@
 import { cleanup, fireEvent, render } from "@testing-library/svelte";
 import { mount, unmount } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fakeBrowser } from "wxt/testing";
+import { fakeBrowser } from "wxt/testing/fake-browser";
 import ReplayAffordance from "@/components/replay/ReplayAffordance.svelte";
 import { asDocId } from "@/lib/core/domain/ids";
 import { onMessage, removeAllListeners, sendMessage } from "@/lib/platform/messaging";

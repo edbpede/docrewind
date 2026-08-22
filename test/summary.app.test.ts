@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { cleanup, render, screen } from "@testing-library/svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fakeBrowser } from "wxt/testing";
+import { fakeBrowser } from "wxt/testing/fake-browser";
 import App from "@/entrypoints/summary/App.svelte";
 import type { Operation } from "@/lib/core/docs/decoder/types";
 import { PARSER_VERSION } from "@/lib/core/docs/decoder/version";

@@ -9,7 +9,7 @@
 
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fakeBrowser } from "wxt/testing";
+import { fakeBrowser } from "wxt/testing/fake-browser";
 import background from "@/entrypoints/background";
 import { PARSER_VERSION } from "@/lib/core/docs/decoder/version";
 import { asDocId, asRevisionId } from "@/lib/core/domain/ids";

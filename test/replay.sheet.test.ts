@@ -5,7 +5,7 @@
 // the kind-branched ReplaySurface (same-thread pipeline, no Worker).
 import { cleanup, render, screen } from "@testing-library/svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fakeBrowser } from "wxt/testing";
+import { fakeBrowser } from "wxt/testing/fake-browser";
 import App from "@/entrypoints/replay/App.svelte";
 import { asDocId } from "@/lib/core/domain/ids";
 import { asGid } from "@/lib/core/sheets/decoder/types";
