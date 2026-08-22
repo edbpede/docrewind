@@ -19,7 +19,7 @@ export interface TimelineMarker {
    * Kind + anchor, used for tooltip/cluster identity.
    *
    * NOT unique: two events of the same kind anchored at the same revision produce
-   * the SAME id (see `entrypoints/replay/App.tsx`'s marker projection). Never key a
+   * the SAME id (see `buildMarkers` in `entrypoints/replay/replay-app.ts`). Never key a
    * Svelte `{#each}` by it — `each_key_duplicate` is a hard runtime crash. Cluster
    * members are keyed by INDEX for exactly this reason.
    */

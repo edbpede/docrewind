@@ -44,8 +44,8 @@ files=()
 while IFS= read -r file; do
   files+=("$file")
 done < <(
-  find "${scan_dirs[@]}" -type f \( -name '*.ts' -o -name '*.tsx' -o -name '*.svelte' \) \
-    ! -name '*.test.ts' ! -name '*.test.tsx' ! -name '*.spec.ts' \
+  find "${scan_dirs[@]}" -type f \( -name '*.ts' -o -name '*.svelte' \) \
+    ! -name '*.test.ts' ! -name '*.spec.ts' \
     ! -path '*/fixtures/*' | sort
 )
 
