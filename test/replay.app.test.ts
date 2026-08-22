@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fakeBrowser } from "wxt/testing";
-import App, { parseUserIndex } from "@/entrypoints/replay/App";
+import App from "@/entrypoints/replay/App.svelte";
+import { parseUserIndex } from "@/entrypoints/replay/replay-app";
 import { PARSER_VERSION } from "@/lib/core/docs/decoder/version";
 import { createModel } from "@/lib/core/docs/reconstruction/model";
 import { asDocId, asRevisionId } from "@/lib/core/domain/ids";
@@ -133,7 +134,7 @@ describe("Replay App run gating", () => {
       updatedAt: 11_000,
     });
 
-    render(() => <App store={store} useWorker={false} />);
+    render(App, { props: { store, useWorker: false } });
     await vi.advanceTimersByTimeAsync(800);
 
     expect(screen.getByText("Discovering revisions…")).toBeTruthy();
@@ -158,7 +159,7 @@ describe("Replay App run gating", () => {
     });
     const store = createMemoryStore();
 
-    render(() => <App store={store} useWorker={false} />);
+    render(App, { props: { store, useWorker: false } });
     await vi.advanceTimersByTimeAsync(20_100);
     await vi.waitFor(() => expect(screen.getByText("Retrieval unavailable")).toBeTruthy());
 
@@ -188,7 +189,7 @@ describe("Replay App run gating", () => {
       throw new Error("idb unavailable");
     });
 
-    render(() => <App store={store} useWorker={false} />);
+    render(App, { props: { store, useWorker: false } });
     await vi.advanceTimersByTimeAsync(800);
 
     await vi.waitFor(() => expect(screen.getByText("Network problem")).toBeTruthy());
@@ -208,7 +209,7 @@ describe("Replay App run gating", () => {
     const store = createMemoryStore();
     store.readCheckpoint = vi.fn(() => new Promise<never>(() => {}));
 
-    render(() => <App store={store} useWorker={false} />);
+    render(App, { props: { store, useWorker: false } });
     await vi.advanceTimersByTimeAsync(20_800);
 
     await vi.waitFor(() => expect(screen.getByText("Retrieval unavailable")).toBeTruthy());
@@ -231,7 +232,7 @@ describe("Replay App run gating", () => {
     const store = createMemoryStore();
     store.readCheckpoint = vi.fn(() => new Promise<never>(() => {}));
 
-    render(() => <App store={store} useWorker={false} />);
+    render(App, { props: { store, useWorker: false } });
     await vi.advanceTimersByTimeAsync(20_800);
     await vi.waitFor(() => expect(screen.getByText("Retrieval unavailable")).toBeTruthy());
 
@@ -261,7 +262,7 @@ describe("Replay App run gating", () => {
       updatedAt: 11_000,
     });
 
-    render(() => <App store={store} useWorker={false} />);
+    render(App, { props: { store, useWorker: false } });
     await vi.advanceTimersByTimeAsync(20_800);
 
     await vi.waitFor(() => expect(screen.getByText("Retrieval unavailable")).toBeTruthy());
@@ -288,7 +289,7 @@ describe("Replay App run gating", () => {
       };
     });
 
-    render(() => <App store={store} useWorker={false} />);
+    render(App, { props: { store, useWorker: false } });
     await vi.advanceTimersByTimeAsync(60_000);
 
     expect(screen.getByText(/Fetching revisions/)).toBeTruthy();
@@ -315,7 +316,7 @@ describe("Replay App run gating", () => {
       updatedAt: Date.now(),
     }));
 
-    render(() => <App store={store} useWorker={false} />);
+    render(App, { props: { store, useWorker: false } });
     await vi.advanceTimersByTimeAsync(13_000);
 
     await vi.waitFor(() => expect(screen.getByText("Network problem")).toBeTruthy());
@@ -336,7 +337,7 @@ describe("Replay App run gating", () => {
       body: { not_a_changelog: true },
     } satisfies RawPayload);
 
-    render(() => <App store={store} useWorker={false} />);
+    render(App, { props: { store, useWorker: false } });
     await vi.waitFor(() => expect(screen.getByText("Unrecognized format")).toBeTruthy());
 
     expect(await store.getRawChunks(DOC)).toHaveLength(1);
@@ -363,7 +364,7 @@ describe("Replay App run gating", () => {
       publishedAt: 1,
     });
 
-    render(() => <App store={store} useWorker={false} />);
+    render(App, { props: { store, useWorker: false } });
     await vi.waitFor(() => expect(screen.getByText("No replay data")).toBeTruthy());
 
     expect(screen.queryByText("old")).toBeNull();
@@ -388,7 +389,7 @@ describe("Replay App run gating", () => {
       await saveReplayPublication(docId, publication);
     };
 
-    render(() => <App store={store} useWorker={false} />);
+    render(App, { props: { store, useWorker: false } });
 
     await vi.waitFor(() => expect(screen.getByText("Settings & privacy")).toBeTruthy());
     expect(await store.getRawChunks(DOC)).toEqual([]);
@@ -415,7 +416,7 @@ describe("Replay App run gating", () => {
       await saveStalePublication(docId, publication);
     };
 
-    render(() => <App store={store} />);
+    render(App, { props: { store } });
     await vi.waitFor(() => expect(screen.getByText("Couldn't reconstruct")).toBeTruthy());
 
     expect(stalePublicationIds).toEqual([]);
@@ -441,7 +442,7 @@ describe("Replay App run gating", () => {
       await saveFreshPublication(docId, publication);
     };
 
-    render(() => <App store={nextStore} />);
+    render(App, { props: { store: nextStore } });
     await vi.waitFor(() => expect(screen.getByText("Settings & privacy")).toBeTruthy());
 
     expect(freshPublicationIds).toHaveLength(1);
@@ -462,14 +463,14 @@ describe("Replay App run gating", () => {
     }));
     const store = createMemoryStore();
 
-    render(() => <App store={store} />);
+    render(App, { props: { store } });
     await vi.waitFor(() => expect(screen.getByText(strings.app.optionsLink)).toBeTruthy());
 
     expect(screen.getByRole("button", { name: strings.options.themeSystem })).toBeTruthy();
     expect(screen.getByRole("button", { name: strings.options.themeLight })).toBeTruthy();
     const dark = screen.getByRole("button", { name: strings.options.themeDark });
 
-    fireEvent.click(dark);
+    await fireEvent.click(dark);
     expect(dark.className).toContain("seg-item-active");
     await vi.waitFor(async () => {
       expect(await theme.getValue()).toBe("dark");
@@ -511,7 +512,7 @@ describe("Replay App run gating", () => {
       }
     };
 
-    render(() => <App store={store} />);
+    render(App, { props: { store } });
     await vi.waitFor(() => expect(screen.getByText("Settings & privacy")).toBeTruthy());
 
     expect(requestedPublicationIds).toHaveLength(1);
@@ -528,7 +529,7 @@ describe("Replay App run gating", () => {
       revisionCount: 0,
     }));
 
-    render(() => <App store={createMemoryStore()} />);
+    render(App, { props: { store: createMemoryStore() } });
     await vi.waitFor(() => expect(screen.getByText("Unrecognized format")).toBeTruthy());
     expect(screen.queryByText("Settings & privacy")).toBeNull();
     cleanup();
@@ -543,7 +544,7 @@ describe("Replay App run gating", () => {
       revisionCount: 0,
     }));
 
-    render(() => <App store={createMemoryStore()} />);
+    render(App, { props: { store: createMemoryStore() } });
     await vi.waitFor(() => expect(screen.getByText("Couldn't reconstruct")).toBeTruthy());
     expect(screen.queryByText("Settings & privacy")).toBeNull();
   });
@@ -567,7 +568,7 @@ describe("Replay App run gating", () => {
       timeline: [],
     }));
 
-    render(() => <App store={store} />);
+    render(App, { props: { store } });
     await vi.waitFor(() => expect(publicationIds).toHaveLength(1));
     cleanup();
 
@@ -584,7 +585,7 @@ describe("Replay App run gating", () => {
       timeline: [],
     }));
 
-    render(() => <App store={store} />);
+    render(App, { props: { store } });
     await vi.waitFor(() => expect(publicationIds).toHaveLength(2));
 
     expect(new Set(publicationIds).size).toBe(2);

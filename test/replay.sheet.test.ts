@@ -3,10 +3,10 @@
 // Vitest (jsdom) integration test for the SHEETS replay App path: a `?kind=sheet`
 // URL with a pre-seeded active grid publication renders the grid + tabs through
 // the kind-branched ReplaySurface (same-thread pipeline, no Worker).
-import { cleanup, render, screen } from "@solidjs/testing-library";
+import { cleanup, render, screen } from "@testing-library/svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fakeBrowser } from "wxt/testing";
-import App from "@/entrypoints/replay/App";
+import App from "@/entrypoints/replay/App.svelte";
 import { asDocId } from "@/lib/core/domain/ids";
 import { asGid } from "@/lib/core/sheets/decoder/types";
 import { SHEETS_PARSER_VERSION } from "@/lib/core/sheets/decoder/version";
@@ -71,7 +71,7 @@ async function renderSeeded(store: ReturnType<typeof createMemoryStore>, model: 
     publishedAt: 1,
   });
   await store.setActiveReplayPublication(DOC, "pub-sheet", "sheet");
-  render(() => <App store={store} useWorker={false} />);
+  render(App, { props: { store, useWorker: false } });
 }
 
 describe("replay App — sheets path", () => {

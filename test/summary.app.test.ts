@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-import { cleanup, render, screen } from "@solidjs/testing-library";
+import { cleanup, render, screen } from "@testing-library/svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fakeBrowser } from "wxt/testing";
-import App from "@/entrypoints/summary/App";
+import App from "@/entrypoints/summary/App.svelte";
 import type { Operation } from "@/lib/core/docs/decoder/types";
 import { PARSER_VERSION } from "@/lib/core/docs/decoder/version";
 import { asDocId, asRevisionId } from "@/lib/core/domain/ids";
@@ -105,13 +105,13 @@ describe("Summary App", () => {
   it("shows a missing-doc error when no ?doc is present", async () => {
     window.history.replaceState(null, "", "/summary.html");
     const store = createMemoryStore();
-    render(() => <App store={store} />);
+    render(App, { props: { store } });
     expect(await screen.findByText(errorTitle("missing-doc-id"))).toBeTruthy();
   });
 
   it("points back to the replay when no publication exists yet", async () => {
     const store = createMemoryStore();
-    render(() => <App store={store} />);
+    render(App, { props: { store } });
     expect(await screen.findByText(strings.summary.missingTitle)).toBeTruthy();
     const openReplay = screen.getByText(strings.summary.openReplay).closest("a");
     expect(openReplay?.getAttribute("href")).toBe(`replay.html?doc=${DOC}`);
@@ -120,7 +120,7 @@ describe("Summary App", () => {
   it("preserves the URL kind=slides in the back-link when no publication exists yet", async () => {
     setSummaryUrl(DOC, "slides");
     const store = createMemoryStore();
-    render(() => <App store={store} />);
+    render(App, { props: { store } });
     expect(await screen.findByText(strings.summary.missingTitle)).toBeTruthy();
     const openReplay = screen.getByText(strings.summary.openReplay).closest("a");
     expect(openReplay?.getAttribute("href")).toBe(`replay.html?doc=${DOC}&kind=slides`);
@@ -129,7 +129,7 @@ describe("Summary App", () => {
   it("preserves the URL kind=sheet in the back-link when no publication exists yet", async () => {
     setSummaryUrl(DOC, "sheet");
     const store = createMemoryStore();
-    render(() => <App store={store} />);
+    render(App, { props: { store } });
     expect(await screen.findByText(strings.summary.missingTitle)).toBeTruthy();
     const openReplay = screen.getByText(strings.summary.openReplay).closest("a");
     expect(openReplay?.getAttribute("href")).toBe(`replay.html?doc=${DOC}&kind=sheet`);
@@ -142,7 +142,7 @@ describe("Summary App", () => {
       rev(2, 60_000, [insert(" world", 6)]),
       rev(3, 120_000, [insert("!", 12)]),
     ]);
-    const { container } = render(() => <App store={store} />);
+    const { container } = render(App, { props: { store } });
 
     expect(await screen.findByText(strings.summary.activityHeading)).toBeTruthy();
     expect(screen.getByText(strings.summary.positionHeading)).toBeTruthy();
@@ -166,7 +166,7 @@ describe("Summary App", () => {
   it("back-to-replay carries kind=slides for a Slides publication", async () => {
     const store = createMemoryStore();
     await seedSlides(store);
-    render(() => <App store={store} />);
+    render(App, { props: { store } });
     // The href starts bare while the publication loads, then resolves to carry the
     // kind so the replay route retries against the /presentation/ endpoint.
     await vi.waitFor(() => {
@@ -178,7 +178,7 @@ describe("Summary App", () => {
   it("back-to-replay carries kind=sheet for a Sheets publication", async () => {
     const store = createMemoryStore();
     await seedSheet(store);
-    render(() => <App store={store} />);
+    render(App, { props: { store } });
     await vi.waitFor(() => {
       const back = screen.getByText(strings.summary.backToReplay).closest("a");
       expect(back?.getAttribute("href")).toBe(`replay.html?doc=${DOC}&kind=sheet`);
@@ -188,7 +188,7 @@ describe("Summary App", () => {
   it("shows a friendly empty state when timing is insufficient", async () => {
     const store = createMemoryStore();
     await seed(store, [rev(1, null, [insert("hello", 1)])]);
-    render(() => <App store={store} />);
+    render(App, { props: { store } });
     expect(await screen.findByText(strings.summary.unavailableTitle)).toBeTruthy();
   });
 });
