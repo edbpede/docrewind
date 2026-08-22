@@ -5,9 +5,9 @@
 // axis for short single-session spans, and the synchronized hover scrub + tooltip
 // that correlates activity with document position across BOTH charts.
 
-import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
 import { afterEach, describe, expect, it } from "vitest";
-import DocumentSummary from "@/components/summary/DocumentSummary";
+import DocumentSummary from "@/components/summary/DocumentSummary.svelte";
 import type { Operation } from "@/lib/core/docs/decoder/types";
 import { asRevisionId } from "@/lib/core/domain/ids";
 import type { DecodedRevision } from "@/lib/core/domain/model";
@@ -48,15 +48,15 @@ describe("DocumentSummary", () => {
 
   it("renders a quantitative length scale and document-position bounds", () => {
     const t0 = Date.UTC(2026, 5, 21, 12, 0, 0);
-    const { container } = render(() => (
-      <DocumentSummary
-        summary={deriveDocumentSummary([
+    const { container } = render(DocumentSummary, {
+      props: {
+        summary: deriveDocumentSummary([
           rev(1, t0, [insert("hello", 1)]),
           rev(2, t0 + DAY, [insert(" world", 6)]),
           rev(3, t0 + 2 * DAY, [insert("!", 12)]),
-        ])}
-      />
-    ));
+        ]),
+      },
+    });
 
     // Both charts now carry a labelled Y axis (a gutter of ticks each), not a lone
     // ceiling caption: a length scale on the activity chart, position bounds on the
@@ -78,16 +78,16 @@ describe("DocumentSummary", () => {
   it("subdivides the x-axis into hour ticks for a short single-day span", () => {
     const start = new Date(2026, 5, 21, 9, 23).getTime();
     const end = start + 2 * HOUR + 59 * 60 * 1000;
-    const { container } = render(() => (
-      <DocumentSummary
-        summary={deriveDocumentSummary([
+    const { container } = render(DocumentSummary, {
+      props: {
+        summary: deriveDocumentSummary([
           rev(1, start, [insert("a", 1)]),
           rev(2, start + HOUR, [insert("b", 2)]),
           rev(3, start + 2 * HOUR, [insert("c", 3)]),
           rev(4, end, [insert("d", 4)]),
-        ])}
-      />
-    ));
+        ]),
+      },
+    });
 
     // Day mode for a sub-day span would collapse to a single label per chart (2
     // total); the hour axis subdivides it into several.
@@ -103,17 +103,17 @@ describe("DocumentSummary", () => {
     expect(axisText).toContain(formatHourLabel(interior ?? 0, false));
   });
 
-  it("scrubs both charts and floats a tooltip while hovering", () => {
+  it("scrubs both charts and floats a tooltip while hovering", async () => {
     const t0 = Date.UTC(2026, 5, 21, 12, 0, 0);
-    const { container } = render(() => (
-      <DocumentSummary
-        summary={deriveDocumentSummary([
+    const { container } = render(DocumentSummary, {
+      props: {
+        summary: deriveDocumentSummary([
           rev(1, t0, [insert("hello", 1)]),
           rev(2, t0 + DAY, [insert(" world", 6)]),
           rev(3, t0 + 2 * DAY, [insert("!", 12)]),
-        ])}
-      />
-    ));
+        ]),
+      },
+    });
 
     // No scrub feedback at rest.
     expect(container.querySelector(".dr-sum-tip")).toBeNull();
@@ -121,7 +121,9 @@ describe("DocumentSummary", () => {
 
     const activity = container.querySelector('[data-chart="activity"]') as HTMLElement;
     stubRect(activity);
-    fireEvent.pointerMove(activity, { clientX: 500 });
+    // Svelte batches where Solid updated synchronously: every `fireEvent` here must
+    // be awaited so the DOM has flushed before the assertions read it.
+    await fireEvent.pointerMove(activity, { clientX: 500 });
 
     // The tooltip floats over the hovered chart with content-free stats.
     const tip = container.querySelector(".dr-sum-tip");
@@ -131,7 +133,7 @@ describe("DocumentSummary", () => {
     expect(container.querySelectorAll("[data-scrub]").length).toBe(2);
 
     // Leaving the chart clears the shared hover state.
-    fireEvent.pointerLeave(activity);
+    await fireEvent.pointerLeave(activity);
     expect(container.querySelector(".dr-sum-tip")).toBeNull();
     expect(container.querySelectorAll("[data-scrub]").length).toBe(0);
   });

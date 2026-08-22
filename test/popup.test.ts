@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fakeBrowser } from "wxt/testing";
-import PopupApp from "@/components/popup/PopupApp";
+import PopupApp from "@/components/popup/PopupApp.svelte";
 import { strings } from "@/lib/core/i18n/strings";
 import { theme } from "@/lib/platform/settings";
 
@@ -30,22 +30,22 @@ describe("PopupApp", () => {
   });
 
   it("shows the concise description and quick-access actions on the overview", () => {
-    render(() => <PopupApp />);
+    render(PopupApp);
     expect(screen.getByText(strings.popup.description)).toBeTruthy();
     expect(screen.getByText(strings.popup.privacyNote)).toBeTruthy();
     expect(screen.getByRole("button", { name: strings.popup.optionsButton })).toBeTruthy();
     expect(screen.getByRole("button", { name: strings.popup.aboutButton })).toBeTruthy();
   });
 
-  it("opens the options page via runtime.openOptionsPage (no tabs permission)", () => {
-    render(() => <PopupApp />);
-    fireEvent.click(screen.getByRole("button", { name: strings.popup.optionsButton }));
+  it("opens the options page via runtime.openOptionsPage (no tabs permission)", async () => {
+    render(PopupApp);
+    await fireEvent.click(screen.getByRole("button", { name: strings.popup.optionsButton }));
     expect(fakeBrowser.runtime.openOptionsPage).toHaveBeenCalledTimes(1);
   });
 
-  it("toggles to the About ledger showing version, author edbpede, and license", () => {
-    render(() => <PopupApp />);
-    fireEvent.click(screen.getByRole("button", { name: strings.popup.aboutButton }));
+  it("toggles to the About ledger showing version, author edbpede, and license", async () => {
+    render(PopupApp);
+    await fireEvent.click(screen.getByRole("button", { name: strings.popup.aboutButton }));
 
     expect(screen.getByText(strings.popup.aboutHeading)).toBeTruthy();
     // Manifest version is surfaced (mono pill + ledger row both render it).
@@ -62,16 +62,16 @@ describe("PopupApp", () => {
     expect(screen.getByText(strings.popup.licenseValue)).toBeTruthy();
   });
 
-  it("returns to the overview from the About view", () => {
-    render(() => <PopupApp />);
-    fireEvent.click(screen.getByRole("button", { name: strings.popup.aboutButton }));
-    fireEvent.click(screen.getByRole("button", { name: strings.popup.backHint }));
+  it("returns to the overview from the About view", async () => {
+    render(PopupApp);
+    await fireEvent.click(screen.getByRole("button", { name: strings.popup.aboutButton }));
+    await fireEvent.click(screen.getByRole("button", { name: strings.popup.backHint }));
     expect(screen.getByText(strings.popup.description)).toBeTruthy();
   });
 
   it("renders the theme selector with the system option selected by default", async () => {
     await theme.setValue("system");
-    render(() => <PopupApp />);
+    render(PopupApp);
 
     const system = await screen.findByRole("button", { name: strings.options.themeSystem });
     const light = screen.getByRole("button", { name: strings.options.themeLight });
@@ -84,10 +84,18 @@ describe("PopupApp", () => {
   });
 
   it("persists a theme change to the theme setting and reflects it live", async () => {
-    render(() => <PopupApp />);
+    render(PopupApp);
 
     const dark = await screen.findByRole("button", { name: strings.options.themeDark });
-    fireEvent.click(dark);
+    // Let the mount-time `theme.getValue()` read settle before clicking. The read
+    // resolves into the same state the click optimistically overwrites, so a click
+    // that races it is reverted — in the extension the read always lands long before
+    // a user can click, and the pre-migration Solid `createResource` behaved the same
+    // way (its fetcher resolution overwrote an optimistic `mutate`). The old assertion
+    // ran synchronously after `fireEvent.click` and so never observed the window;
+    // awaiting `fireEvent` — which Svelte requires — makes it observable here.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await fireEvent.click(dark);
 
     expect(dark.className).toContain("seg-item-active");
     expect(dark.getAttribute("aria-pressed")).toBe("true");

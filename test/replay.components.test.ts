@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
-import { createSignal } from "solid-js";
+import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import DocumentViewport from "@/components/replay/DocumentViewport";
-import PlaybackControls from "@/components/replay/PlaybackControls";
-import SummaryInsights from "@/components/replay/SummaryInsights";
-import Timeline, { clusterMarkers, type TimelineMarker } from "@/components/replay/Timeline";
-import TimelineLegend from "@/components/replay/TimelineLegend";
+import DocumentViewport from "@/components/replay/DocumentViewport.svelte";
+import PlaybackControls from "@/components/replay/PlaybackControls.svelte";
+import SummaryInsights from "@/components/replay/SummaryInsights.svelte";
+import Timeline from "@/components/replay/Timeline.svelte";
+import TimelineLegend from "@/components/replay/TimelineLegend.svelte";
+import { clusterMarkers, type TimelineMarker } from "@/components/replay/timeline-markers";
 import type { Block } from "@/lib/core/docs/reconstruction/blocks";
 import type { Segment } from "@/lib/core/docs/reconstruction/render";
 
@@ -62,7 +62,7 @@ describe("replay UI components", () => {
 
   it("scrubs the timeline with pointer input across the padded interior", async () => {
     const onScrub = vi.fn();
-    render(() => <Timeline currentIndex={0} max={10} events={[]} onScrub={onScrub} />);
+    render(Timeline, { props: { currentIndex: 0, max: 10, events: [], onScrub } });
     const slider = screen.getByRole("slider");
     slider.getBoundingClientRect = () =>
       ({
@@ -93,7 +93,7 @@ describe("replay UI components", () => {
 
   it("clamps pointer scrubs that land in either end safe area to the bounds", async () => {
     const onScrub = vi.fn();
-    render(() => <Timeline currentIndex={0} max={10} events={[]} onScrub={onScrub} />);
+    render(Timeline, { props: { currentIndex: 0, max: 10, events: [], onScrub } });
     const slider = screen.getByRole("slider");
     slider.getBoundingClientRect = () =>
       ({
@@ -124,9 +124,9 @@ describe("replay UI components", () => {
 
   it("parks the playhead in the end margin at the resting endpoints, axis in between", () => {
     const thumbLeft = (index: number, max: number): string => {
-      const { container } = render(() => (
-        <Timeline currentIndex={index} max={max} events={[]} onScrub={() => {}} />
-      ));
+      const { container } = render(Timeline, {
+        props: { currentIndex: index, max, events: [], onScrub: () => {} },
+      });
       return (container.querySelector(".tl-thumb") as HTMLElement).style.left;
     };
 
@@ -148,7 +148,7 @@ describe("replay UI components", () => {
 
   it("scrubs the timeline with the keyboard (Arrow / Home / End)", async () => {
     const onScrub = vi.fn();
-    render(() => <Timeline currentIndex={5} max={10} events={[]} onScrub={onScrub} />);
+    render(Timeline, { props: { currentIndex: 5, max: 10, events: [], onScrub } });
     const slider = screen.getByRole("slider");
 
     // Exposes a focusable ARIA slider with the full value contract.
@@ -171,7 +171,7 @@ describe("replay UI components", () => {
     const events: TimelineMarker[] = [
       { id: "large-4", kind: "large-insertion", index: 4, label: "Large insertion" },
     ];
-    render(() => <Timeline currentIndex={0} max={10} events={events} onScrub={onScrub} />);
+    render(Timeline, { props: { currentIndex: 0, max: 10, events, onScrub } });
 
     await fireEvent.click(screen.getByRole("button", { name: /Large insertion/ }));
 
@@ -188,7 +188,7 @@ describe("replay UI components", () => {
         detail: "+1,240 characters",
       },
     ];
-    render(() => <Timeline currentIndex={0} max={10} events={events} onScrub={vi.fn()} />);
+    render(Timeline, { props: { currentIndex: 0, max: 10, events, onScrub: vi.fn() } });
     const marker = screen.getByRole("button", { name: /Large insertion/ });
 
     expect(screen.queryByRole("tooltip")).toBeNull();
@@ -213,7 +213,7 @@ describe("replay UI components", () => {
       { id: "ins-147", kind: "large-insertion", index: 147, label: "Large insertion" },
       { id: "session-148", kind: "session", index: 148, label: "Editing session" },
     ];
-    render(() => <Timeline currentIndex={0} max={148} events={events} onScrub={onScrub} />);
+    render(Timeline, { props: { currentIndex: 0, max: 148, events, onScrub } });
 
     // The four-mark burst is one button; the early session stays its own seal.
     const stack = screen.getByRole("button", { name: /4 marks/ });
@@ -291,7 +291,7 @@ describe("replay UI components", () => {
         detail: "10 inserted · 0 deleted",
       },
     ];
-    render(() => <TimelineLegend events={events} />);
+    render(TimelineLegend, { props: { events } });
 
     // The "Marks" heading is aria-hidden, so the role query returns just the two
     // present kinds — in stable session→pause order regardless of input order.
@@ -305,21 +305,21 @@ describe("replay UI components", () => {
   });
 
   it("renders nothing when there are no markers", () => {
-    const { container } = render(() => <TimelineLegend events={[]} />);
+    const { container } = render(TimelineLegend, { props: { events: [] } });
     expect(container.querySelector("ul")).toBeNull();
   });
 
   it("shows replay duration and attribution caveat", () => {
-    render(() => (
-      <SummaryInsights
-        revisions={[
+    render(SummaryInsights, {
+      props: {
+        revisions: [
           revision(1, 1_000, asUserId("user-a")),
           revision(2, 61_000, asUserId("user-b")),
-        ]}
-        timeline={[]}
-        realIdentities={true}
-      />
-    ));
+        ],
+        timeline: [],
+        realIdentities: true,
+      },
+    });
 
     expect(screen.getByText("Replay duration")).toBeTruthy();
     expect(screen.getByText("1m")).toBeTruthy();
@@ -331,113 +331,113 @@ describe("replay UI components", () => {
   it("collapses one author across many sessions into a single chip", () => {
     // Regression for the transposed-tuple bug: a single author token repeated
     // across revisions must yield exactly one author chip, never one per row.
-    render(() => (
-      <SummaryInsights
-        revisions={[
+    render(SummaryInsights, {
+      props: {
+        revisions: [
           revision(1, 1_000, asUserId("author-1")),
           revision(2, 61_000, asUserId("author-1")),
           revision(3, 200_000, asUserId("author-1")),
-        ]}
-        timeline={[]}
-      />
-    ));
+        ],
+        timeline: [],
+      },
+    });
     const chips = screen.getAllByRole("listitem");
     expect(chips).toHaveLength(1);
     expect(chips[0]?.textContent).toBe("Author 1");
   });
 
   it("renders a resolved real name when realIdentities is on", () => {
-    render(() => (
-      <SummaryInsights
-        revisions={[revision(1, 1_000, asUserId("07280646734247216338"))]}
-        timeline={[]}
-        realIdentities={true}
-        identities={{
+    render(SummaryInsights, {
+      props: {
+        revisions: [revision(1, 1_000, asUserId("07280646734247216338"))],
+        timeline: [],
+        realIdentities: true,
+        identities: {
           "07280646734247216338": {
             userId: "07280646734247216338",
             name: "Ada Lovelace",
             email: "ada@example.com",
           },
-        }}
-      />
-    ));
+        },
+      },
+    });
     expect(screen.getByText("Ada Lovelace")).toBeTruthy();
     // The raw opaque token must NOT leak when a name resolved.
     expect(screen.queryByText("07280646734247216338")).toBeNull();
   });
 
   it("falls back to an opaque Author label (never the raw token) when unresolved", () => {
-    render(() => (
-      <SummaryInsights
-        revisions={[revision(1, 1_000, asUserId("unmapped-token"))]}
-        timeline={[]}
-        realIdentities={true}
-        identities={{}}
-      />
-    ));
+    render(SummaryInsights, {
+      props: {
+        revisions: [revision(1, 1_000, asUserId("unmapped-token"))],
+        timeline: [],
+        realIdentities: true,
+        identities: {},
+      },
+    });
     expect(screen.getByText("Author 1")).toBeTruthy();
     // The raw Gaia token must never leak into the UI, even on a resolution miss.
     expect(screen.queryByText("unmapped-token")).toBeNull();
   });
 
   it("keeps authors opaque by default even when identities are present", () => {
-    render(() => (
-      <SummaryInsights
-        revisions={[revision(1, 1_000, asUserId("07280646734247216338"))]}
-        timeline={[]}
-        identities={{
+    render(SummaryInsights, {
+      props: {
+        revisions: [revision(1, 1_000, asUserId("07280646734247216338"))],
+        timeline: [],
+        identities: {
           "07280646734247216338": {
             userId: "07280646734247216338",
             name: "Ada Lovelace",
             email: "ada@example.com",
           },
-        }}
-      />
-    ));
+        },
+      },
+    });
     expect(screen.getByText("Author 1")).toBeTruthy();
     expect(screen.queryByText("Ada Lovelace")).toBeNull();
   });
 
-  it("shows the email row in the detail card only when an address is known", () => {
-    render(() => (
-      <SummaryInsights
-        revisions={[revision(1, 1_000, asUserId("07280646734247216338"))]}
-        timeline={[]}
-        realIdentities={true}
-        identities={{
+  it("shows the email row in the detail card only when an address is known", async () => {
+    render(SummaryInsights, {
+      props: {
+        revisions: [revision(1, 1_000, asUserId("07280646734247216338"))],
+        timeline: [],
+        realIdentities: true,
+        identities: {
           "07280646734247216338": {
             userId: "07280646734247216338",
             name: "Ada Lovelace",
             email: "ada@example.com",
           },
-        }}
-      />
-    ));
+        },
+      },
+    });
     // The card is revealed by pinning the chip (click); the known email then shows.
-    fireEvent.click(screen.getByRole("button", { name: /Ada Lovelace/ }));
+    await fireEvent.click(screen.getByRole("button", { name: /Ada Lovelace/ }));
     expect(screen.getByText("Email")).toBeTruthy();
     expect(screen.getByText("ada@example.com")).toBeTruthy();
   });
 
-  it("omits the email row entirely for an author with no known address", () => {
+  it("omits the email row entirely for an author with no known address", async () => {
     // Collaborators carry name + colour but no email (the wire format has none), so
     // the row is dropped rather than rendered with a "Not available" placeholder.
-    render(() => (
-      <SummaryInsights
-        revisions={[revision(1, 1_000, asUserId("03089517982426497767"))]}
-        timeline={[]}
-        realIdentities={true}
-        identities={{
+    render(SummaryInsights, {
+      props: {
+        revisions: [revision(1, 1_000, asUserId("03089517982426497767"))],
+        timeline: [],
+        realIdentities: true,
+        identities: {
           "03089517982426497767": {
             userId: "03089517982426497767",
             name: "RB Boot",
             email: null,
             color: "#673AB7",
           },
-        }}
-      />
-    ));
-    fireEvent.click(screen.getByRole("button", { name: /RB Boot/ }));
+        },
+      },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: /RB Boot/ }));
     // The card opened (the revision-count row is present)...
     expect(screen.getByText("Revisions")).toBeTruthy();
     // ...but with no address, neither the Email label nor any placeholder is rendered.
@@ -445,24 +445,24 @@ describe("replay UI components", () => {
     expect(screen.queryByText("Not available")).toBeNull();
   });
 
-  it("publishes the foregrounded author key on hover and clears it on leave", () => {
+  it("publishes the foregrounded author key on hover and clears it on leave", async () => {
     const onActiveAuthorChange = vi.fn();
-    render(() => (
-      <SummaryInsights
-        revisions={[revision(1, 1_000, asUserId("author-x"))]}
-        timeline={[]}
-        onActiveAuthorChange={onActiveAuthorChange}
-      />
-    ));
+    render(SummaryInsights, {
+      props: {
+        revisions: [revision(1, 1_000, asUserId("author-x"))],
+        timeline: [],
+        onActiveAuthorChange,
+      },
+    });
     // The effect publishes the initial (empty) focus once on mount.
     expect(onActiveAuthorChange).toHaveBeenCalledWith(null);
 
     const chip = screen.getAllByRole("listitem")[0];
     if (chip === undefined) throw new Error("expected an author chip");
-    fireEvent.pointerEnter(chip);
+    await fireEvent.pointerEnter(chip);
     expect(onActiveAuthorChange).toHaveBeenLastCalledWith("author-x");
 
-    fireEvent.pointerLeave(chip);
+    await fireEvent.pointerLeave(chip);
     expect(onActiveAuthorChange).toHaveBeenLastCalledWith(null);
   });
 
@@ -471,9 +471,9 @@ describe("replay UI components", () => {
       { kind: "accepted-text", text: "Hello ", fromRevision: 1, toRevision: 1, revisions: [1] },
       { kind: "accepted-text", text: "world", fromRevision: 2, toRevision: 2, revisions: [2] },
     ];
-    const { container } = render(() => (
-      <DocumentViewport blocks={blocksOf(segments)} caret={{ revision: 2, color: "#ff0000" }} />
-    ));
+    const { container } = render(DocumentViewport, {
+      props: { blocks: blocksOf(segments), caret: { revision: 2, color: "#ff0000" } },
+    });
     const caret = container.querySelector<HTMLElement>(".doc-caret");
     expect(caret).toBeTruthy();
     // The caret is tinted to the author's hue and hidden from assistive tech.
@@ -487,9 +487,9 @@ describe("replay UI components", () => {
     const segments: Segment[] = [
       { kind: "accepted-text", text: "Hello", fromRevision: 1, toRevision: 5, revisions: [1, 5] },
     ];
-    const { container } = render(() => (
-      <DocumentViewport blocks={blocksOf(segments)} caret={{ revision: 5, color: "#00ff00" }} />
-    ));
+    const { container } = render(DocumentViewport, {
+      props: { blocks: blocksOf(segments), caret: { revision: 5, color: "#00ff00" } },
+    });
     expect(container.querySelector(".doc-caret")).toBeTruthy();
   });
 
@@ -508,9 +508,9 @@ describe("replay UI components", () => {
       },
       { kind: "accepted-text", text: "World", fromRevision: 0, toRevision: 0, revisions: [0] },
     ];
-    const { container } = render(() => (
-      <DocumentViewport blocks={blocksOf(segments)} caret={{ revision: 1, color: "#00ff00" }} />
-    ));
+    const { container } = render(DocumentViewport, {
+      props: { blocks: blocksOf(segments), caret: { revision: 1, color: "#00ff00" } },
+    });
     const carets = container.querySelectorAll(".doc-caret");
     expect(carets).toHaveLength(1);
     // The caret is painted immediately after the inserting run, not the base run.
@@ -522,9 +522,9 @@ describe("replay UI components", () => {
       { kind: "accepted-text", text: "Hello", fromRevision: 1, toRevision: 1, revisions: [1] },
     ];
     // A pure-deletion frame: the current revision (7) has no run of its own on screen.
-    const { container } = render(() => (
-      <DocumentViewport blocks={blocksOf(segments)} caret={{ revision: 7, color: null }} />
-    ));
+    const { container } = render(DocumentViewport, {
+      props: { blocks: blocksOf(segments), caret: { revision: 7, color: null } },
+    });
     expect(container.querySelector(".doc-caret")).toBeNull();
   });
 
@@ -537,13 +537,13 @@ describe("replay UI components", () => {
       [1, "ada"],
       [2, "boot"],
     ]);
-    render(() => (
-      <DocumentViewport
-        blocks={blocksOf(segments)}
-        authorKeyByRevision={authorKeyByRevision}
-        highlight={{ key: "ada", color: "#673AB7", label: "Author 1" }}
-      />
-    ));
+    render(DocumentViewport, {
+      props: {
+        blocks: blocksOf(segments),
+        authorKeyByRevision,
+        highlight: { key: "ada", color: "#673AB7", label: "Author 1" },
+      },
+    });
     const ada = screen.getByText("by Ada");
     const boot = screen.getByText("by Boot");
     // Ada's run is highlighted (linked to the off-screen attribution) and tinted...
@@ -556,40 +556,46 @@ describe("replay UI components", () => {
     expect(screen.getByText("Contributed by Author 1")).toBeTruthy();
   });
 
-  it("reuses run DOM nodes across a segments update so hover tooltips don't flicker", () => {
+  it("reuses run DOM nodes across a segments update so hover tooltips don't flicker", async () => {
     // Regression: playback rebuilds `segments` into a FRESH array of FRESH objects
-    // every tick. `<For>` (reference-keyed) found zero identity overlap and tore down
-    // every span each tick, dropping `:hover` on the affordance run under the cursor
-    // and re-running its `::after` fade from 0 — the reported tooltip flicker. `<Index>`
-    // is position-keyed, so the node at each row persists and only its content updates.
-    // We assert the exact contract: the suggest run's DOM node survives the update.
-    const [segments, setSegments] = createSignal<Segment[]>([
-      { kind: "accepted-text", text: "Hello ", fromRevision: 1, toRevision: 1, revisions: [1] },
-      {
-        kind: "suggested-insert",
-        text: "wor",
-        fromRevision: 2,
-        toRevision: 2,
-        revisions: [2],
+    // every tick. A KEYED `{#each}` (reference or id identity) finds zero overlap and
+    // tears down every span each tick, dropping `:hover` on the affordance run under
+    // the cursor and re-running its `::after` fade from 0 — the reported tooltip
+    // flicker. A KEYLESS `{#each}` is position-keyed (Solid's `<Index>`), so the node
+    // at each row persists and only its content updates. We assert the exact contract:
+    // the suggest run's DOM node survives the update.
+    const { container, rerender } = render(DocumentViewport, {
+      props: {
+        blocks: blocksOf([
+          { kind: "accepted-text", text: "Hello ", fromRevision: 1, toRevision: 1, revisions: [1] },
+          {
+            kind: "suggested-insert",
+            text: "wor",
+            fromRevision: 2,
+            toRevision: 2,
+            revisions: [2],
+          },
+        ]),
       },
-    ]);
-    const { container } = render(() => <DocumentViewport blocks={blocksOf(segments())} />);
+    });
     const before = container.querySelector(".doc-suggest");
     expect(before).toBeTruthy();
     expect(before?.getAttribute("data-doc-tip")).toBeTruthy();
 
     // A subsequent playback tick: a brand-new array of brand-new objects, with the
     // suggest run's tail grown by a char (the typical "still being typed" case).
-    setSegments([
-      { kind: "accepted-text", text: "Hello ", fromRevision: 1, toRevision: 1, revisions: [1] },
-      {
-        kind: "suggested-insert",
-        text: "world",
-        fromRevision: 2,
-        toRevision: 2,
-        revisions: [2],
-      },
-    ]);
+    await rerender({
+      blocks: blocksOf([
+        { kind: "accepted-text", text: "Hello ", fromRevision: 1, toRevision: 1, revisions: [1] },
+        {
+          kind: "suggested-insert",
+          text: "world",
+          fromRevision: 2,
+          toRevision: 2,
+          revisions: [2],
+        },
+      ]),
+    });
     const after = container.querySelector(".doc-suggest");
     // SAME node instance (never recreated), so a live :hover and its tooltip persist...
     expect(after).toBe(before);
@@ -602,13 +608,13 @@ describe("replay UI components", () => {
     const segments: Segment[] = [
       { kind: "accepted-text", text: "plain", fromRevision: 1, toRevision: 1, revisions: [1] },
     ];
-    render(() => (
-      <DocumentViewport
-        blocks={blocksOf(segments)}
-        authorKeyByRevision={new Map([[1, "ada"]])}
-        highlight={null}
-      />
-    ));
+    render(DocumentViewport, {
+      props: {
+        blocks: blocksOf(segments),
+        authorKeyByRevision: new Map([[1, "ada"]]),
+        highlight: null,
+      },
+    });
     expect(screen.getByText("plain").getAttribute("aria-describedby")).toBeNull();
     expect(screen.queryByText(/Contributed by/)).toBeNull();
   });
@@ -646,13 +652,13 @@ describe("replay UI components", () => {
     syncRaf();
     // Caret far below the reading band (innerHeight≈768; band bottom ≈ 599) → must scroll.
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(domRect(900, 920));
-    render(() => (
-      <DocumentViewport
-        blocks={blocksOf(caretSegments)}
-        caret={{ revision: 2, color: "#000000" }}
-        follow
-      />
-    ));
+    render(DocumentViewport, {
+      props: {
+        blocks: blocksOf(caretSegments),
+        caret: { revision: 2, color: "#000000" },
+        follow: true,
+      },
+    });
     expect(scrollTo).toHaveBeenCalled();
   });
 
@@ -663,23 +669,22 @@ describe("replay UI components", () => {
   // browser re-anchoring as a user scroll and disengages follow mid-playback. The
   // viewport defends against this by disabling scroll anchoring on the document scroller
   // while follow is engaged, and restoring the default once the user takes over.
-  it("disables scroll anchoring on the viewport scroller while follow is engaged and restores it when follow turns off", () => {
+  it("disables scroll anchoring on the viewport scroller while follow is engaged and restores it when follow turns off", async () => {
     vi.stubGlobal("scrollTo", vi.fn());
     syncRaf();
     // Caret comfortably in the band → no programmatic scroll; isolates the anchoring effect.
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(domRect(100, 120));
-    const [follow, setFollow] = createSignal(true);
-    render(() => (
-      <DocumentViewport
-        blocks={blocksOf(caretSegments)}
-        caret={{ revision: 2, color: "#000000" }}
-        follow={follow()}
-      />
-    ));
+    const { rerender } = render(DocumentViewport, {
+      props: {
+        blocks: blocksOf(caretSegments),
+        caret: { revision: 2, color: "#000000" },
+        follow: true,
+      },
+    });
     expect(document.documentElement.style.overflowAnchor).toBe("none");
-    setFollow(false);
+    await rerender({ follow: false });
     expect(document.documentElement.style.overflowAnchor).toBe("");
-    setFollow(true);
+    await rerender({ follow: true });
     expect(document.documentElement.style.overflowAnchor).toBe("none");
   });
 
@@ -688,13 +693,13 @@ describe("replay UI components", () => {
     vi.stubGlobal("scrollTo", scrollTo);
     syncRaf();
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(domRect(900, 920));
-    render(() => (
-      <DocumentViewport
-        blocks={blocksOf(caretSegments)}
-        caret={{ revision: 2, color: "#000000" }}
-        follow={false}
-      />
-    ));
+    render(DocumentViewport, {
+      props: {
+        blocks: blocksOf(caretSegments),
+        caret: { revision: 2, color: "#000000" },
+        follow: false,
+      },
+    });
     expect(scrollTo).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Jump to edit" })).toBeTruthy();
   });
@@ -703,13 +708,13 @@ describe("replay UI components", () => {
     vi.stubGlobal("scrollTo", vi.fn());
     syncRaf();
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(domRect(-50, -30));
-    render(() => (
-      <DocumentViewport
-        blocks={blocksOf(caretSegments)}
-        caret={{ revision: 2, color: "#000000" }}
-        follow={false}
-      />
-    ));
+    render(DocumentViewport, {
+      props: {
+        blocks: blocksOf(caretSegments),
+        caret: { revision: 2, color: "#000000" },
+        follow: false,
+      },
+    });
     const pill = screen.getByRole("button", { name: "Jump to edit" });
     expect(pill.querySelector(".rotate-180")).toBeTruthy();
   });
@@ -719,14 +724,14 @@ describe("replay UI components", () => {
     syncRaf();
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(domRect(100, 120));
     const onFollowOff = vi.fn();
-    render(() => (
-      <DocumentViewport
-        blocks={blocksOf(caretSegments)}
-        caret={{ revision: 2, color: "#000000" }}
-        follow
-        onFollowOff={onFollowOff}
-      />
-    ));
+    render(DocumentViewport, {
+      props: {
+        blocks: blocksOf(caretSegments),
+        caret: { revision: 2, color: "#000000" },
+        follow: true,
+        onFollowOff,
+      },
+    });
     window.dispatchEvent(new Event("wheel"));
     expect(onFollowOff).toHaveBeenCalled();
   });
@@ -737,14 +742,14 @@ describe("replay UI components", () => {
     // Caret in view — no programmatic scrollTo fires, so progScroll stays false.
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(domRect(100, 120));
     const onFollowOff = vi.fn();
-    render(() => (
-      <DocumentViewport
-        blocks={blocksOf(caretSegments)}
-        caret={{ revision: 2, color: "#000000" }}
-        follow
-        onFollowOff={onFollowOff}
-      />
-    ));
+    render(DocumentViewport, {
+      props: {
+        blocks: blocksOf(caretSegments),
+        caret: { revision: 2, color: "#000000" },
+        follow: true,
+        onFollowOff,
+      },
+    });
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown" }));
     expect(onFollowOff).toHaveBeenCalled();
   });
@@ -755,14 +760,14 @@ describe("replay UI components", () => {
     // Caret in view — recompute does not call scrollTo, so progScroll stays false.
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(domRect(100, 120));
     const onFollowOff = vi.fn();
-    render(() => (
-      <DocumentViewport
-        blocks={blocksOf(caretSegments)}
-        caret={{ revision: 2, color: "#000000" }}
-        follow
-        onFollowOff={onFollowOff}
-      />
-    ));
+    render(DocumentViewport, {
+      props: {
+        blocks: blocksOf(caretSegments),
+        caret: { revision: 2, color: "#000000" },
+        follow: true,
+        onFollowOff,
+      },
+    });
     window.dispatchEvent(new Event("scroll"));
     expect(onFollowOff).toHaveBeenCalled();
   });
@@ -776,54 +781,54 @@ describe("replay UI components", () => {
     // Caret far below the band → recompute calls scrollTo → sets progScroll flag.
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(domRect(900, 920));
     const onFollowOff = vi.fn();
-    render(() => (
-      <DocumentViewport
-        blocks={blocksOf(caretSegments)}
-        caret={{ revision: 2, color: "#000000" }}
-        follow
-        onFollowOff={onFollowOff}
-      />
-    ));
+    render(DocumentViewport, {
+      props: {
+        blocks: blocksOf(caretSegments),
+        caret: { revision: 2, color: "#000000" },
+        follow: true,
+        onFollowOff,
+      },
+    });
     // Simulate the scroll events that window.scrollTo would emit during its animation.
     window.dispatchEvent(new Event("scroll"));
     expect(onFollowOff).not.toHaveBeenCalled();
   });
 
-  it("re-engages follow and snaps to the caret when the jump pill is tapped", () => {
+  it("re-engages follow and snaps to the caret when the jump pill is tapped", async () => {
     const scrollTo = vi.fn();
     vi.stubGlobal("scrollTo", scrollTo);
     syncRaf();
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(domRect(900, 920));
     const onFollowOn = vi.fn();
-    render(() => (
-      <DocumentViewport
-        blocks={blocksOf(caretSegments)}
-        caret={{ revision: 2, color: "#000000" }}
-        follow={false}
-        onFollowOn={onFollowOn}
-      />
-    ));
-    fireEvent.click(screen.getByRole("button", { name: "Jump to edit" }));
+    render(DocumentViewport, {
+      props: {
+        blocks: blocksOf(caretSegments),
+        caret: { revision: 2, color: "#000000" },
+        follow: false,
+        onFollowOn,
+      },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: "Jump to edit" }));
     expect(onFollowOn).toHaveBeenCalled();
     expect(scrollTo).toHaveBeenCalled();
   });
 
-  it("PlaybackControls exposes a Follow edits toggle reflecting its state", () => {
+  it("PlaybackControls exposes a Follow edits toggle reflecting its state", async () => {
     const onFollowChange = vi.fn();
-    render(() => (
-      <PlaybackControls
-        playing={false}
-        speed={1}
-        follow
-        onPlayPause={() => {}}
-        onRestart={() => {}}
-        onSpeed={() => {}}
-        onFollowChange={onFollowChange}
-      />
-    ));
+    render(PlaybackControls, {
+      props: {
+        playing: false,
+        speed: 1,
+        follow: true,
+        onPlayPause: () => {},
+        onRestart: () => {},
+        onSpeed: () => {},
+        onFollowChange,
+      },
+    });
     const toggle = screen.getByRole("button", { name: "Follow edits" });
     expect(toggle.getAttribute("aria-pressed")).toBe("true");
-    fireEvent.click(toggle);
+    await fireEvent.click(toggle);
     expect(onFollowChange).toHaveBeenCalledWith(false);
   });
   // ── Claim A: target-aware programmatic-scroll guard (easing-tail safe) ──────
@@ -842,14 +847,14 @@ describe("replay UI components", () => {
     vi.spyOn(document.documentElement, "scrollHeight", "get").mockReturnValue(5000);
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(domRect(900, 920));
     const onFollowOff = vi.fn();
-    render(() => (
-      <DocumentViewport
-        blocks={blocksOf(caretSegments)}
-        caret={{ revision: 2, color: "#000000" }}
-        follow
-        onFollowOff={onFollowOff}
-      />
-    ));
+    render(DocumentViewport, {
+      props: {
+        blocks: blocksOf(caretSegments),
+        caret: { revision: 2, color: "#000000" },
+        follow: true,
+        onFollowOff,
+      },
+    });
     // Component called scrollTo; capture the programmatic target.
     expect(scrollTo).toHaveBeenCalled();
     expect(capturedTarget).toBeGreaterThan(0);
@@ -920,16 +925,16 @@ describe("replay UI components", () => {
     );
 
     const onFollowOff = vi.fn();
-    render(() => (
-      <DocumentViewport
-        blocks={blocksOf(caretSegments)}
-        caret={{ revision: 2, color: "#000000" }}
-        follow
-        onFollowOff={onFollowOff}
-      />
-    ));
+    render(DocumentViewport, {
+      props: {
+        blocks: blocksOf(caretSegments),
+        caret: { revision: 2, color: "#000000" },
+        follow: true,
+        onFollowOff,
+      },
+    });
 
-    // Frame 1: createEffect → schedule() → rAF queued. Flush it.
+    // Frame 1: the scheduling $effect → schedule() → rAF queued. Flush it.
     // recompute: caret (900,920) is below the band → decision.scroll=true →
     //   markProgrammatic(target) → progScroll=true, progScrollReached=false.
     // After recompute: rafId=undefined (cleared at entry).
@@ -984,14 +989,14 @@ describe("replay UI components", () => {
     vi.spyOn(document.documentElement, "scrollHeight", "get").mockReturnValue(800);
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(domRect(900, 920));
     const onFollowOff = vi.fn();
-    render(() => (
-      <DocumentViewport
-        blocks={blocksOf(caretSegments)}
-        caret={{ revision: 2, color: "#000000" }}
-        follow
-        onFollowOff={onFollowOff}
-      />
-    ));
+    render(DocumentViewport, {
+      props: {
+        blocks: blocksOf(caretSegments),
+        caret: { revision: 2, color: "#000000" },
+        follow: true,
+        onFollowOff,
+      },
+    });
     // The browser receives the raw (unclamped) followScroll target (~786).
     expect(scrollTo).toHaveBeenCalled();
     expect(capturedTarget).toBeGreaterThan(500);
@@ -1030,14 +1035,14 @@ describe("replay UI components", () => {
         () => mockCaretRect,
       );
       const onFollowOff = vi.fn();
-      render(() => (
-        <DocumentViewport
-          blocks={blocksOf(caretSegments)}
-          caret={{ revision: 2, color: "#000000" }}
-          follow
-          onFollowOff={onFollowOff}
-        />
-      ));
+      render(DocumentViewport, {
+        props: {
+          blocks: blocksOf(caretSegments),
+          caret: { revision: 2, color: "#000000" },
+          follow: true,
+          onFollowOff,
+        },
+      });
       expect(scrollTo).toHaveBeenCalledTimes(1);
 
       // The page is now gliding toward the target and the caret has entered the band, so
@@ -1076,14 +1081,14 @@ describe("replay UI components", () => {
     // Caret in view so no programmatic scrollTo fires (progScroll stays false).
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(domRect(100, 120));
     const onFollowOff = vi.fn();
-    render(() => (
-      <DocumentViewport
-        blocks={blocksOf(caretSegments)}
-        caret={{ revision: 2, color: "#000000" }}
-        follow
-        onFollowOff={onFollowOff}
-      />
-    ));
+    render(DocumentViewport, {
+      props: {
+        blocks: blocksOf(caretSegments),
+        caret: { revision: 2, color: "#000000" },
+        follow: true,
+        onFollowOff,
+      },
+    });
 
     // A child element (e.g. the timeline slider) calls preventDefault on Arrow before
     // it bubbles to the window keydown handler.

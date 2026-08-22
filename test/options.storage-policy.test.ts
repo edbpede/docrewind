@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fakeBrowser } from "wxt/testing";
-import OptionsApp from "@/components/options/OptionsApp";
+import OptionsApp from "@/components/options/OptionsApp.svelte";
 
 const { sendMessageMock, storeMock } = vi.hoisted(() => ({
   sendMessageMock: vi.fn(async () => ({ status: "completed", reclaimedBytes: 0 })),
@@ -79,7 +79,7 @@ describe("OptionsApp storage policy controls", () => {
   });
 
   it("turning off raw retention requests guarded maintenance without direct raw deletion", async () => {
-    render(() => <OptionsApp />);
+    render(OptionsApp);
     const checkbox = await screen.findByLabelText("Keep the original history on this device");
     expect(
       screen.getByText(
@@ -108,7 +108,7 @@ describe("OptionsApp storage policy controls", () => {
   });
 
   it("changing a budget requests guarded configured raw maintenance", async () => {
-    render(() => <OptionsApp />);
+    render(OptionsApp);
     const globalCap = await screen.findByLabelText("Global cap (MB)");
     await vi.waitFor(() => expect((globalCap as HTMLInputElement).value).toBe("500"));
 
@@ -130,7 +130,7 @@ describe("OptionsApp storage policy controls", () => {
 
   it("changing a budget on the generic options page requests guarded global maintenance", async () => {
     window.history.replaceState(null, "", "/options.html");
-    render(() => <OptionsApp />);
+    render(OptionsApp);
     const globalCap = await screen.findByLabelText("Global cap (MB)");
     await vi.waitFor(() => expect((globalCap as HTMLInputElement).value).toBe("500"));
 
@@ -152,7 +152,7 @@ describe("OptionsApp storage policy controls", () => {
 
   it("clear-current routes through the background without direct document deletion", async () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
-    render(() => <OptionsApp />);
+    render(OptionsApp);
     const clearCurrent = await screen.findByRole("button", { name: "Clear this document" });
 
     await fireEvent.click(clearCurrent);
@@ -174,7 +174,7 @@ describe("OptionsApp storage policy controls", () => {
 
   it("clear-all routes through the background without direct full deletion", async () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
-    render(() => <OptionsApp />);
+    render(OptionsApp);
     const clearAll = await screen.findByRole("button", { name: "Clear all documents" });
 
     await fireEvent.click(clearAll);
@@ -195,7 +195,7 @@ describe("OptionsApp storage policy controls", () => {
 
   it("keeps a durable pending maintenance status when send fails", async () => {
     sendMessageMock.mockRejectedValueOnce(new Error("sw unavailable"));
-    render(() => <OptionsApp />);
+    render(OptionsApp);
     const checkbox = await screen.findByLabelText("Keep the original history on this device");
 
     await fireEvent.click(checkbox);
@@ -209,7 +209,7 @@ describe("OptionsApp storage policy controls", () => {
 
   it("reports budget maintenance failures", async () => {
     sendMessageMock.mockRejectedValueOnce(new Error("sw unavailable"));
-    render(() => <OptionsApp />);
+    render(OptionsApp);
     const globalCap = await screen.findByLabelText("Global cap (MB)");
     await vi.waitFor(() => expect((globalCap as HTMLInputElement).value).toBe("500"));
 
