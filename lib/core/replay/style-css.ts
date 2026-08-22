@@ -2,7 +2,7 @@
 //
 // Pure marks -> CSS mapping (plan Phase 2/3). Translates the closed, privacy-safe
 // `ParagraphMarks` / `TextMarks` (lib/core/docs/decoder/style-allowlist) into plain CSS
-// property maps the replay viewport spreads into a SolidJS `style` prop. Kept pure
+// property maps the replay viewport serializes into Svelte's `style` attribute. Kept pure
 // and browser-free so it is Bun-testable and carries NO network / font fetch —
 // DESIGN.md mandates system-fonts-only, so a font CATEGORY maps to a system stack
 // (the real Google font is unobtainable; the category is the honest maximum).
