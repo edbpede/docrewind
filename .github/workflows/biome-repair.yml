@@ -15,6 +15,16 @@ jobs:
     uses: engels74/automation/.github/workflows/biome-repair.yml@v1.0.0
     with:
       config-files: biome.json
-      source-roots: lib entrypoints components test e2e scripts wxt.config.ts uno.config.ts vitest.config.ts playwright.config.ts
+      source-roots: |
+        lib
+        entrypoints
+        components
+        test
+        e2e
+        scripts
+        wxt.config.ts
+        uno.config.ts
+        vitest.config.ts
+        playwright.config.ts
       # renovate: datasource=npm depName=bun
       bun-version: 1.4.2
