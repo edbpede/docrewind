@@ -108,7 +108,11 @@ jobs:
       # Channel parity: e2e/fixtures.ts pins `channel: "chromium"`; this provisions
       # exactly that Playwright-bundled Chromium so local/CI behavior matches.
       - name: Install Playwright Chromium
-        run: bunx playwright install --with-deps chromium
+        run: |
+          # Tests use Playwright's pinned Chromium, not the runner's Chrome.
+          # Its unrelated apt index can fail checksum validation during apt update.
+          sudo rm -f /etc/apt/sources.list.d/google-chrome*.list /etc/apt/sources.list.d/google-chrome*.sources
+          bunx playwright install --with-deps chromium
 
       # E2E incl. replay-smoke + network-isolation audit, against .output/chrome-mv3.
       - name: E2E tests (Playwright, Chromium)
