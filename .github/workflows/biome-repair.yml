@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+name: Biome repair
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+permissions:
+  contents: write
+  pull-requests: read
+  actions: write
+concurrency:
+  group: biome-repair-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+jobs:
+  repair:
+    uses: edbfi/automation/.github/workflows/biome-repair.yml@v1.0.0
+    with:
+      config-files: biome.json
+      source-roots: |
+        lib
+        entrypoints
+        components
+        test
+        e2e
+        scripts
+        wxt.config.ts
+        uno.config.ts
+        vitest.config.ts
+        playwright.config.ts
+      # renovate: datasource=npm depName=bun
+      bun-version: 1.4.2

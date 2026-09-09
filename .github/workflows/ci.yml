@@ -1,121 +1,68 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-#
-# CI. The `test` job runs Phase 6's three-tier test split + coverage gate +
-# network-isolation audit. The sibling `packaging-smoke` job (Phase 7) runs the
-# built-artifact manifest audit + same-environment determinism gate on the zipped
-# extensions, and uploads those zips as a downloadable `extension-zips` artifact
-# for review convenience. Packaging stays OUT of the `test` job by design; the
-# full tag-triggered release build (provenance + checksums + signed/uploaded
-# release assets) lives in release.yml — this file does not recreate it.
-#
-# The `biome-migrate` job exists so Renovate's grouped "biome" PRs can carry the
-# config migration a new Biome release may require: it runs the repo-local
-# `biome migrate`, commits the result as the GitHub Actions bot, and pushes back
-# to the same Renovate branch. It is the ONLY job granted `contents: write`, and
-# its `if:` restricts it to Renovate branches in this repository — ordinary and
-# forked pull requests can never reach the write path.
-name: CI
-
+name: ci
 on:
+  pull_request:
   push:
     branches: [main]
-  pull_request:
   workflow_dispatch:
-
-# Read-only by default; the migrate job opts into write for itself alone.
+    inputs:
+      pr-number:
+        description: PR number for a repair dispatch
+        type: string
+        default: ''
+      expected-head-sha:
+        description: Exact repaired PR commit
+        type: string
+        default: ''
 permissions:
   contents: read
-
+  pull-requests: read
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
-
 jobs:
-  biome-migrate:
-    name: Auto-migrate Biome config (Renovate only)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    # Same-repository Renovate pull requests only. The fork comparison keeps a
-    # forked PR from ever being granted the write token below.
-    if: >-
-      github.event_name == 'pull_request' &&
-      github.actor == 'renovate[bot]' &&
-      github.event.pull_request.head.repo.full_name == github.repository
-    permissions:
-      contents: write
+  guard:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     steps:
-      - name: Checkout pull request branch
-        uses: actions/checkout@v7
+      - uses: edbfi/automation/actions/dispatch-guard@v1.0.0
         with:
-          # Check out the branch itself (not the detached merge commit) so the
-          # migration commit can be pushed back to the Renovate branch.
-          ref: ${{ github.head_ref }}
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          # Derived from the committed `packageManager` field, not `latest`.
-          bun-version-file: package.json
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      # `bunx biome` resolves the @biomejs/biome devDependency from node_modules,
-      # so the migration runs on the exact version Renovate just bumped to.
-      - name: Migrate Biome configuration
-        run: bunx biome migrate --write
-
-      # Allowed to modify files. `continue-on-error` (not `|| true`) keeps a
-      # genuine failure visible in the UI while still letting the commit step
-      # capture whatever was fixed; the gate is the non-writing check below.
-      - name: Apply Biome formatting and safe fixes
-        continue-on-error: true
-        run: bunx biome check --write .
-
-      - name: Commit and push migration result
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -u
-          if git diff --staged --quiet; then
-            echo "Biome configuration already current — nothing to commit."
-          else
-            git commit -m "chore: auto-migrate biome config"
-            git push
-          fi
-
-      # Authoritative, non-writing verification. Failures here fail the job.
-      - name: Verify Biome check passes
-        run: bunx biome ci .
-
+          token: ${{ github.token }}
+          pr-number: ${{ inputs.pr-number }}
+          expected-head-sha: ${{ inputs.expected-head-sha }}
   test:
     name: compile · check · test (logic/coverage/vitest) · build · e2e
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
-    needs: [biome-migrate]
-    # `always() && !failure() && !cancelled()` runs this job when biome-migrate
-    # is SKIPPED (the normal case), because a skipped dependency would otherwise
-    # cascade and skip the entire gate. A genuine migrate failure still stops it.
-    if: ${{ always() && !failure() && !cancelled() }}
+    needs: guard
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
-          # On a Renovate PR this picks up the migration commit pushed above.
-          ref: ${{ github.head_ref || github.ref }}
+          persist-credentials: false
 
       # Pin Bun to the version the project targets (.agents/rules + @types/bun),
       # read from the committed `packageManager` field.
+      - name: Setup Node for tool CLIs
+        uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 24.20.0
+
       - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@v2.2.0
         with:
           bun-version-file: package.json
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      # Generate .wxt/ types so tsc + the build resolve WXT aliases.
-      - name: Prepare WXT
-        run: bun run postinstall
+      - name: Repository hygiene and secrets
+        uses: j178/prek-action@v3.0.0
+        with:
+          # renovate: datasource=github-releases depName=j178/prek
+          prek-version: 0.5.2
+          extra-args: --all-files --hook-stage manual
+        env:
+          SKIP: no-commit-to-branch,biome,tsc
 
       - name: Typecheck
         run: bun run compile
@@ -161,11 +108,28 @@ jobs:
       # Channel parity: e2e/fixtures.ts pins `channel: "chromium"`; this provisions
       # exactly that Playwright-bundled Chromium so local/CI behavior matches.
       - name: Install Playwright Chromium
-        run: bunx playwright install --with-deps chromium
+        run: |
+          # Tests use Playwright's pinned Chromium, not the runner's Chrome.
+          # Its unrelated apt index can fail checksum validation during apt update.
+          sudo rm -f /etc/apt/sources.list.d/google-chrome*.list /etc/apt/sources.list.d/google-chrome*.sources
+          bunx playwright install --with-deps chromium
 
       # E2E incl. replay-smoke + network-isolation audit, against .output/chrome-mv3.
       - name: E2E tests (Playwright, Chromium)
-        run: bun run test:e2e
+        run: bun run test:e2e --trace retain-on-failure
+
+      - name: Browser failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: playwright-failure
+          path: |
+            playwright-report/
+            test/test-results/
+          retention-days: 7
+
+      - name: Reject tracked-file mutations
+        run: git diff --exit-code HEAD
 
   # Phase 7 packaging smoke — a SIBLING job (deliberately not part of `test`):
   # builds + zips both browsers and re-asserts the privacy invariant on the
@@ -173,32 +137,37 @@ jobs:
   # release build (provenance + checksums + artifact upload) is release.yml.
   packaging-smoke:
     name: packaging-smoke (verify-manifest · determinism)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
+    needs: guard
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Node for tool CLIs
+        uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 24.20.0
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@v2.2.0
         with:
           bun-version-file: package.json
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Prepare WXT
-        run: bun run postinstall
-
-      # Build + package both browsers from the one codebase.
+      # WXT zip builds before packaging; avoid an extra build per browser.
       - name: Build & zip both browsers
-        run: bun run build && bun run zip && bun run build:firefox && bun run zip:firefox
+        run: bun run zip && bun run zip:firefox
 
       # Surface the smoke-built zips as a downloadable CI artifact (Chromium +
       # Firefox + the Firefox sources bundle). This is a convenience for review;
       # the authoritative, provenance-signed + checksummed release artifacts are
       # still produced only by the tag-triggered release.yml.
       - name: Upload packaged extensions
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: extension-zips
           path: .output/*.zip
@@ -221,3 +190,23 @@ jobs:
       # Same-environment per-file content determinism (builds twice; see script header).
       - name: Verify build determinism
         run: bash scripts/verify-reproducible-build.sh
+
+      - name: Reject tracked-file mutations
+        run: git diff --exit-code HEAD
+
+  required:
+    name: ci / required
+    if: always()
+    needs: [guard, test, packaging-smoke]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: edbfi/automation/actions/dispatch-guard@v1.0.0
+        with:
+          token: ${{ github.token }}
+          pr-number: ${{ inputs.pr-number }}
+          expected-head-sha: ${{ inputs.expected-head-sha }}
+      - uses: edbfi/automation/actions/gate@v1.0.0
+        with:
+          needs: ${{ toJSON(needs) }}
+          required: guard test packaging-smoke
