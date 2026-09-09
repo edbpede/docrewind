@@ -13,7 +13,7 @@ Every PR, default-branch push and manual dispatch runs two required lanes:
 
 `ci / required` rejects failed, cancelled, missing or skipped lanes. Validation
 has read-only permissions and must leave tracked files unchanged. Versioned
-shared guard/gate actions come from `engels74/automation`; action references use
+shared guard/gate actions come from `edbfi/automation`; action references use
 full release tags. Local commands are documented in AGENTS.md. CI skips only
 prek's local branch guard and Biome/typecheck hooks already run explicitly;
 it does not replace or weaken the three test tiers.

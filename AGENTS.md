@@ -133,7 +133,7 @@ justification; do not lower `coverageThreshold`.
 
 ## Reference
 
-- `.agents/rules/bun-solid-pro.md` — SolidJS reactivity, WXT entrypoints, Bun,
+- `.agents/rules/wxt-svelte5-extension.md` — Svelte 5 reactivity, WXT entrypoints, Bun,
   TypeScript strictness, UnoCSS, Vitest/Playwright/Biome conventions. Read
   before writing new components, entrypoints, or tests.
 - `lib/core/fixtures/README.md` — the fixture corpus's three-tier acceptance

@@ -258,8 +258,8 @@ export const strings = {
     licenseValue: "AGPL-3.0-or-later",
     authorHandle: "edbpede",
     authorUrl: "https://github.com/edbpede",
-    sourceText: "github.com/edbpede/docrewind",
-    sourceUrl: "https://github.com/edbpede/docrewind",
+    sourceText: "github.com/edbfi/docrewind",
+    sourceUrl: "https://github.com/edbfi/docrewind",
   },
 } as const;
 

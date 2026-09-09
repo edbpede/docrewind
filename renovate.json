@@ -1,7 +1,6 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["github>engels74/automation:default#v1.0.0"],
-  "gitIgnoredAuthors": ["300104067+engels74-bot@users.noreply.github.com"],
+  "extends": ["github>edbfi/automation:default#v1.0.0"],
   "packageRules": [
     {
       "description": "Svelte language tools require the TypeScript 6 programmatic API; review when compatible with 7.",
